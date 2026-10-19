@@ -69,7 +69,7 @@
 </script>
 
 {#snippet itemRow(item: Item, date: string)}
-	<li class={item.state}>
+	<li class={[item.state, item.calendar === data.workCalendar && 'work']}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
@@ -78,6 +78,7 @@
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
 		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
@@ -91,6 +92,12 @@
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
 			</form>
+			{#if !item.recurrence}
+				<form method="POST" action="?page={data.start}&/unschedule" use:enhance class="inline">
+					<input type="hidden" name="uid" value={item.uid} />
+					<button class="act" aria-label="Put {item.title} back on Not scheduled" title="Back to Not scheduled">↩</button>
+				</form>
+			{/if}
 		{/if}
 	</li>
 {/snippet}
@@ -219,6 +226,13 @@
 						</select>
 					</label>
 				</div>
+				{#if editing.kind === 'event'}
+					<label class="field">Calendar
+						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar}>
+							{#each data.eventCalendars as name (name)}<option value={name}>{name}</option>{/each}
+						</select>
+					</label>
+				{/if}
 				<label class="field">Repeats
 					<select name="repeat" id="f-repeat" value={repeatChoice(editing.recurrence)}>
 						{#each REPEATS as r (r.value)}<option value={r.value}>{r.name}</option>{/each}
@@ -394,6 +408,9 @@
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
+	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
+	li.work { background: var(--work); }
+	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: 1fr; }

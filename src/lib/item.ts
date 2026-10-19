@@ -27,6 +27,8 @@ export interface Item {
 	occurrence?: string;
 	/** On one showing of a repeating item: the day the series starts. */
 	seriesStart?: string;
+	/** Name of the calendar it is kept in (Personal, Family, Work…). Shown only; not part of the .ics. */
+	calendar?: string;
 }
 
 export const LABELS: ItemLabel[] = ['month', 'waiting', 'someday'];

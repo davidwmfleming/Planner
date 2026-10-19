@@ -12,6 +12,7 @@ const store = new CalendarStore({
 await store.connect();
 const personal = await store.ensureCalendar('Personal', ['event']);
 await store.ensureCalendar('Family', ['event']);
+const work = await store.ensureCalendar('Work', ['event']);
 const tasks = await store.ensureCalendar('Tasks', ['task']);
 
 const t = toISODate(new Date());
@@ -35,5 +36,6 @@ const todo = [
 	tk(undefined, 'French training: waiting to hear', { label: 'waiting' })
 ];
 for (const e of events) await store.create(personal.url, e);
+await store.create(work.url, ev(t, 'Economic Modelling', '09:00', { endTime: '10:00' }));
 for (const x of todo) await store.create(tasks.url, x);
 console.log(`Seeded ${events.length} events and ${todo.length} tasks.`);
