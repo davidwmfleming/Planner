@@ -7,6 +7,7 @@
 	--muted: #5d6676;
 	--rule: #c7d2e2;
 	--wash: #eef2f8;
+	--work: #fde4e4;
 	--line: 2.1rem;
 	--font: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 	color-scheme: light;
@@ -19,6 +20,7 @@
 		--muted: #9aa3b3;
 		--rule: #2b3342;
 		--wash: #1b2029;
+		--work: #3b2224;
 		color-scheme: dark;
 	}
 }
@@ -27,4 +29,7 @@ html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.35; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid var(--pen); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* E-ink redraws slowly and smears motion, so nothing animates anywhere. */
+*, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+/* Fingers and pens need bigger lines than a mouse does. */
+@media (pointer: coarse) { :root { --line: 2.6rem; } }

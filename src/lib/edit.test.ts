@@ -3,7 +3,7 @@ import { applyEdit, type EditFields } from './edit';
 import type { Item } from './item';
 
 const fields = (f: Partial<EditFields>): EditFields => ({
-	title: 'Dentist', kind: 'event', date: '2026-10-21', time: '09:00', endTime: '', location: '', label: '', notes: '', ...f
+	title: 'Dentist', kind: 'event', date: '2026-10-21', time: '09:00', endTime: '', location: '', label: '', notes: '', repeat: '', ...f
 });
 const event: Item = { uid: 'u1', kind: 'event', title: 'Dentist', date: '2026-10-21', time: '09:00', endTime: '10:00', state: 'open' };
 
@@ -37,5 +37,14 @@ describe('applyEdit', () => {
 		const carried: Item = { uid: 't', kind: 'task', title: 'Book dentist', date: '2026-10-19', carriedFrom: '2026-10-18', state: 'open' };
 		expect(applyEdit(carried, fields({ kind: 'task', title: 'Book dentist', date: '2026-10-19', time: '' }))).toMatchObject({ item: { carriedFrom: '2026-10-18' } });
 		expect(applyEdit(carried, fields({ kind: 'task', title: 'Book dentist', date: '2026-10-22', time: '' }))).not.toMatchObject({ item: { carriedFrom: '2026-10-18' } });
+	});
+
+	it('saves a repeat choice as a standard rule, keeps a rule made elsewhere, and needs a date to repeat', () => {
+		expect(applyEdit(event, fields({ repeat: 'weekdays' }))).toMatchObject({ item: { recurrence: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR' } });
+		const fromPhone = { ...event, recurrence: 'FREQ=MONTHLY;BYDAY=2TU' };
+		expect(applyEdit(fromPhone, fields({ repeat: 'custom' }))).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;BYDAY=2TU' } });
+		expect(applyEdit(fromPhone, fields({ repeat: '' }))).not.toHaveProperty('item.recurrence');
+		expect(applyEdit({ ...event, kind: 'task' }, fields({ kind: 'task', date: '', repeat: 'weekly' }))).toHaveProperty('error');
+		expect(applyEdit(event, fields({ repeat: 'hourly' }))).toHaveProperty('error');
 	});
 });

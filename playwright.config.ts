@@ -19,7 +19,7 @@ export default defineConfig({
 		}
 	],
 	projects: [
-		{ name: 'tablet', use: { viewport: { width: 1000, height: 1400 } } },
+		{ name: 'tablet', use: { viewport: { width: 1000, height: 1400 }, isMobile: true, hasTouch: true } },
 		{ name: 'phone', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }
 	]
 });
