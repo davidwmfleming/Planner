@@ -80,3 +80,40 @@ test('if a line cannot be saved, the words stay and the planner stays up', async
 	await expect(taskLine).toHaveValue(`Renew passport ${tag}`);
 	await expect(page.locator(`section.day[data-date="${tue}"]`)).toBeVisible();
 });
+
+test('words written while a failing save is on its way are kept with the failed ones', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	await page.route('**/*&/add', async (route) => {
+		await new Promise((r) => setTimeout(r, 800));
+		await route.abort();
+	});
+	const taskLine = page.locator(`#add-task-${tue}`);
+	await taskLine.fill(`Fix gate ${tag}`);
+	await taskLine.press('Enter');
+	await expect(taskLine).toHaveValue('');
+	await taskLine.fill('Paint shed');
+	await expect(page.getByRole('alert')).toContainText("Couldn't save");
+	await expect(taskLine).toHaveValue(`Fix gate ${tag} Paint shed`);
+});
+
+test('on a slow connection, writing more and tapping another line saves both and leaves the cursor there', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	await page.route('**/*&/add', async (route) => {
+		await new Promise((r) => setTimeout(r, 800));
+		await route.continue();
+	});
+	const day = page.locator(`section.day[data-date="${tue}"]`);
+	const taskLine = page.locator(`#add-task-${tue}`);
+	const eventLine = page.locator(`#add-event-${tue}`);
+	await taskLine.fill(`Sweep porch ${tag}`);
+	await taskLine.press('Enter');
+	await taskLine.fill(`Rake leaves ${tag}`);
+	await eventLine.click();
+	await expect(day.getByText(`Sweep porch ${tag}`)).toHaveCount(1);
+	await expect(day.getByText(`Rake leaves ${tag}`)).toHaveCount(1);
+	await expect(eventLine).toBeFocused();
+});

@@ -161,20 +161,21 @@
 				gestureMessage = '';
 				await update({ reset: false });
 			} else {
-				if (!line.value.trim()) line.value = written;
+				line.value = line.value.trim() ? `${written} ${line.value}` : written;
 				gestureMessage =
 					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${written}"; try again`) : `Couldn't save "${written}". Check the connection, then tap the line and try again.`;
 			}
 			saving.delete(formElement);
 			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
-			tappedTo.delete(formElement);
-			left.delete(formElement);
 			if (next?.isConnected && (document.activeElement === document.body || document.activeElement === null)) next.focus();
-			// Words written while the last line was saving, then left: save those too.
+			// Words written while the last line was saving, then left: save those too (and keep the cursor where it went).
 			if (result.type !== 'error' && line.value.trim() && document.activeElement !== line) {
 				left.add(formElement);
 				formElement.requestSubmit();
+				return;
 			}
+			tappedTo.delete(formElement);
+			left.delete(formElement);
 		};
 	};
 	function saveOnLeave(e: FocusEvent) {
