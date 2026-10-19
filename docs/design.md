@@ -8,7 +8,7 @@
 ViWoods / phone / Mac browser
         │  HTTPS over Tailscale
         ▼
-  planner (SvelteKit, Node)  ── CalDAV ──►  Radicale  ──► /srv/radicale/data (.ics files)
+  planner (SvelteKit, Node)  ── CalDAV ──►  Radicale  ──► volume planner_data (.ics files)
         ▲                                      ▲
         │ nightly rollover job                 │ CalDAV over Tailscale
                                      iPhone Calendar / Reminders, Mac Calendar, wife's iPhone
@@ -78,7 +78,7 @@ Each is one small PR with its own tests. 1–11 can be done before the server ar
 9. **Rollover**: nightly job plus a check on every page load; carried-over marker.
 10. **Repeating items**: show recurring events and tasks; create them from the details sheet. Tick, ✕ and → change one day (a standard one-off change, RECURRENCE-ID); the sheet edits the whole series; "Delete this day" skips one day (EXDATE). Edits keep one-off changes made on phones.
 11. **E-ink and phone polish**: installable app (PWA), large tap targets, no animation, fast page flips; QA on tablet and phone sizes.
-12. **Package and deploy**: Docker Compose for Radicale and planner on `homebase`, Tailscale Serve, backups.
+12. **Package and deploy**: Docker Compose for Radicale and planner on `homebase`, Tailscale Serve, backups. `scripts/server-setup.sh` does it in one go; rehearsed first on an Ubuntu VM on the Mac. Radicale's data is the Compose volume `planner_data` (not a host folder), so the backup must include Docker's volumes.
 13. **Move in**: export iCloud calendars and reminders into Radicale; set up David's and his wife's phones and the Mac; run alongside the paper book for two weeks.
 
 **Later versions:** school-meal emails to calendar (Proton Bridge), work Outlook read-only feed, pen ticks and cross-outs, handwriting entry.
