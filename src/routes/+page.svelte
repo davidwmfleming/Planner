@@ -73,7 +73,7 @@
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
-			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}">{item.state === 'done' ? '✓' : ''}</button>
+			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}"><span class="sq">{item.state === 'done' ? '✓' : ''}</span></button>
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
 		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
@@ -308,12 +308,14 @@
 		background: none;
 		border: 0;
 		color: var(--muted);
-		min-width: 2.2rem;
+		min-width: var(--line);
 		min-height: var(--line);
 		padding: 0;
 		cursor: pointer;
 	}
-	.box { cursor: pointer; padding: 0; background: var(--paper); width: 1.25rem; height: 1.25rem; border: 2px solid var(--pen); border-radius: 3px; flex: none; display: grid; place-items: center; font-weight: 800; font-size: 0.95rem; line-height: 1; color: var(--pen); }
+	/* The square is small like a paper box, but the whole line height around it is tappable. */
+	.box { cursor: pointer; padding: 0; margin-left: -0.5rem; background: none; border: 0; width: 2.25rem; min-height: var(--line); flex: none; display: grid; place-items: center; }
+	.sq { background: var(--paper); width: 1.25rem; height: 1.25rem; border: 2px solid var(--pen); border-radius: 3px; display: grid; place-items: center; font-weight: 800; font-size: 0.95rem; line-height: 1; color: var(--pen); }
 	.time { font-variant-numeric: tabular-nums; color: var(--pen); font-weight: 700; min-width: 4.4em; font-size: 0.92rem; }
 	.allday { color: var(--pen); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 4.4em; }
 	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
@@ -351,8 +353,8 @@
 		background: var(--paper);
 		border: 1.5px solid var(--ink);
 		border-radius: 6px;
-		min-height: 36px;
-		padding: 0 0.6rem;
+		min-height: 40px;
+		padding: 0 0.7rem;
 		cursor: pointer;
 		margin-left: 0.3rem;
 	}
@@ -383,17 +385,21 @@
 	.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 	.seg { display: flex; gap: 0.4rem; }
 	.seg label { display: flex; gap: 0.3rem; align-items: center; border: 2px solid var(--ink); border-radius: 6px; padding: 0 0.7rem; min-height: 44px; color: var(--ink); font-size: 1rem; font-weight: 400; }
-	.actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; }
+	/* Save stays in reach on a phone while the rest of the sheet scrolls. */
+	.actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; position: sticky; bottom: 0; background: var(--paper); padding-block: 0.6rem; border-top: 1px solid var(--rule); }
 	.actions-left, .actions-right { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	button.btn { cursor: pointer; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
-	.repeat { font-size: 0.8rem; color: var(--muted); }
+	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: 1fr; }
-		h1 span { display: none; }
+		/* Title and month on one line, all four controls on the next: no third row eating the page. */
+		h1 { flex-basis: 100%; }
+		nav { flex-wrap: nowrap; width: 100%; }
+		input[type='date'] { flex: 1; min-width: 0; font-size: 0.95rem; }
 	}
 </style>

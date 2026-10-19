@@ -27,4 +27,7 @@ html, body { margin: 0; }
 body { background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.35; }
 a { color: inherit; }
 :focus-visible { outline: 3px solid var(--pen); outline-offset: 2px; }
-@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+/* E-ink redraws slowly and smears motion, so nothing animates anywhere. */
+*, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+/* Fingers and pens need bigger lines than a mouse does. */
+@media (pointer: coarse) { :root { --line: 2.6rem; } }

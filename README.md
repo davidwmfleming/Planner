@@ -16,3 +16,7 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 | `npm run lint` | Type and Svelte checks |
 | `npm run calendar` | Start a local Radicale calendar server (needs `python3 -m pip install radicale`) |
 | `npm run seed` | Fill it with sample entries from the paper page |
+
+## Installing it on a device
+
+Open the planner's address in the browser, then add it to the home screen: in Chrome on Android (the ViWoods), menu → **Add to home screen** / **Install app**; in Safari on iPhone, Share → **Add to Home Screen**. It then opens full-screen like any app. It needs the home server (over Tailscale) to show anything; there is no offline copy, because the calendar server is the one place the data lives.
