@@ -144,10 +144,26 @@
 		await invalidateAll();
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
-	const keepWriting: SubmitFunction = () => async ({ update, formElement }) => {
-		await update();
-		formElement.querySelector<HTMLInputElement>('input[name="text"]')?.focus();
+	// Tapping away from a line saves it too, so handwriting needs no Enter. The cursor then stays where you tapped.
+	// (Saving redraws the page, which can drop focus, so it is put back on purpose either way.)
+	const saving = new Set<HTMLFormElement>();
+	const tappedTo = new Map<HTMLFormElement, HTMLElement | null>();
+	const keepWriting: SubmitFunction = ({ formElement }) => {
+		saving.add(formElement);
+		return async ({ update }) => {
+			await update();
+			saving.delete(formElement);
+			const next = tappedTo.has(formElement) ? tappedTo.get(formElement) : formElement.querySelector<HTMLInputElement>('input[name="text"]');
+			tappedTo.delete(formElement);
+			if (next?.isConnected && (document.activeElement === document.body || document.activeElement === null)) next.focus();
+		};
 	};
+	function saveOnLeave(e: FocusEvent) {
+		const input = e.currentTarget as HTMLInputElement;
+		if (!input.form || saving.has(input.form) || !input.value.trim()) return;
+		tappedTo.set(input.form, e.relatedTarget as HTMLElement | null);
+		input.form.requestSubmit();
+	}
 
 	function onJump(e: Event) {
 		const value = (e.currentTarget as HTMLInputElement).value;
@@ -204,6 +220,7 @@
 			<input type="hidden" name="date" value={date} />
 			<input
 				class="entry"
+				onblur={saveOnLeave}
 				name="text"
 				id="add-{kind}-{date || 'unscheduled'}"
 				autocomplete="off"
