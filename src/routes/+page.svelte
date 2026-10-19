@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { enhance } from '$app/forms';
-	import { goto } from '$app/navigation';
+	import { deserialize, enhance } from '$app/forms';
+	import { goto, invalidateAll } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
+	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
@@ -47,17 +48,94 @@
 
 	const pageUrl = (start: string) => `?page=${start}`;
 
-	// Swipe sideways on the page to flip, like turning a paper page.
-	let swipeStart: { x: number; y: number } | null = null;
-	function onPointerDown(e: PointerEvent) {
-		swipeStart = { x: e.clientX, y: e.clientY };
+	// Pen (or finger) marks on the page, like on paper: sweep sideways to turn the page, draw ✓ on an item to tick it,
+	// scribble over it to strike it out, or drag it onto another day. The tap buttons all still work.
+	type Active = { id: number; points: Point[]; uid?: string; occurrence?: string; from?: string; pen: boolean };
+	let stroke: Active | null = null;
+	let dropDay = $state<string | null>(null);
+	let dragging = $state<string | null>(null);
+	let gestureMessage = $state('');
+	let swallowClick = false;
+
+	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
+
+	function onStrokeStart(e: PointerEvent) {
+		const target = e.target as HTMLElement;
+		if (!e.isPrimary || target.closest('input, select, textarea, dialog, header, a')) return;
+		const row = target.closest<HTMLElement>('li[data-uid]');
+		stroke = {
+			id: e.pointerId,
+			points: [{ x: e.clientX, y: e.clientY }],
+			uid: row?.dataset.uid,
+			occurrence: row?.dataset.occurrence,
+			from: row ? (row.closest<HTMLElement>('section.day')?.dataset.date ?? '') : undefined,
+			pen: e.pointerType === 'pen'
+		};
 	}
-	function onPointerUp(e: PointerEvent) {
-		if (!swipeStart) return;
-		const dx = e.clientX - swipeStart.x;
-		const dy = e.clientY - swipeStart.y;
-		swipeStart = null;
-		if (Math.abs(dx) > 80 && Math.abs(dy) < Math.abs(dx) * 0.6) goto(pageUrl(dx < 0 ? data.next : data.previous));
+	function onStrokeMove(e: PointerEvent) {
+		if (!stroke || e.pointerId !== stroke.id) return;
+		stroke.points.push({ x: e.clientX, y: e.clientY });
+		if (stroke.uid && movedFar(stroke.points[0], stroke.points[stroke.points.length - 1])) {
+			const day = dayAt(e.clientX, e.clientY);
+			dragging = stroke.uid;
+			dropDay = day && day !== stroke.from ? day : null;
+		}
+	}
+	function onStrokeEnd(e: PointerEvent) {
+		const done = stroke;
+		const target = dropDay;
+		onStrokeCancel();
+		if (!done || e.pointerId !== done.id) return;
+		done.points.push({ x: e.clientX, y: e.clientY });
+		if (!movedFar(done.points[0], done.points[done.points.length - 1]) && done.points.length < 4) return;
+		swallowClick = true;
+		setTimeout(() => (swallowClick = false), 400);
+		const item = done.uid ? { uid: done.uid, ...(done.occurrence ? { occurrence: done.occurrence } : {}) } : undefined;
+		if (item && target) return send('move', { ...item, to: target });
+		const read = readStroke(done.points);
+		if (read === 'next' || read === 'previous') return goto(pageUrl(read === 'next' ? data.next : data.previous));
+		if (!item) return;
+		const row = document.querySelector<HTMLElement>(`li[data-uid="${CSS.escape(item.uid)}"]`);
+		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
+		if (read === 'tick' && !row?.classList.contains('done')) return send('mark', { ...item, state: 'done' });
+		if (read === 'scratch' && !row?.classList.contains('dropped')) return send('mark', { ...item, state: 'dropped' });
+	}
+	function onStrokeCancel() {
+		stroke = null;
+		dropDay = null;
+		dragging = null;
+	}
+	// A pen stroke shouldn't also scroll the page (fingers still scroll). Pointer events can't stop that; touch events can.
+	function holdPagePen(e: TouchEvent) {
+		if (stroke && e.cancelable && [...e.touches].some((t) => (t as Touch & { touchType?: string }).touchType === 'stylus')) e.preventDefault();
+	}
+	// The stroke has done its job; don't let it also count as a tap on whatever it ended on.
+	function afterStroke(e: MouseEvent) {
+		if (!swallowClick) return;
+		swallowClick = false;
+		e.preventDefault();
+		e.stopPropagation();
+	}
+	let wrap = $state<HTMLDivElement>();
+	onMount(() => {
+		const listen = { pointerdown: onStrokeStart, pointermove: onStrokeMove, pointerup: onStrokeEnd, pointercancel: onStrokeCancel };
+		for (const [name, fn] of Object.entries(listen)) wrap?.addEventListener(name, fn as EventListener);
+		window.addEventListener('touchmove', holdPagePen, { passive: false });
+		window.addEventListener('click', afterStroke, true);
+		return () => {
+			for (const [name, fn] of Object.entries(listen)) wrap?.removeEventListener(name, fn as EventListener);
+			window.removeEventListener('touchmove', holdPagePen);
+			window.removeEventListener('click', afterStroke, true);
+		};
+	});
+
+	async function send(action: string, fields: Record<string, string>) {
+		const body = new FormData();
+		for (const [k, v] of Object.entries(fields)) body.set(k, v);
+		const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+		const result = deserialize(await response.text());
+		gestureMessage = result.type === 'failure' ? String(result.data?.message ?? 'That did not work; try again') : result.type === 'error' ? 'That did not work; try again' : '';
+		await invalidateAll();
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
 	const keepWriting: SubmitFunction = () => async ({ update, formElement }) => {
@@ -72,7 +150,7 @@
 </script>
 
 {#snippet itemRow(item: Item, date: string)}
-	<li class={[item.state, item.calendar === data.workCalendar && 'work']}>
+	<li class={[item.state, item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
@@ -135,7 +213,7 @@
 	<title>Planner · {monthYear(data.start)}</title>
 </svelte:head>
 
-<div class="wrap">
+<div class="wrap" bind:this={wrap}>
 	<header class="bar">
 		<h1>Planner <span>· {monthYear(data.start)}</span></h1>
 		<nav aria-label="Pages">
@@ -146,9 +224,10 @@
 		</nav>
 	</header>
 
-	<main class="page" onpointerdown={onPointerDown} onpointerup={onPointerUp}>
+	{#if gestureMessage}<p class="error" role="alert">{gestureMessage}</p>{/if}
+	<main class="page">
 		{#each data.days as day (day.date)}
-			<section class="day" class:weekend={day.weekend} aria-label={day.date} data-date={day.date}>
+			<section class="day" class:weekend={day.weekend} class:drop-target={dropDay === day.date} aria-label={day.date} data-date={day.date}>
 				<div class="day-head">
 					<span class="dow">{dayLetter(day.date)}</span>
 					<span class="dnum">{dayNumber(day.date)}</span>
@@ -187,7 +266,7 @@
 			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
 			<ul class="lines">
 				{#each data.unscheduled as item (item.uid)}
-					<li class={item.state}>
+					<li class={[item.state, dragging === item.uid && 'dragging']} data-uid={item.uid}>
 						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 						{@render pullButtons(item)}
@@ -309,7 +388,12 @@
 		text-decoration: none;
 	}
 	input[type='date'] { padding: 0 0.4rem; }
-	.page { touch-action: pan-y; margin-top: 0.4rem; }
+	.wrap { touch-action: pan-y; }
+	.page { margin-top: 0.4rem; }
+	/* Dragging an item: it gets a dashed outline, and the day it would land on a thick one. */
+	.lines li[data-uid] { user-select: none; -webkit-user-select: none; }
+	li.dragging { outline: 2px dashed var(--ink); }
+	.day.drop-target { outline: 4px solid var(--ink); outline-offset: -2px; }
 	.day { border-bottom: 2px solid var(--ink); padding-block: 0.5rem 0.9rem; min-height: calc((100dvh - 10rem) / 3); }
 	.day.weekend { min-height: calc((100dvh - 10rem) / 6); }
 	.day-head { display: flex; align-items: baseline; gap: 0.55rem; }

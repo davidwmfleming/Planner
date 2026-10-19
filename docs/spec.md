@@ -11,7 +11,8 @@
 4. **Line-style entry (keyboard in v1):** tap an empty line, type "9am Dentist". In the events column it becomes an event at 9:00 that day; in the tasks column, a task starting at 9:00. "More details" opens recurrence, location, end time, labels and notes.
 5. **Automatic rollover:** unchecked, undropped tasks move forward to today each morning, marked as carried over so nothing is lost silently.
 
-6. **Tap marks (v1):** tap the box to mark done; a small ✕ button drops an item (shown struck through). Pen gestures come in a later version.
+6. **Tap marks (v1):** tap the box to mark done; a small ✕ button drops an item (shown struck through).
+7. **Pen marks (v2):** on the tablet, draw ✓ on an item to tick it, scribble over it to strike it out, drag it onto another day to move it, and sweep sideways to turn the page. The tap buttons keep working.
 
 ## Soon after
 - **Future tasks list** (first called "Not scheduled"): this month's to-dos, someday items and a "waiting on" list (wills, tax credit, French training). Hidden behind a button at the bottom of the page; each item has one-tap **Today** and **Sat** buttons to pull it onto today or the coming Saturday. (Moved up to day one after prototype feedback.)
@@ -42,7 +43,7 @@ After two weeks, David hasn't opened the paper planner, and nothing he wrote in 
 Events and tasks are still on the CalDAV server, so his phone calendar keeps working; only the planner view is lost.
 
 ## Open questions
-- Decided: v1 is keyboard and tap only. Pen gestures (tick, cross-out) and handwriting-to-text are later versions.
+- Decided: v1 is keyboard and tap only. v2 adds pen marks (tick, scratch-out, drag, page sweep). Handwriting-to-text: first try the tablet's own handwriting keyboard in the entry lines before building anything.
 - Can the work Outlook calendar publish a read-only feed?
 - Should events in the past also get ticked, or only tasks? (The photo shows ticks on events.)
 - The loose notes at the bottom of the paper page: keep a per-day notes line?
