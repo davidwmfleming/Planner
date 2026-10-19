@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isDavPath, onServer } from './dav-proxy';
+import { isDavDiscovery, isDavPath, onServer } from './dav-proxy';
 
 const server = new URL('http://127.0.0.1:8232/');
 
@@ -21,5 +21,12 @@ describe('the calendar-app address', () => {
 		expect(isDavPath('/.well-known/caldav')).toBe(true);
 		expect(isDavPath('/davidson')).toBe(false);
 		expect(isDavPath('/')).toBe(false);
+	});
+
+	it("also answers calendar apps' questions at the site's root, and nothing else there", () => {
+		expect(isDavDiscovery('PROPFIND', '/')).toBe(true);
+		expect(isDavDiscovery('GET', '/')).toBe(false);
+		expect(isDavDiscovery('POST', '/')).toBe(false);
+		expect(isDavDiscovery('PROPFIND', '/other')).toBe(false);
 	});
 });

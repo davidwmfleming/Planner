@@ -7,6 +7,12 @@ export const DAV_PREFIX = '/dav';
 /** True for requests meant for the calendar server rather than the planner's own pages. */
 export const isDavPath = (path: string) => path === DAV_PREFIX || path.startsWith(`${DAV_PREFIX}/`) || path.startsWith('/.well-known/caldav');
 
+// Calendar-only request types. Apple Calendar sends these to the site's root when it looks for the calendars.
+const DAV_METHODS = ['PROPFIND', 'REPORT', 'PROPPATCH', 'MKCALENDAR', 'MKCOL', 'MOVE', 'COPY'];
+
+/** True for a calendar app asking the site's root where the calendars are; it is answered as if it asked /dav/. */
+export const isDavDiscovery = (method: string, path: string) => path === '/' && DAV_METHODS.includes(method.toUpperCase());
+
 // Headers calendar apps send that the server needs; everything else (cookies and so on) stays here.
 const PASSED_ON = ['authorization', 'content-type', 'depth', 'destination', 'if-match', 'if-none-match', 'overwrite', 'prefer', 'brief', 'user-agent'];
 // Node's fetch has already undone any compression and works out lengths itself.
@@ -25,10 +31,11 @@ export function onServer(server: URL, path: string, search: string): URL | undef
 
 export async function proxyToCalendarServer(request: Request, url: URL, serverUrl: string): Promise<Response> {
 	if (url.pathname.startsWith('/.well-known/caldav')) {
-		return new Response(null, { status: 301, headers: { Location: `${DAV_PREFIX}/` } });
+		// A full address: some calendar apps don't follow a bare path.
+		return new Response(null, { status: 301, headers: { Location: `${url.origin}${DAV_PREFIX}/` } });
 	}
 	const server = new URL(serverUrl);
-	const target = onServer(server, url.pathname, url.search);
+	const target = onServer(server, url.pathname === '/' ? `${DAV_PREFIX}/` : url.pathname, url.search);
 	if (!target) return new Response('Bad calendar address', { status: 400 });
 
 	const headers = new Headers({ 'X-Script-Name': DAV_PREFIX });

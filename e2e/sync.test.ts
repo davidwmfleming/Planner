@@ -51,7 +51,16 @@ test('calendar apps need the calendar password, and the usual address leads them
 	await expect(calendarApp(baseURL!, 'wrong')).rejects.toThrow();
 	const found = await request.get('/.well-known/caldav', { maxRedirects: 0 });
 	expect(found.status()).toBe(301);
-	expect(found.headers()['location']).toBe('/dav/');
+	expect(found.headers()['location']).toBe(`${baseURL}/dav/`);
+});
+
+test("asked at the site's root, as Apple Calendar does, the planner points to the calendars", async ({ request }) => {
+	const auth = { Authorization: `Basic ${Buffer.from('david:dev').toString('base64')}`, Depth: '0', 'Content-Type': 'application/xml' };
+	const body = '<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop><d:current-user-principal/></d:prop></d:propfind>';
+	const found = await request.fetch('/', { method: 'PROPFIND', headers: auth, data: body });
+	expect(found.status()).toBe(207);
+	expect(await found.text()).toContain('/dav/david/');
+	expect((await request.get('/')).status()).toBe(200); // the planner page itself is unchanged
 });
 
 test('the calendar-app address cannot be used to reach other sites', async ({ request }) => {
