@@ -48,3 +48,35 @@ test('tapping away from a written line saves it, and the cursor goes where you t
 	await page.reload();
 	await expect(day.getByText(`Book flu shot ${tag}`)).toHaveCount(1);
 });
+
+test('tapping another line while a line saves leaves the cursor there', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	// A slow connection, so the tap lands while the first line is still saving.
+	await page.route('**/*&/add', async (route) => {
+		await new Promise((r) => setTimeout(r, 800));
+		await route.continue();
+	});
+	const taskLine = page.locator(`#add-task-${tue}`);
+	const eventLine = page.locator(`#add-event-${tue}`);
+	await taskLine.fill(`Order printer ink ${tag}`);
+	await taskLine.press('Enter');
+	await expect(taskLine).toHaveValue('');
+	await eventLine.click();
+	await expect(page.locator(`section.day[data-date="${tue}"]`).getByText(`Order printer ink ${tag}`)).toBeVisible();
+	await expect(eventLine).toBeFocused();
+});
+
+test('if a line cannot be saved, the words stay and the planner stays up', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	await page.route('**/*&/add', (route) => route.abort());
+	const taskLine = page.locator(`#add-task-${tue}`);
+	await taskLine.fill(`Renew passport ${tag}`);
+	await page.locator(`#add-event-${tue}`).click();
+	await expect(page.getByRole('alert')).toContainText("Couldn't save");
+	await expect(taskLine).toHaveValue(`Renew passport ${tag}`);
+	await expect(page.locator(`section.day[data-date="${tue}"]`)).toBeVisible();
+});

@@ -145,23 +145,45 @@
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
 	// Tapping away from a line saves it too, so handwriting needs no Enter. The cursor then stays where you tapped.
-	// (Saving redraws the page, which can drop focus, so it is put back on purpose either way.)
+	// The line is cleared as soon as it is sent, so you can keep writing while it saves; if saving fails, the words come back.
+	// (Saving redraws the page, which can drop focus, so focus is put back on purpose.)
 	const saving = new Set<HTMLFormElement>();
-	const tappedTo = new Map<HTMLFormElement, HTMLElement | null>();
-	const keepWriting: SubmitFunction = ({ formElement }) => {
+	const left = new Set<HTMLFormElement>();
+	const tappedTo = new Map<HTMLFormElement, HTMLElement>();
+	const lineOf = (form: HTMLFormElement) => form.querySelector<HTMLInputElement>('input[name="text"]')!;
+	const keepWriting: SubmitFunction = ({ formElement, formData }) => {
+		const line = lineOf(formElement);
+		const written = String(formData.get('text') ?? '');
 		saving.add(formElement);
-		return async ({ update }) => {
-			await update();
+		line.value = '';
+		return async ({ result, update }) => {
+			if (result.type === 'success' || result.type === 'redirect') {
+				gestureMessage = '';
+				await update({ reset: false });
+			} else {
+				if (!line.value.trim()) line.value = written;
+				gestureMessage =
+					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${written}"; try again`) : `Couldn't save "${written}". Check the connection, then tap the line and try again.`;
+			}
 			saving.delete(formElement);
-			const next = tappedTo.has(formElement) ? tappedTo.get(formElement) : formElement.querySelector<HTMLInputElement>('input[name="text"]');
+			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
 			tappedTo.delete(formElement);
+			left.delete(formElement);
 			if (next?.isConnected && (document.activeElement === document.body || document.activeElement === null)) next.focus();
+			// Words written while the last line was saving, then left: save those too.
+			if (result.type !== 'error' && line.value.trim() && document.activeElement !== line) {
+				left.add(formElement);
+				formElement.requestSubmit();
+			}
 		};
 	};
 	function saveOnLeave(e: FocusEvent) {
 		const input = e.currentTarget as HTMLInputElement;
-		if (!input.form || saving.has(input.form) || !input.value.trim()) return;
-		tappedTo.set(input.form, e.relatedTarget as HTMLElement | null);
+		if (!input.form || (!saving.has(input.form) && !input.value.trim())) return;
+		// SvelteKit parks focus on the page body while it redraws; that isn't a tap.
+		if (e.relatedTarget instanceof HTMLElement && e.relatedTarget !== document.body) tappedTo.set(input.form, e.relatedTarget);
+		if (saving.has(input.form)) return;
+		left.add(input.form);
 		input.form.requestSubmit();
 	}
 
