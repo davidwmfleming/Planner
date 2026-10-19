@@ -25,6 +25,17 @@ Open the planner's address in the browser, then add it to the home screen: in Ch
 
 Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Set `WORK_CALENDAR` in `.env` to use a different calendar name.
 
+## Running it on the server (or a test VM)
+
+The planner and its calendar server run in Docker (`compose.yaml`), reachable only over Tailscale with an https address from Tailscale Serve. All calendar data lives in the Compose volume `planner_data`, which the nightly backup covers. On a fresh Ubuntu Server with your user able to `sudo`:
+
+```
+curl -fsSO https://raw.githubusercontent.com/davidwmfleming/Planner/main/scripts/server-setup.sh
+bash server-setup.sh            # add --sample on a test machine for the sample entries
+```
+
+The script installs Docker and Tailscale if needed (Tailscale prints a sign-in link the first time), puts the code in `/srv/planner`, writes `/srv/planner/.env` with a random calendar password, starts everything, and prints the planner's address and the calendar-app details. Run it again to update. In the Tailscale admin console, MagicDNS and HTTPS certificates must be on. Set `HTTPS_PORT` (for example `HTTPS_PORT=8443 bash server-setup.sh`) if another service already uses 443.
+
 ## Syncing with other calendar apps
 
 The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to Android with DAVx⁵, as a CalDAV account. Events and tasks added on either side show on the other. The planner passes everything under `/dav/` to the calendar server, which asks for its own user name (`CALDAV_USER`, usually `david`) and password (`CALDAV_PASSWORD` in `.env`).

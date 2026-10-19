@@ -1,0 +1,42 @@
+# The planner and its calendar server. All data lives in the one "data" volume (caught by the nightly backup).
+# Settings come from .env next to this file; scripts/server-setup.sh writes it.
+name: planner
+
+services:
+  radicale:
+    build: docker/radicale
+    restart: unless-stopped
+    environment:
+      CALDAV_USER: ${CALDAV_USER:-david}
+      CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
+    volumes:
+      - data:/data
+
+  planner:
+    build: .
+    restart: unless-stopped
+    depends_on: [radicale]
+    environment:
+      CALDAV_URL: http://radicale:5232/
+      CALDAV_USER: ${CALDAV_USER:-david}
+      CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
+      ORIGIN: ${ORIGIN:?Set ORIGIN in .env to the planner's https address}
+      TZ: ${TZ:-America/Toronto}
+    # Only this machine can reach it; Tailscale Serve gives it the https address.
+    ports:
+      - 127.0.0.1:${PLANNER_PORT:-3000}:3000
+
+  # Sample entries for a test machine: docker compose --profile sample run --rm seed
+  seed:
+    build:
+      context: .
+      target: seed
+    profiles: [sample]
+    depends_on: [radicale]
+    environment:
+      CALDAV_URL: http://radicale:5232/
+      CALDAV_USER: ${CALDAV_USER:-david}
+      CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
+
+volumes:
+  data:
