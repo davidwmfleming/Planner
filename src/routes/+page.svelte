@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { deserialize, enhance } from '$app/forms';
-	import { goto, invalidateAll } from '$app/navigation';
+	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
@@ -209,6 +209,25 @@
 		};
 		setTimeout(decide, LEAVE_DELAY);
 	}
+
+	// Turning the page or leaving it right after writing: save the words now rather than after the pause.
+	const unsaved = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].filter((i) => i.form && i.value.trim() && !saving.has(i.form));
+	function sendLine(input: HTMLInputElement, keepalive = false) {
+		const body = new FormData(input.form!);
+		input.value = '';
+		return fetch(input.form!.action, { method: 'POST', body, keepalive, headers: { 'x-sveltekit-action': 'true' } });
+	}
+	beforeNavigate((nav) => {
+		const lines = unsaved();
+		if (!lines.length) return;
+		if (nav.willUnload || !nav.to) {
+			for (const line of lines) sendLine(line, true);
+			return;
+		}
+		nav.cancel();
+		const to = nav.to.url;
+		Promise.all(lines.map((line) => sendLine(line))).finally(() => goto(to));
+	});
 
 	function onJump(e: Event) {
 		const value = (e.currentTarget as HTMLInputElement).value;
