@@ -7,6 +7,7 @@ import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
 import { defaultCalendarUrl, getStore } from '$lib/server/store';
+import { workEventsBetween } from '$lib/server/work-calendar';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,6 +21,8 @@ export const load: PageServerLoad = async ({ url }) => {
 	const asked = url.searchParams.get('page');
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
+	const [first, last] = [dates[0], dates[dates.length - 1]];
+	const work = workEventsBetween(first, last); // read alongside the home calendars; never stops the page loading
 
 	let items;
 	try {
@@ -40,8 +43,12 @@ export const load: PageServerLoad = async ({ url }) => {
 			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
 			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
 			.map(plain),
-		// A repeating item shows on each day of the page it falls on.
-		days: buildDays(dates, items.flatMap((i) => (i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]))).map((d) => ({
+		workProblem: (await work).problem,
+		// A repeating item shows on each day of the page it falls on; work meetings sit among the events.
+		days: buildDays(dates, [
+			...items.flatMap((i) => (i.recurrence ? occurrencesBetween(i.ics, first, last) : [i])),
+			...(await work).events
+		]).map((d) => ({
 			...d,
 			events: d.events.map(plain),
 			tasks: d.tasks.map(plain)

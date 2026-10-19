@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Calendar server for browser tests: a fresh Radicale on port 5233, seeded with sample data.
 set -euo pipefail
+# An Outlook-style work calendar with meetings around today, read by the app as WORK_CALENDAR_URL.
+mkdir -p .e2e && npx vite-node scripts/sample-work-feed.ts .e2e/work.ics
 export DEV_CALENDAR_DIR="$(mktemp -d)" DEV_CALENDAR_PORT=5233
 bash scripts/dev-calendar.sh &
 SERVER=$!

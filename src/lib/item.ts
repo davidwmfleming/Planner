@@ -27,6 +27,8 @@ export interface Item {
 	occurrence?: string;
 	/** On one showing of a repeating item: the day the series starts. */
 	seriesStart?: string;
+	/** Set on events read from an outside calendar (the work calendar). They are shown but can't be changed here. */
+	feed?: 'work';
 }
 
 export const LABELS: ItemLabel[] = ['month', 'waiting', 'someday'];

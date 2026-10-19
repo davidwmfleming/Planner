@@ -80,4 +80,6 @@ Each is one small PR with its own tests. 1–11 can be done before the server ar
 12. **Package and deploy**: Docker Compose for Radicale and planner on `homebase`, Tailscale Serve, backups.
 13. **Move in**: export iCloud calendars and reminders into Radicale; set up David's and his wife's phones and the Mac; run alongside the paper book for two weeks.
 
-**Later versions:** school-meal emails to calendar (Proton Bridge), work Outlook read-only feed, pen ticks and cross-outs, handwriting entry.
+**Work calendar (built after step 11, at David's request):** the planner reads Outlook's published ICS link (`WORK_CALENDAR_URL` in `.env`) every 10 minutes, keeps it only in memory, and shows the meetings among the day's events in local time, shaded light red with a "Work" tag and no controls. Nothing is written back. If the link can't be read, the page still loads and says so.
+
+**Later versions:** school-meal emails to calendar (Proton Bridge), pen ticks and cross-outs, handwriting entry.

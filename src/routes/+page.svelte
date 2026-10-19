@@ -68,7 +68,19 @@
 	}
 </script>
 
+{#snippet workRow(item: Item)}
+	<!-- A work meeting: shown in its place in the day, but changed only in Outlook. -->
+	<li class="work" title={item.location ? `Work · ${item.location}` : 'Work'}>
+		<span class="box" aria-hidden="true"></span>
+		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else}<span class="allday">All day</span>{/if}
+		<span class="title">{item.title}</span>
+		{#if item.location}<span class="where">{item.location}</span>{/if}
+		<span class="tag work-tag">Work</span>
+	</li>
+{/snippet}
+
 {#snippet itemRow(item: Item, date: string)}
+	{#if item.feed}{@render workRow(item)}{:else}
 	<li class={item.state}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
@@ -93,6 +105,7 @@
 			</form>
 		{/if}
 	</li>
+	{/if}
 {/snippet}
 
 {#snippet pullButtons(item: Item)}
@@ -135,6 +148,8 @@
 			<input type="date" id="jump" aria-label="Go to date" value={data.start} onchange={onJump} />
 		</nav>
 	</header>
+
+	{#if data.workProblem}<p class="notice" role="status">{data.workProblem}</p>{/if}
 
 	<main class="page" onpointerdown={onPointerDown} onpointerup={onPointerUp}>
 		{#each data.days as day (day.date)}
@@ -394,6 +409,13 @@
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
+	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
+	li.work { background: var(--work); }
+	li.work .title { color: var(--ink); }
+	li.work .time, li.work .allday { color: var(--ink); }
+	.notice { margin: 0.5rem 0 0; padding: 0.4rem 0.6rem; border: 1.5px solid var(--muted); border-radius: 6px; color: var(--muted); font-size: 0.85rem; }
+	.where { font-size: 0.78rem; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 9rem; }
+	.work-tag { margin-right: 0.4rem; }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: 1fr; }

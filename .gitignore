@@ -24,3 +24,4 @@ vite.config.ts.timestamp-*
 test-results/
 playwright-report/
 .dev-calendar/
+.e2e/
