@@ -25,6 +25,14 @@ export interface Calendar {
 
 const ALL_COMPONENTS = { 'comp-filter': { _attributes: { name: 'VCALENDAR' } } };
 
+/** A DAV property's text, whether the XML parser gave a plain value or a wrapper. */
+function davText(value: unknown): string | undefined {
+	if (typeof value === 'string' || typeof value === 'number') return String(value);
+	const wrapped = value as { _cdata?: unknown; _text?: unknown } | undefined;
+	const inner = wrapped?._cdata ?? wrapped?._text;
+	return typeof inner === 'string' ? inner : undefined;
+}
+
 export class CalendarStore {
 	private client: DAVClient;
 	private davCalendars: DAVCalendar[] = [];
@@ -82,11 +90,20 @@ export class CalendarStore {
 	async listItems(): Promise<StoredItem[]> {
 		const all: StoredItem[] = [];
 		for (const calendar of this.davCalendars) {
-			const objects = await this.client.fetchCalendarObjects({ calendar, filters: ALL_COMPONENTS });
-			for (const obj of objects) {
-				if (typeof obj.data !== 'string' || !obj.data.trim()) continue;
-				for (const item of icsToItems(obj.data)) {
-					all.push({ ...item, calendarUrl: calendar.url, url: obj.url, etag: obj.etag });
+			// One query that returns everything, rather than a list followed by a fetch: an item added or
+			// deleted between the two (on a phone, or by another page load) would make the fetch fail.
+			const responses = await this.client.calendarQuery({
+				url: calendar.url,
+				props: { 'd:getetag': {}, 'c:calendar-data': {} },
+				filters: ALL_COMPONENTS,
+				depth: '1'
+			});
+			for (const res of responses) {
+				const data = davText(res.props?.calendarData);
+				if (!res.href || !data?.trim()) continue;
+				const url = new URL(res.href, calendar.url).href;
+				for (const item of icsToItems(data)) {
+					all.push({ ...item, calendarUrl: calendar.url, url, etag: davText(res.props?.getetag) });
 				}
 			}
 		}

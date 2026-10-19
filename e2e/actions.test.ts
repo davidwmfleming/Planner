@@ -1,12 +1,15 @@
 import { expect, test } from '@playwright/test';
+import { futureWeek } from './dates';
 import { unique } from './unique';
+
+const { mon, tue } = futureWeek();
 
 test('tick, drop and move a task with one tap each', async ({ page }, info) => {
 	const name = unique('Water plants', info);
-	await page.goto('/?page=2026-10-19');
-	const monday = page.locator('section.day[data-date="2026-10-19"]');
-	const tuesday = page.locator('section.day[data-date="2026-10-20"]');
-	const line = page.locator('#add-task-2026-10-19');
+	await page.goto(`/?page=${mon}`);
+	const monday = page.locator(`section.day[data-date="${mon}"]`);
+	const tuesday = page.locator(`section.day[data-date="${tue}"]`);
+	const line = page.locator(`#add-task-${mon}`);
 	await line.fill(name);
 	await line.press('Enter');
 	const row = monday.locator('li', { hasText: name });
@@ -29,11 +32,11 @@ test('tick, drop and move a task with one tap each', async ({ page }, info) => {
 
 test('an event can be ticked or dropped but not moved with the arrow', async ({ page }, info) => {
 	const name = unique('Haircut', info);
-	await page.goto('/?page=2026-10-19');
-	const line = page.locator('#add-event-2026-10-19');
+	await page.goto(`/?page=${mon}`);
+	const line = page.locator(`#add-event-${mon}`);
 	await line.fill(`10am ${name}`);
 	await line.press('Enter');
-	const row = page.locator('section.day[data-date="2026-10-19"] li', { hasText: name });
+	const row = page.locator(`section.day[data-date="${mon}"] li`, { hasText: name });
 	await expect(row.getByRole('button', { name: `Tick ${name}` })).toBeVisible();
 	await expect(row.getByRole('button', { name: `Drop ${name}` })).toBeVisible();
 	await expect(row.getByRole('button', { name: /Move/ })).toHaveCount(0);

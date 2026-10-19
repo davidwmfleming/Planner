@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { iso } from './dates';
 import { unique } from './unique';
-
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 test('an unfinished task on an earlier day is carried to today, marked with where it came from', async ({ page }, info) => {
 	const title = unique('Return library books', info);

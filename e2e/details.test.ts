@@ -1,12 +1,15 @@
 import { expect, test } from '@playwright/test';
+import { futureWeek } from './dates';
 import { unique } from './unique';
+
+const { mon, tue, wed } = futureWeek();
 
 test('the details sheet edits an item and can turn an event into a task', async ({ page }, info) => {
 	const name = unique('Vet', info);
-	await page.goto('/?page=2026-10-19');
-	const tuesday = page.locator('section.day[data-date="2026-10-20"]');
-	await page.locator('#add-event-2026-10-20').fill(`2pm ${name}`);
-	await page.locator('#add-event-2026-10-20').press('Enter');
+	await page.goto(`/?page=${mon}`);
+	const tuesday = page.locator(`section.day[data-date="${tue}"]`);
+	await page.locator(`#add-event-${tue}`).fill(`2pm ${name}`);
+	await page.locator(`#add-event-${tue}`).press('Enter');
 
 	await tuesday.getByRole('button', { name: `Details for ${name}` }).click();
 	const sheet = page.getByRole('dialog', { name: 'Details' });
@@ -34,9 +37,9 @@ test('the details sheet edits an item and can turn an event into a task', async 
 
 test('an event without a date is refused with a clear message', async ({ page }, info) => {
 	const name = unique('Concert', info);
-	await page.goto('/?page=2026-10-19');
-	await page.locator('#add-event-2026-10-21').fill(`7pm ${name}`);
-	await page.locator('#add-event-2026-10-21').press('Enter');
+	await page.goto(`/?page=${mon}`);
+	await page.locator(`#add-event-${wed}`).fill(`7pm ${name}`);
+	await page.locator(`#add-event-${wed}`).press('Enter');
 	await page.getByRole('button', { name: `Details for ${name}` }).click();
 	const sheet = page.getByRole('dialog', { name: 'Details' });
 	await sheet.locator('#f-date').fill('');
