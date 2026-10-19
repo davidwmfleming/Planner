@@ -1,0 +1,62 @@
+import { expect, test } from '@playwright/test';
+import { DAVClient } from 'tsdav';
+import { futureWeek } from './dates';
+import { unique } from './unique';
+
+const { tue } = futureWeek();
+
+// What Apple Calendar or DAVx⁵ does: find the calendars from the planner's own address, then read and write events.
+async function calendarApp(baseURL: string, password = 'dev') {
+	const client = new DAVClient({
+		serverUrl: `${baseURL}/`,
+		credentials: { username: 'david', password },
+		authMethod: 'Basic',
+		defaultAccountType: 'caldav'
+	});
+	await client.login();
+	return client;
+}
+
+test('another calendar app finds the calendars, and events flow both ways', async ({ page, baseURL }, info) => {
+	const client = await calendarApp(baseURL!);
+	const calendars = await client.fetchCalendars();
+	const work = calendars.find((c) => c.displayName === 'Work');
+	expect(work, 'the Work calendar is offered to other apps').toBeTruthy();
+	expect(new URL(work!.url).pathname).toMatch(/^\/dav\//);
+
+	// Added in the other app, seen in the planner.
+	const fromApp = unique('Dentist from phone', info);
+	const uid = crypto.randomUUID();
+	const day = tue.replaceAll('-', '');
+	const made = await client.createCalendarObject({
+		calendar: work!,
+		filename: `${uid}.ics`,
+		iCalString: ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20261019T120000Z',
+			`DTSTART:${day}T150000`, `DTEND:${day}T160000`, `SUMMARY:${fromApp}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n')
+	});
+	expect(made.ok).toBe(true);
+	await page.goto(`/?page=${tue}`);
+	await expect(page.locator(`section.day[data-date="${tue}"] li.work`, { hasText: fromApp })).toContainText('3:00 pm');
+
+	// Added in the planner, seen in the other app.
+	const fromPlanner = unique('Haircut from planner', info);
+	await page.locator(`#add-event-${tue}`).fill(`5pm ${fromPlanner}`);
+	await page.locator(`#add-event-${tue}`).press('Enter');
+	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner })).toBeVisible();
+	const everywhere = (await Promise.all(calendars.map((c) => client.fetchCalendarObjects({ calendar: c })))).flat();
+	expect(everywhere.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
+});
+
+test('calendar apps need the calendar password, and the usual address leads them in', async ({ request, baseURL }) => {
+	await expect(calendarApp(baseURL!, 'wrong')).rejects.toThrow();
+	const found = await request.get('/.well-known/caldav', { maxRedirects: 0 });
+	expect(found.status()).toBe(301);
+	expect(found.headers()['location']).toBe('/dav/');
+});
+
+test('the calendar-app address cannot be used to reach other sites', async ({ request }) => {
+	const auth = { Authorization: `Basic ${Buffer.from('david:dev').toString('base64')}` };
+	expect((await request.get('/dav//example.com/', { headers: auth })).status()).toBe(400);
+	const move = await request.fetch('/dav/david/x.ics', { method: 'MOVE', headers: { ...auth, Destination: 'http://localhost:4173/dav//example.com/x.ics' } });
+	expect(move.status()).toBe(400);
+});

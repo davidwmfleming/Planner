@@ -62,6 +62,8 @@ htpasswd_filename = $DATA/users
 htpasswd_encryption = plain
 [storage]
 filesystem_folder = $DATA/collections
+[web]
+type = none
 [logging]
 level = warning
 EOF
@@ -109,6 +111,9 @@ cat <<EOF
 4. Wait a minute, then open https://$SITE
    User name: anything (david is fine)   Password: $TEST_PASSWORD
 
-The password is kept in $SECRETS. To update after new changes: sh $APP/scripts/nfsn-setup.sh $SITE
+To sync a calendar app with this test copy (sample data only), add a CalDAV account:
+   Server: $SITE   (on a Mac, https://$SITE/dav/)   User name: david   Password: $CALDAV_PASSWORD
+
+The passwords are kept in $SECRETS. To update after new changes: sh $APP/scripts/nfsn-setup.sh $SITE
 then restart the planner daemon from the control panel.
 EOF
