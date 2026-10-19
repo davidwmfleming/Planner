@@ -74,7 +74,7 @@ export class CalendarStore {
 		const home = this.client.account?.homeUrl;
 		if (!home) throw new Error('The calendar server did not report a home folder for this user');
 		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-		await this.client.makeCalendar({
+		const made = this.client.makeCalendar({
 			url: new URL(`${slug}/`, home).href,
 			props: {
 				displayname: name,
@@ -83,6 +83,8 @@ export class CalendarStore {
 				}
 			}
 		});
+		// Another program (or another copy of the planner) may create it at the same moment; that's fine.
+		await made.catch(() => undefined);
 		await this.refreshCalendars();
 		const created = this.calendars().find((c) => c.name === name);
 		if (!created) throw new Error(`Could not create the calendar "${name}"`);
@@ -112,10 +114,11 @@ export class CalendarStore {
 		return all;
 	}
 
-	async create(calendarUrl: string, item: Item): Promise<StoredItem> {
+	/** Saves a new item. Given the document of an item it replaces elsewhere, keeps that one's one-off changes. */
+	async create(calendarUrl: string, item: Item, previous?: string): Promise<StoredItem> {
 		const calendar = this.calendarAt(calendarUrl);
 		const filename = `${item.uid}.ics`;
-		const ics = itemToICS(item);
+		const ics = itemToICS(item, previous);
 		const res = await this.client.createCalendarObject({ calendar, filename, iCalString: ics });
 		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status})`);
 		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
