@@ -1,7 +1,7 @@
 // Reads and writes planner items on a CalDAV server (Radicale in production and development).
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
-import { icsToItems, itemToICS } from './ical';
+import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
 
 export interface StoreConfig {
 	serverUrl: string;
@@ -14,6 +14,8 @@ export interface StoredItem extends Item {
 	calendarUrl: string;
 	url: string;
 	etag?: string;
+	/** The whole document as stored, so saving keeps what the planner doesn't show (a repeat's one-off changes, time zones). */
+	ics: string;
 }
 
 export interface Calendar {
@@ -103,7 +105,7 @@ export class CalendarStore {
 				if (!res.href || !data?.trim()) continue;
 				const url = new URL(res.href, calendar.url).href;
 				for (const item of icsToItems(data)) {
-					all.push({ ...item, calendarUrl: calendar.url, url, etag: davText(res.props?.getetag) });
+					all.push({ ...item, calendarUrl: calendar.url, url, etag: davText(res.props?.getetag), ics: data });
 				}
 			}
 		}
@@ -113,28 +115,39 @@ export class CalendarStore {
 	async create(calendarUrl: string, item: Item): Promise<StoredItem> {
 		const calendar = this.calendarAt(calendarUrl);
 		const filename = `${item.uid}.ics`;
-		const res = await this.client.createCalendarObject({ calendar, filename, iCalString: itemToICS(item) });
+		const ics = itemToICS(item);
+		const res = await this.client.createCalendarObject({ calendar, filename, iCalString: ics });
 		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status})`);
-		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined };
+		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
 	}
 
 	/** Saves changes. Fails if someone else changed the item since it was read, so no edit is silently lost. */
 	async update(stored: StoredItem, changes: Partial<Item>): Promise<StoredItem> {
-		const next: StoredItem = { ...stored, ...changes };
-		const res = await this.client.updateCalendarObject({
-			calendarObject: { url: stored.url, etag: stored.etag, data: itemToICS(next) }
-		});
+		const { calendarUrl, url, etag, ics, ...item } = stored;
+		return this.replace(stored, { ...item, ...changes });
+	}
+
+	/** Changes one showing of a repeating item, leaving the rest of the series as it is. */
+	async updateOccurrence(stored: StoredItem, day: string, change: (current: Item) => Partial<Item>): Promise<void> {
+		await this.put(stored, withOccurrence(stored.ics, day, change));
+	}
+
+	/** Removes one showing of a repeating item. */
+	async removeOccurrence(stored: StoredItem, day: string): Promise<void> {
+		await this.put(stored, withoutOccurrence(stored.ics, day));
+	}
+
+	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
+		const res = await this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } });
 		if (!res.ok) throw new Error(`Saving "${stored.title}" failed (${res.status}); reload and try again`);
-		return { ...next, etag: res.headers.get('etag') ?? undefined };
+		return res.headers.get('etag') ?? undefined;
 	}
 
 	/** Saves an item exactly as given, dropping any field it no longer has. */
 	async replace(stored: StoredItem, item: Item): Promise<StoredItem> {
-		const res = await this.client.updateCalendarObject({
-			calendarObject: { url: stored.url, etag: stored.etag, data: itemToICS(item) }
-		});
-		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status}); reload and try again`);
-		return { ...item, calendarUrl: stored.calendarUrl, url: stored.url, etag: res.headers.get('etag') ?? undefined };
+		const ics = itemToICS(item, stored.ics);
+		const etag = await this.put(stored, ics);
+		return { ...item, calendarUrl: stored.calendarUrl, url: stored.url, etag, ics };
 	}
 
 	async remove(stored: StoredItem): Promise<void> {

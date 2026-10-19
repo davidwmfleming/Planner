@@ -21,8 +21,12 @@ export interface Item {
 	state: ItemState;
 	/** Day an unfinished task was originally on before rollover moved it. */
 	carriedFrom?: string;
-	/** RRULE value, e.g. "FREQ=WEEKLY;BYDAY=MO". Expanded in a later step. */
+	/** RRULE value, e.g. "FREQ=WEEKLY;BYDAY=MO". */
 	recurrence?: string;
+	/** On one showing of a repeating item: the day it was originally due (its RECURRENCE-ID). */
+	occurrence?: string;
+	/** On one showing of a repeating item: the day the series starts. */
+	seriesStart?: string;
 }
 
 export const LABELS: ItemLabel[] = ['month', 'waiting', 'someday'];

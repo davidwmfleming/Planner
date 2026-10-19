@@ -5,6 +5,7 @@ import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
+import { occurrencesBetween } from '$lib/server/ical';
 import { defaultCalendarUrl, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -12,7 +13,7 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 
 /** Only plain item data goes to the browser, not where it lives on the server. */
-const plain = ({ calendarUrl, url, etag, ...item }: Item & { calendarUrl: string; url: string; etag?: string }): Item => item;
+const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }): Item => item;
 
 export const load: PageServerLoad = async ({ url }) => {
 	const today = toISODate(new Date());
@@ -39,7 +40,8 @@ export const load: PageServerLoad = async ({ url }) => {
 			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
 			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
 			.map(plain),
-		days: buildDays(dates, items).map((d) => ({
+		// A repeating item shows on each day of the page it falls on.
+		days: buildDays(dates, items.flatMap((i) => (i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]))).map((d) => ({
 			...d,
 			events: d.events.map(plain),
 			tasks: d.tasks.map(plain)
@@ -78,7 +80,10 @@ export const actions: Actions = {
 		const found = await findItem(String(form.get('uid') ?? ''));
 		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
 		const { store, item } = found;
-		await store.update(item, { state: item.state === state ? 'open' : state });
+		const toggle = (current: Item): Partial<Item> => ({ state: current.state === state ? 'open' : state });
+		const day = String(form.get('occurrence') ?? '');
+		if (item.recurrence && ISO.test(day)) await store.updateOccurrence(item, day, toggle);
+		else await store.update(item, toggle(item));
 	},
 
 	/** Move a task to another day (the arrow moves it to the next day). */
@@ -89,10 +94,12 @@ export const actions: Actions = {
 		const found = await findItem(String(form.get('uid') ?? ''));
 		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
 		const { store, item } = found;
-		const changes = item.kind === 'event' && item.endDate
-			? { date: to, endDate: addDays(to, daysBetween(item.date!, item.endDate)) }
+		const moveTo = (current: Item) => current.kind === 'event' && current.endDate
+			? { date: to, endDate: addDays(to, daysBetween(current.date!, current.endDate)) }
 			: { date: to };
-		await store.update(item, changes);
+		const day = String(form.get('occurrence') ?? '');
+		if (item.recurrence && ISO.test(day)) await store.updateOccurrence(item, day, moveTo);
+		else await store.update(item, moveTo(item));
 	},
 
 	/** The details sheet: edit any field, switch between event and task. */
@@ -104,7 +111,8 @@ export const actions: Actions = {
 		const field = (name: string) => String(form.get(name) ?? '');
 		const result = applyEdit(item, {
 			title: field('title'), kind: field('kind'), date: field('date'), time: field('time'),
-			endTime: field('endTime'), location: field('location'), label: field('label'), notes: field('notes')
+			endTime: field('endTime'), location: field('location'), label: field('label'), notes: field('notes'),
+			repeat: field('repeat')
 		});
 		if ('error' in result) return fail(400, { message: result.error });
 		if (result.item.kind === item.kind) {
@@ -122,6 +130,17 @@ export const actions: Actions = {
 		const found = await findItem(String(form.get('uid') ?? ''));
 		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
 		await found.store.remove(found.item);
+	},
+
+	/** Removes one day of a repeating item and keeps the rest of the series. */
+	deleteOne: async ({ request }) => {
+		const form = await request.formData();
+		const day = String(form.get('occurrence') ?? '');
+		if (!ISO.test(day)) return fail(400, { message: 'Which day should be removed?' });
+		const found = await findItem(String(form.get('uid') ?? ''));
+		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		if (!found.item.recurrence) return fail(400, { message: 'This item does not repeat' });
+		await found.store.removeOccurrence(found.item, day);
 	}
 };
 

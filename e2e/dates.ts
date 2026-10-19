@@ -9,5 +9,5 @@ export function futureWeek() {
 	const now = new Date();
 	const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 21 - ((now.getDay() + 6) % 7));
 	const day = (n: number) => iso(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + n));
-	return { mon: day(0), tue: day(1), wed: day(2) };
+	return { mon: day(0), tue: day(1), wed: day(2), nextMon: day(7), nextTue: day(8) };
 }

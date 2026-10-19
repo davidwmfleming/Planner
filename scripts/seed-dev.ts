@@ -23,7 +23,7 @@ const tk = (date: string | undefined, title: string, extra: Partial<Item> = {}):
 
 const events = [
 	ev(t, 'Cornwall Camp', undefined, { endDate: t2 }), ev(t, 'Terry Fox', '08:00'), ev(t, 'ADHD follow-up', '08:45'),
-	ev(t, 'Georgetown CleanTech visit', '09:00'), ev(t1, 'Policy team', '09:00'), ev(t1, 'Training', '11:00'), ev(t1, 'Reg policy', '12:00')
+	ev(t, 'Georgetown CleanTech visit', '09:00'), ev(t1, 'Policy team', '09:00', { recurrence: 'FREQ=WEEKLY' }), ev(t1, 'Training', '11:00'), ev(t1, 'Reg policy', '12:00')
 ];
 const todo = [
 	tk(t, 'Green cart'), tk(t, 'Ruck', { state: 'dropped' }), tk(t, 'Anniversary gift ideas'), tk(y, 'Book dentist cleaning'),

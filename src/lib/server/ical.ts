@@ -6,6 +6,8 @@ import { addDays } from '$lib/dates';
 import { LABELS, type Item, type ItemLabel, type ItemState } from '$lib/item';
 
 const PRODID = '-//davidwmfleming//Planner//EN';
+/** Text a one-off change of a repeating item shares with its series unless it was changed for that day. */
+const SERIES_TEXT = ['summary', 'location', 'description', 'categories'];
 
 const dateValue = (date: string) => ICAL.Time.fromDateString(date);
 const dateTimeValue = (date: string, time: string) => ICAL.Time.fromDateTimeString(`${date}T${time}:00`);
@@ -14,11 +16,41 @@ const pad = (n: number) => String(n).padStart(2, '0');
 const isoDate = (t: ICAL.Time) => `${t.year}-${pad(t.month)}-${pad(t.day)}`;
 const hhmm = (t: ICAL.Time) => `${pad(t.hour)}:${pad(t.minute)}`;
 
-export function itemToICS(item: Item): string {
+/**
+ * Writes an item as an .ics document. Given the document it replaces, a repeating item keeps
+ * its skipped days and its one-off changes (made here or on a phone), and time zone definitions are kept.
+ */
+export function itemToICS(item: Item, previous?: string): string {
 	const cal = new ICAL.Component(['vcalendar', [], []]);
 	cal.addPropertyWithValue('prodid', PRODID);
 	cal.addPropertyWithValue('version', '2.0');
+	const comp = itemComponent(item);
+	cal.addSubcomponent(comp);
+	if (previous) {
+		const old = new ICAL.Component(ICAL.parse(previous));
+		for (const tz of old.getAllSubcomponents('vtimezone')) cal.addSubcomponent(tz);
+		const oldParts = [...old.getAllSubcomponents('vevent'), ...old.getAllSubcomponents('vtodo')].filter((p) => p.name === comp.name);
+		const oldMaster = oldParts.find((p) => !p.hasProperty('recurrence-id'));
+		if (item.recurrence && oldMaster) {
+			// Rewritten to match the new start, so a skipped day stays skipped.
+			const skipped = oldMaster.getAllProperties('exdate').flatMap((ex) => ex.getValues() as ICAL.Time[]);
+			for (const t of skipped) addSeriesDay(comp, 'exdate', comp, isoDate(t));
+			for (const one of oldParts.filter((p) => p.hasProperty('recurrence-id'))) {
+				// A day that was only ticked or moved takes the series' new title, place and notes too.
+				for (const name of SERIES_TEXT) {
+					if (String(one.getFirstPropertyValue(name) ?? '') !== String(oldMaster.getFirstPropertyValue(name) ?? '')) continue;
+					one.removeAllProperties(name);
+					const value = comp.getFirstPropertyValue(name);
+					if (value != null) one.addPropertyWithValue(name, value);
+				}
+				cal.addSubcomponent(one);
+			}
+		}
+	}
+	return cal.toString();
+}
 
+function itemComponent(item: Item): ICAL.Component {
 	const comp = new ICAL.Component(item.kind === 'event' ? 'vevent' : 'vtodo');
 	comp.addPropertyWithValue('uid', item.uid);
 	comp.addPropertyWithValue('dtstamp', ICAL.Time.now());
@@ -56,9 +88,7 @@ export function itemToICS(item: Item): string {
 			comp.addSubcomponent(alarm);
 		}
 	}
-
-	cal.addSubcomponent(comp);
-	return cal.toString();
+	return comp;
 }
 
 function addHour(time: string): string {
@@ -75,6 +105,102 @@ export function icsToItems(ics: string): Item[] {
 		items.push(componentToItem(comp));
 	}
 	return items;
+}
+
+/** The main component of a document and its one-off changes, keyed by the day each replaces. */
+function parts(ics: string) {
+	const cal = new ICAL.Component(ICAL.parse(ics));
+	const all = [...cal.getAllSubcomponents('vevent'), ...cal.getAllSubcomponents('vtodo')];
+	const master = all.find((c) => !c.hasProperty('recurrence-id'));
+	const overrides = new Map<string, ICAL.Component>();
+	for (const c of all) {
+		const rid = c.getFirstPropertyValue('recurrence-id') as ICAL.Time | null;
+		if (rid) overrides.set(isoDate(rid), c);
+	}
+	return { cal, master, overrides };
+}
+
+/** One showing of a repeating item on the day it was originally due, before any one-off change. */
+function showing(series: Item, day: string): Item {
+	const shown: Item = { ...series, date: day, occurrence: day, seriesStart: series.date, state: series.state === 'dropped' ? 'dropped' : 'open' };
+	delete shown.carriedFrom;
+	if (series.endDate && series.date) shown.endDate = addDays(day, dayCount(series.date, series.endDate));
+	return shown;
+}
+
+const dayCount = (from: string, to: string) =>
+	Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
+
+const MAX_REPEATS = 20_000;
+
+/** Every showing of a repeating item that touches the days from..to (inclusive), with one-off changes applied. */
+export function occurrencesBetween(ics: string, from: string, to: string): Item[] {
+	const { master, overrides } = parts(ics);
+	if (!master || !master.hasProperty('rrule')) return [];
+	const series = componentToItem(master);
+	if (!series.date) return [];
+	const length = series.endDate ? dayCount(series.date, series.endDate) : 0;
+	const touches = (i: Item) => !!i.date && i.date <= to && (i.endDate ?? i.date) >= from;
+
+	const shown: Item[] = [];
+	const expansion = new ICAL.RecurExpansion({ component: master, dtstart: master.getFirstPropertyValue('dtstart') as ICAL.Time });
+	for (let n = 0; n < MAX_REPEATS; n++) {
+		const next = expansion.next();
+		if (!next) break;
+		const day = isoDate(next);
+		if (day > to) break;
+		if (addDays(day, length) < from || overrides.has(day)) continue;
+		shown.push(showing(series, day));
+	}
+	for (const [day, comp] of overrides) {
+		const changed = { ...componentToItem(comp), occurrence: day, seriesStart: series.date, recurrence: series.recurrence };
+		if (touches(changed)) shown.push(changed);
+	}
+	return shown;
+}
+
+/** Changes one showing of a repeating item (tick, drop, move) by writing a one-off change for that day. */
+export function withOccurrence(ics: string, day: string, change: (current: Item) => Partial<Item>): string {
+	const { cal, master, overrides } = parts(ics);
+	if (!master) throw new Error('Nothing to change in this calendar entry');
+	const series = componentToItem(master);
+	const existing = overrides.get(day);
+	const current = existing ? { ...componentToItem(existing), occurrence: day } : showing(series, day);
+	const next: Item = { ...current, ...change(current) };
+	delete next.recurrence;
+	delete next.occurrence;
+	delete next.seriesStart;
+
+	const comp = itemComponent(next);
+	addSeriesDay(comp, 'recurrence-id', master, day);
+
+	if (existing) cal.removeSubcomponent(existing);
+	cal.addSubcomponent(comp);
+	return cal.toString();
+}
+
+/** Removes one showing of a repeating item, leaving the rest of the series. */
+export function withoutOccurrence(ics: string, day: string): string {
+	const { cal, master, overrides } = parts(ics);
+	if (!master) throw new Error('Nothing to change in this calendar entry');
+	const existing = overrides.get(day);
+	if (existing) cal.removeSubcomponent(existing);
+	addSeriesDay(master, 'exdate', master, day);
+	return cal.toString();
+}
+
+/** Names one day of a series the standard way: the series' start time and time zone, on that day. */
+function addSeriesDay(comp: ICAL.Component, name: string, master: ICAL.Component, day: string) {
+	const start = master.getFirstProperty('dtstart');
+	if (!start) throw new Error('A repeating item needs a start');
+	const value = (start.getFirstValue() as ICAL.Time).clone();
+	const [y, m, d] = day.split('-').map(Number);
+	value.year = y;
+	value.month = m;
+	value.day = d;
+	const prop = comp.addPropertyWithValue(name, value);
+	const tzid = start.getParameter('tzid');
+	if (tzid) prop.setParameter('tzid', tzid);
 }
 
 function componentToItem(comp: ICAL.Component): Item {

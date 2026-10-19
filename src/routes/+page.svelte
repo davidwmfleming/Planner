@@ -5,6 +5,7 @@
 	import { addDays } from '$lib/dates';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
 	import type { Item } from '$lib/item';
+	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount } from 'svelte';
 	import type { PageProps } from './$types';
 
@@ -71,19 +72,23 @@
 	<li class={item.state}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
+			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}">{item.state === 'done' ? '✓' : ''}</button>
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
 		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
+			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="act" name="state" value="dropped" aria-label="{item.state === 'dropped' ? 'Restore' : 'Drop'} {item.title}">✕</button>
 		</form>
 		{#if item.kind === 'task' && date}
 			<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
 				<input type="hidden" name="uid" value={item.uid} />
+			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
 			</form>
 		{/if}
@@ -189,6 +194,7 @@
 		{#key editing.uid}
 			<form method="POST" action="?page={data.start}&/save" use:enhance={closeOnSuccess}>
 				<input type="hidden" name="uid" value={editing.uid} />
+				{#if editing.occurrence}<input type="hidden" name="occurrence" value={editing.occurrence} />{/if}
 				<h2 class="sheet-title">Details</h2>
 				<label class="field">Title <input name="title" id="f-title" value={editing.title} required /></label>
 				<fieldset class="field">
@@ -199,7 +205,7 @@
 					</div>
 				</fieldset>
 				<div class="row2">
-					<label class="field">Date <input type="date" name="date" id="f-date" value={editing.date ?? ''} /></label>
+					<label class="field">{editing.recurrence ? 'Starts' : 'Date'} <input type="date" name="date" id="f-date" value={editing.seriesStart ?? editing.date ?? ''} /></label>
 					<label class="field">Time <input type="time" name="time" id="f-time" value={editing.time ?? ''} /></label>
 				</div>
 				<div class="row2">
@@ -213,12 +219,28 @@
 						</select>
 					</label>
 				</div>
+				<label class="field">Repeats
+					<select name="repeat" id="f-repeat" value={repeatChoice(editing.recurrence)}>
+						{#each REPEATS as r (r.value)}<option value={r.value}>{r.name}</option>{/each}
+						{#if repeatChoice(editing.recurrence) === 'custom'}<option value="custom">As set on another device</option>{/if}
+					</select>
+				</label>
 				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
 				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
 				{#if form?.message}<p class="error" role="alert">{form.message}</p>{/if}
-				<p class="hint">Leave the date empty to keep a task unscheduled. Repeating items arrive in a later step.</p>
+				<p class="hint">
+					Leave the date empty to keep a task unscheduled.
+					{#if editing.recurrence}Changes here apply to every day it repeats; tick, ✕ and → change just one day.{/if}
+				</p>
 				<div class="actions">
-					<button class="btn" formaction="?page={data.start}&/delete" formnovalidate>Delete</button>
+					{#if editing.occurrence}
+						<span class="actions-left">
+							<button class="btn" formaction="?page={data.start}&/deleteOne" formnovalidate>Delete this day</button>
+							<button class="btn" formaction="?page={data.start}&/delete" formnovalidate>Delete all</button>
+						</span>
+					{:else}
+						<button class="btn" formaction="?page={data.start}&/delete" formnovalidate>Delete</button>
+					{/if}
 					<span class="actions-right">
 						<button type="button" class="btn" onclick={() => sheet?.close()}>Cancel</button>
 						<button class="btn primary">Save</button>
@@ -362,12 +384,13 @@
 	.seg { display: flex; gap: 0.4rem; }
 	.seg label { display: flex; gap: 0.3rem; align-items: center; border: 2px solid var(--ink); border-radius: 6px; padding: 0 0.7rem; min-height: 44px; color: var(--ink); font-size: 1rem; font-weight: 400; }
 	.actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; }
-	.actions-right { display: flex; gap: 0.5rem; }
+	.actions-left, .actions-right { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	button.btn { cursor: pointer; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+	.repeat { font-size: 0.8rem; color: var(--muted); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: 1fr; }
