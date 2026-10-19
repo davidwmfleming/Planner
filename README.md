@@ -24,3 +24,7 @@ Open the planner's address in the browser, then add it to the home screen: in Ch
 ## Work events
 
 Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Set `WORK_CALENDAR` in `.env` to use a different calendar name.
+
+## Temporary test copy on NearlyFreeSpeech.NET
+
+Until the home server is running, a test copy with **sample data only** can run on a NearlyFreeSpeech.NET site. It is on the open internet, so it sits behind a password (`TEST_PASSWORD`, checked by the browser's own password prompt) and must never hold real calendars. Over SSH on the site run `sh nfsn-setup.sh your-site.nfshost.com` (the script is `scripts/nfsn-setup.sh`); it installs and builds everything, makes the passwords, adds sample entries, and prints the three control-panel steps (two daemons and a proxy).
