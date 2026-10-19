@@ -3,6 +3,8 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
 	testDir: 'e2e',
 	use: { baseURL: 'http://localhost:4173' },
+	// On CI, failures also appear as annotations on the pull request.
+	reporter: process.env.CI ? [['github'], ['list']] : 'list',
 	webServer: [
 		{
 			// A seeded Radicale; the app is only started once seeding has printed its summary.
