@@ -5,6 +5,11 @@ hosts = 0.0.0.0:5232
 type = htpasswd
 htpasswd_filename = /data/users
 htpasswd_encryption = sha512
+# Checking a sha512 password takes about half a second, and every calendar request is checked.
+# Remember a good login for an hour so a tick doesn't wait on a dozen of those checks.
+# (The password only changes when the container restarts, which clears this memory.)
+cache_logins = True
+cache_successful_logins_expiry = 3600
 [storage]
 filesystem_folder = /data/collections
 [web]
