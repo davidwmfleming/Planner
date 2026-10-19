@@ -48,9 +48,9 @@
 
 	const pageUrl = (start: string) => `?page=${start}`;
 
-	// Pen (or finger) marks on the page, like on paper: sweep sideways to turn the page, draw ✓ on an item to tick it,
-	// scribble over it to strike it out, or drag it onto another day. The tap buttons all still work.
-	type Active = { id: number; points: Point[]; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
+	// Marks on the page, like on paper: sweep a finger sideways to turn the page; with the pen, draw ✓ on an item to tick it,
+	// scribble over it to strike it out, or drag it onto another day. The pen never scrolls; fingers do. The tap buttons all still work.
+	type Active = { id: number; points: Point[]; pen: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
 	let stroke: Active | null = null;
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
@@ -62,13 +62,18 @@
 	function onStrokeStart(e: PointerEvent) {
 		const target = e.target as HTMLElement;
 		if (!e.isPrimary || target.closest('input, select, textarea, dialog, header, a')) return;
-		// Writing on a line: the pen belongs to the handwriting keyboard, so no marks until the line is left.
-		if (document.activeElement?.classList.contains('entry')) return;
+		// Near a line being written on, the pen belongs to the handwriting keyboard: no marks there.
+		const writing = document.activeElement;
+		if (writing?.classList.contains('entry')) {
+			const r = writing.getBoundingClientRect();
+			if (e.clientY > r.top - 24 && e.clientY < r.bottom + 24) return;
+		}
 		swallowClick = false;
 		const row = target.closest<HTMLElement>('li[data-uid]') ?? undefined;
 		stroke = {
 			id: e.pointerId,
 			points: [{ x: e.clientX, y: e.clientY }],
+			pen: e.pointerType === 'pen',
 			row,
 			uid: row?.dataset.uid,
 			occurrence: row?.dataset.occurrence,
@@ -101,7 +106,8 @@
 		const item = done.uid ? { uid: done.uid, ...(done.occurrence ? { occurrence: done.occurrence } : {}) } : undefined;
 		if (item && target) return send('move', { ...item, to: target });
 		const read = readStroke(done.points);
-		if (read === 'next' || read === 'previous') return goto(pageUrl(read === 'next' ? data.next : data.previous));
+		// Fingers (and a mouse) turn pages; the pen only makes marks, so a sloppy scribble never flips the page.
+		if (read === 'next' || read === 'previous') return done.pen ? undefined : goto(pageUrl(read === 'next' ? data.next : data.previous));
 		if (!item) return;
 		const row = done.row;
 		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
@@ -115,7 +121,9 @@
 	}
 	// A pen stroke shouldn't also scroll the page (fingers still scroll). Pointer events can't stop that; touch events can.
 	function holdPagePen(e: TouchEvent) {
-		if (stroke && e.cancelable && [...e.touches].some((t) => (t as Touch & { touchType?: string }).touchType === 'stylus')) e.preventDefault();
+		// Some tablets (the ViWoods among them) don't mark pen touches as a stylus, so go by the pointer that started the stroke.
+		const stylus = [...e.touches].some((t) => (t as Touch & { touchType?: string }).touchType === 'stylus');
+		if (stroke && e.cancelable && (stroke.pen || stylus)) e.preventDefault();
 	}
 	// The stroke has done its job; don't let it also count as a tap on whatever it ended on.
 	function afterStroke(e: MouseEvent) {
@@ -188,14 +196,18 @@
 		const tapped = e.relatedTarget instanceof HTMLElement && e.relatedTarget !== document.body ? e.relatedTarget : undefined;
 		if (!form) return;
 		// Wait a moment: a handwriting keyboard can take focus briefly mid-word, and the line must not be saved under it.
-		setTimeout(() => {
-			if (document.activeElement === input || !document.hasFocus()) return;
+		const decide = () => {
+			if (document.activeElement === input) return;
+			input.classList.remove('writing');
+			// The whole page lost focus (another app or the keyboard): decide when it comes back.
+			if (!document.hasFocus()) return void addEventListener('focus', () => setTimeout(decide, LEAVE_DELAY), { once: true });
 			if (!saving.has(form) && !input.value.trim()) return;
 			if (tapped) tappedTo.set(form, tapped);
 			if (saving.has(form)) return;
 			left.add(form);
 			form.requestSubmit();
-		}, LEAVE_DELAY);
+		};
+		setTimeout(decide, LEAVE_DELAY);
 	}
 
 	function onJump(e: Event) {
@@ -253,6 +265,7 @@
 			<input type="hidden" name="date" value={date} />
 			<input
 				class="entry"
+				onfocus={(e) => e.currentTarget.classList.add('writing')}
 				onblur={saveOnLeave}
 				name="text"
 				id="add-{kind}-{date || 'unscheduled'}"
@@ -494,8 +507,10 @@
 		min-height: var(--line);
 	}
 	.entry::placeholder { color: var(--muted); opacity: 0.6; font-size: 0.85rem; }
-	/* A line being written on opens up, so there's room for handwriting. */
-	.entry:focus { background: var(--wash); outline-offset: 0; min-height: calc(var(--line) * 2.2); font-size: 1.15rem; }
+	.entry:focus { background: var(--wash); outline-offset: 0; }
+	/* A line being written on opens up, so there's room for handwriting. It closes a moment after you leave it,
+	   so the page doesn't shift under a tap that is still landing. */
+	.entry.writing { min-height: calc(var(--line) * 2.2); font-size: 1.15rem; }
 	button.title {
 		font: inherit;
 		text-align: left;

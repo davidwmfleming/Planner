@@ -25,6 +25,11 @@ describe('readStroke', () => {
 		expect(readStroke(scribble(6, 60))).toBe('scratch');
 	});
 
+	it('a zig-zag up and down, moving along the line, is a scratch-out', () => {
+		const zigzag = Array.from({ length: 8 }, (_, i) => line({ x: 100 + i * 20, y: i % 2 ? 330 : 300 }, { x: 120 + i * 20, y: i % 2 ? 300 : 330 })).flat();
+		expect(readStroke(zigzag)).toBe('scratch');
+	});
+
 	it('two passes are not enough for a scratch-out', () => {
 		expect(readStroke(scribble(2))).not.toBe('scratch');
 	});

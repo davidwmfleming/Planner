@@ -92,3 +92,20 @@ test('a tap that wobbles a little is still a tap', async ({ page }, info) => {
 	await draw(page, [[x, y], [x + 1, y + 1], [x + 2, y], [x + 1, y + 2]]);
 	await expect(row).toHaveClass(/done/);
 });
+
+test('a check mark works straight after writing on a line, away from that line', async ({ page }, info) => {
+	const name = unique('Post the parcel', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	// Still writing on Wednesday's line; the ✓ goes on Monday's item, and the line saves itself.
+	const { wed } = futureWeek();
+	const line = page.locator(`#add-task-${wed}`);
+	await line.fill(`Next thing ${name}`);
+	await expect(line).toBeFocused();
+	await onScreen(row);
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await expect(row).toHaveClass(/done/);
+	await expect(page.locator(`section.day[data-date="${wed}"]`).getByText(`Next thing ${name}`)).toBeVisible();
+});
