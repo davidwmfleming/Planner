@@ -1,0 +1,30 @@
+/* One notebook page: days stacked top to bottom, events left, tasks right, ruled lines.
+   Built for e-ink first: black on white, no motion, large tap targets. */
+:root {
+	--paper: #ffffff;
+	--ink: #15171c;
+	--pen: #1d3a8f;
+	--muted: #5d6676;
+	--rule: #c7d2e2;
+	--wash: #eef2f8;
+	--line: 2.1rem;
+	--font: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		--paper: #121419;
+		--ink: #e9ebf0;
+		--pen: #9db2ff;
+		--muted: #9aa3b3;
+		--rule: #2b3342;
+		--wash: #1b2029;
+		color-scheme: dark;
+	}
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--paper); color: var(--ink); font-family: var(--font); font-size: 17px; line-height: 1.35; }
+a { color: inherit; }
+:focus-visible { outline: 3px solid var(--pen); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
