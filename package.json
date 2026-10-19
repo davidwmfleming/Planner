@@ -12,13 +12,16 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
-		"lint": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings"
+		"lint": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+		"calendar": "bash scripts/dev-calendar.sh",
+		"seed": "vite-node scripts/seed-dev.ts"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.56.1",
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/kit": "^2.22.0",
 		"@sveltejs/vite-plugin-svelte": "^6.0.0",
+		"@types/node": "^22.20.5",
 		"svelte": "^5.0.0",
 		"svelte-check": "^4.0.0",
 		"typescript": "^5.0.0",
