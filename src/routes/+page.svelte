@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
+	import { addDays } from '$lib/dates';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
 	import type { PageProps } from './$types';
 
@@ -32,6 +33,29 @@
 		if (value) goto(pageUrl(value));
 	}
 </script>
+
+{#snippet itemRow(item: (typeof data.days)[number]['events'][number], date: string)}
+	<li class={item.state}>
+		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
+			<input type="hidden" name="uid" value={item.uid} />
+			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}">{item.state === 'done' ? '✓' : ''}</button>
+		</form>
+		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
+		<span class="title">{item.title}</span>
+		{#if item.label}<span class="tag">{{ month: 'This month', waiting: 'Waiting', someday: 'Someday' }[item.label]}</span>{/if}
+		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
+		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
+			<input type="hidden" name="uid" value={item.uid} />
+			<button class="act" name="state" value="dropped" aria-label="{item.state === 'dropped' ? 'Restore' : 'Drop'} {item.title}">✕</button>
+		</form>
+		{#if item.kind === 'task'}
+			<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
+				<input type="hidden" name="uid" value={item.uid} />
+				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
+			</form>
+		{/if}
+	</li>
+{/snippet}
 
 {#snippet blankLine(kind: 'event' | 'task', date: string)}
 	<li class="blank">
@@ -80,11 +104,7 @@
 						<h2>Events</h2>
 						<ul class="lines">
 							{#each day.events as item (item.uid)}
-								<li class={item.state}>
-									<span class="box" aria-label={item.state === 'done' ? 'Done' : 'Not done'}>{item.state === 'done' ? '✓' : ''}</span>
-									{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else}<span class="allday">All day</span>{/if}
-									<span class="title">{item.title}</span>
-								</li>
+								{@render itemRow(item, day.date)}
 							{/each}
 							{@render blankLine('event', day.date)}
 						</ul>
@@ -93,13 +113,7 @@
 						<h2>Tasks</h2>
 						<ul class="lines">
 							{#each day.tasks as item (item.uid)}
-								<li class={item.state}>
-									<span class="box" aria-label={item.state === 'done' ? 'Done' : 'Not done'}>{item.state === 'done' ? '✓' : ''}</span>
-									{#if item.time}<span class="time">{formatTime(item.time)}</span>{/if}
-									<span class="title">{item.title}</span>
-									{#if item.label}<span class="tag">{{ month: 'This month', waiting: 'Waiting', someday: 'Someday' }[item.label]}</span>{/if}
-									{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
-								</li>
+								{@render itemRow(item, day.date)}
 							{/each}
 							{@render blankLine('task', day.date)}
 						</ul>
@@ -161,7 +175,18 @@
 	h2 { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; font-weight: 700; }
 	.lines { list-style: none; margin: 0; padding: 0; }
 	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 0.45rem; }
-	.box { width: 1.25rem; height: 1.25rem; border: 2px solid var(--pen); border-radius: 3px; flex: none; display: grid; place-items: center; font-weight: 800; font-size: 0.95rem; line-height: 1; color: var(--pen); }
+	.inline { display: contents; }
+	.act {
+		font: inherit;
+		background: none;
+		border: 0;
+		color: var(--muted);
+		min-width: 2.2rem;
+		min-height: var(--line);
+		padding: 0;
+		cursor: pointer;
+	}
+	.box { cursor: pointer; padding: 0; background: var(--paper); width: 1.25rem; height: 1.25rem; border: 2px solid var(--pen); border-radius: 3px; flex: none; display: grid; place-items: center; font-weight: 800; font-size: 0.95rem; line-height: 1; color: var(--pen); }
 	.time { font-variant-numeric: tabular-nums; color: var(--pen); font-weight: 700; min-width: 4.4em; font-size: 0.92rem; }
 	.allday { color: var(--pen); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 4.4em; }
 	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }

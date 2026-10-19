@@ -1,0 +1,39 @@
+import { expect, test } from '@playwright/test';
+
+test('tick, drop and move a task with one tap each', async ({ page }, info) => {
+	const name = `Water plants ${info.project.name}`;
+	await page.goto('/?page=2026-10-19');
+	const monday = page.locator('section.day[data-date="2026-10-19"]');
+	const tuesday = page.locator('section.day[data-date="2026-10-20"]');
+	const line = page.locator('#add-task-2026-10-19');
+	await line.fill(name);
+	await line.press('Enter');
+	const row = monday.locator('li', { hasText: name });
+	await expect(row).toBeVisible();
+
+	await row.getByRole('button', { name: `Tick ${name}` }).click();
+	await expect(row).toHaveClass(/done/);
+	await row.getByRole('button', { name: `Untick ${name}` }).click();
+	await expect(row).toHaveClass(/open/);
+
+	await row.getByRole('button', { name: `Drop ${name}` }).click();
+	await expect(row).toHaveClass(/dropped/);
+	await row.getByRole('button', { name: `Restore ${name}` }).click();
+	await expect(row).toHaveClass(/open/);
+
+	await row.getByRole('button', { name: `Move ${name} to the next day` }).click();
+	await expect(monday.getByText(name)).toHaveCount(0);
+	await expect(tuesday.getByText(name)).toBeVisible();
+});
+
+test('an event can be ticked or dropped but not moved with the arrow', async ({ page }, info) => {
+	const name = `Haircut ${info.project.name}`;
+	await page.goto('/?page=2026-10-19');
+	const line = page.locator('#add-event-2026-10-19');
+	await line.fill(`10am ${name}`);
+	await line.press('Enter');
+	const row = page.locator('section.day[data-date="2026-10-19"] li', { hasText: name });
+	await expect(row.getByRole('button', { name: `Tick ${name}` })).toBeVisible();
+	await expect(row.getByRole('button', { name: `Drop ${name}` })).toBeVisible();
+	await expect(row.getByRole('button', { name: /Move/ })).toHaveCount(0);
+});
