@@ -1,8 +1,9 @@
-import { error } from '@sveltejs/kit';
+import { error, fail } from '@sveltejs/kit';
 import { flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
 import { buildDays } from '$lib/page';
-import { getStore } from '$lib/server/store';
-import type { PageServerLoad } from './$types';
+import { parseLine } from '$lib/parse';
+import { defaultCalendarUrl, getStore } from '$lib/server/store';
+import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -32,4 +33,22 @@ export const load: PageServerLoad = async ({ url }) => {
 			tasks: d.tasks.map(({ calendarUrl, url, etag, ...i }) => i)
 		}))
 	};
+};
+
+export const actions: Actions = {
+	/** A line written on a day: left column makes an event, right column a task. */
+	add: async ({ request }) => {
+		const form = await request.formData();
+		const kind = form.get('kind');
+		const date = String(form.get('date') ?? '');
+		const text = String(form.get('text') ?? '');
+		if (kind !== 'event' && kind !== 'task') return fail(400, { message: 'Choose the events or tasks column' });
+		if (!ISO.test(date)) return fail(400, { message: 'That day is not a valid date' });
+		const { title, time } = parseLine(text);
+		if (!title) return fail(400, { message: 'Write something on the line first' });
+
+		const store = await getStore();
+		await store.create(defaultCalendarUrl(store, kind), { uid: crypto.randomUUID(), kind, title, date, time, state: 'open' });
+		return { added: title };
+	}
 };

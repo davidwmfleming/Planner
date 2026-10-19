@@ -1,5 +1,7 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
 	import { goto } from '$app/navigation';
+	import type { SubmitFunction } from '@sveltejs/kit';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
 	import type { PageProps } from './$types';
 
@@ -19,11 +21,35 @@
 		swipeStart = null;
 		if (Math.abs(dx) > 80 && Math.abs(dy) < Math.abs(dx) * 0.6) goto(pageUrl(dx < 0 ? data.next : data.previous));
 	}
+	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
+	const keepWriting: SubmitFunction = () => async ({ update, formElement }) => {
+		await update();
+		formElement.querySelector<HTMLInputElement>('input[name="text"]')?.focus();
+	};
+
 	function onJump(e: Event) {
 		const value = (e.currentTarget as HTMLInputElement).value;
 		if (value) goto(pageUrl(value));
 	}
 </script>
+
+{#snippet blankLine(kind: 'event' | 'task', date: string)}
+	<li class="blank">
+		<form method="POST" action="?page={data.start}&/add" use:enhance={keepWriting}>
+			<input type="hidden" name="kind" value={kind} />
+			<input type="hidden" name="date" value={date} />
+			<input
+				class="entry"
+				name="text"
+				id="add-{kind}-{date}"
+				autocomplete="off"
+				enterkeyhint="done"
+				placeholder={kind === 'event' ? 'add event' : 'add task'}
+				aria-label="Add {kind} on {date}"
+			/>
+		</form>
+	</li>
+{/snippet}
 
 <svelte:head>
 	<title>Planner · {monthYear(data.start)}</title>
@@ -60,6 +86,7 @@
 									<span class="title">{item.title}</span>
 								</li>
 							{/each}
+							{@render blankLine('event', day.date)}
 						</ul>
 					</div>
 					<div class="col">
@@ -74,6 +101,7 @@
 									{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 								</li>
 							{/each}
+							{@render blankLine('task', day.date)}
 						</ul>
 					</div>
 				</div>
@@ -139,6 +167,19 @@
 	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
 	li.done .title, li.done .time { color: var(--muted); }
 	li.dropped .title, li.dropped .time { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
+	.blank form { flex: 1; display: flex; }
+	.entry {
+		flex: 1;
+		min-width: 0;
+		font: inherit;
+		color: var(--pen);
+		background: transparent;
+		border: 0;
+		padding: 0.2rem 0;
+		min-height: var(--line);
+	}
+	.entry::placeholder { color: var(--muted); opacity: 0.6; font-size: 0.85rem; }
+	.entry:focus { background: var(--wash); outline-offset: 0; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	@media (max-width: 520px) {
