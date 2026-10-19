@@ -1,0 +1,21 @@
+import { expect, test } from '@playwright/test';
+import { futureWeek } from './dates';
+import { unique } from './unique';
+
+const { wed } = futureWeek();
+
+test('one tap sends a task from its day back to Not scheduled', async ({ page }, info) => {
+	const name = unique('Sort the garage', info);
+	await page.goto(`/?page=${wed}`);
+	await page.locator(`#add-task-${wed}`).fill(name);
+	await page.locator(`#add-task-${wed}`).press('Enter');
+	const row = page.locator(`section.day[data-date="${wed}"] li`, { hasText: name });
+	await row.getByRole('button', { name: `Put ${name} back on Not scheduled` }).click();
+	await expect(row).toHaveCount(0);
+
+	const list = page.getByRole('region', { name: 'Not scheduled' });
+	if ((await list.getByRole('button', { name: /Show not scheduled/ }).count()) > 0) {
+		await list.getByRole('button', { name: /Show not scheduled/ }).click();
+	}
+	await expect(list.getByRole('button', { name: `Details for ${name}` })).toBeVisible();
+});

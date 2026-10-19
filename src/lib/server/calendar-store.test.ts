@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CalendarStore } from './calendar-store';
+import { occurrencesBetween } from './ical';
 
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
 const PORT = 5299;
@@ -71,5 +72,19 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		const stale = (await store.listItems()).find((i) => i.uid === 'tk-2')!;
 		await store.update(stale, { title: 'Wash sheets' });
 		await expect(store.update(stale, { title: 'Change sheets' })).rejects.toThrow(/reload/);
+	});
+
+	it('changes one day of a repeating event and keeps that change when the series is renamed', async () => {
+		const personal = await store.ensureCalendar('Personal', ['event']);
+		await store.create(personal.url, { uid: 'rp-1', kind: 'event', title: 'Lift', date: '2026-10-05', time: '06:30', state: 'open', recurrence: 'FREQ=WEEKLY' });
+		const find = async () => (await store.listItems()).find((i) => i.uid === 'rp-1')!;
+
+		await store.updateOccurrence(await find(), '2026-10-19', () => ({ state: 'done' }));
+		await store.update(await find(), { title: 'Gym' });
+		const shown = occurrencesBetween((await find()).ics, '2026-10-12', '2026-10-19');
+		expect(shown.map((i) => [i.date, i.title, i.state])).toEqual([
+			['2026-10-12', 'Gym', 'open'],
+			['2026-10-19', 'Gym', 'done']
+		]);
 	});
 });
