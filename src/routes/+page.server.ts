@@ -6,7 +6,7 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
-import { defaultCalendarUrl, getStore } from '$lib/server/store';
+import { defaultCalendarUrl, getStore, workCalendarName } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -21,16 +21,24 @@ export const load: PageServerLoad = async ({ url }) => {
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
 
-	let items;
+	let items, store;
 	try {
 		await rollover(today);
-		items = await (await getStore()).listItems();
+		store = await getStore();
+		items = await store.listItems();
 	} catch (e) {
 		error(503, `The calendar server isn't answering. Check that it is running, then reload. (${(e as Error).message})`);
 	}
 
+	const calendars = store.calendars();
+	const calendarName = (url: string) => calendars.find((c) => c.url === url)?.name;
+	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).map((c) => c.name);
+
 	return {
 		today,
+		eventCalendars,
+		defaultEventCalendar: calendarName(defaultCalendarUrl(store, 'event')),
+		workCalendar: workCalendarName(),
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -41,7 +49,12 @@ export const load: PageServerLoad = async ({ url }) => {
 			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
 			.map(plain),
 		// A repeating item shows on each day of the page it falls on.
-		days: buildDays(dates, items.flatMap((i) => (i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]))).map((d) => ({
+		days: buildDays(
+			dates,
+			items.flatMap((i) =>
+				(i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]).map((shown) => ({ ...shown, calendar: calendarName(i.calendarUrl) }))
+			)
+		).map((d) => ({
 			...d,
 			events: d.events.map(plain),
 			tasks: d.tasks.map(plain)
@@ -102,6 +115,17 @@ export const actions: Actions = {
 		else await store.update(item, moveTo(item));
 	},
 
+	/** Takes a task off its day and puts it back on the Not scheduled list. */
+	unschedule: async ({ request }) => {
+		const form = await request.formData();
+		const found = await findItem(String(form.get('uid') ?? ''));
+		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const { store, item } = found;
+		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Not scheduled' });
+		const { date, time, carriedFrom, ...rest } = item;
+		await store.replace(item, rest);
+	},
+
 	/** The details sheet: edit any field, switch between event and task. */
 	save: async ({ request }) => {
 		const form = await request.formData();
@@ -115,12 +139,15 @@ export const actions: Actions = {
 			repeat: field('repeat')
 		});
 		if ('error' in result) return fail(400, { message: result.error });
-		if (result.item.kind === item.kind) {
+		// Events can be filed in any calendar that takes events (Personal, Family, Work…).
+		const wanted = result.item.kind === 'event' ? store.calendars().find((c) => c.name === field('calendar') && c.accepts.includes('event')) : undefined;
+		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind));
+		if (result.item.kind === item.kind && target === item.calendarUrl) {
 			// Fields left blank are removed, so save the whole item rather than a merge.
 			await store.replace(item, result.item);
 		} else {
-			// Events and tasks are different kinds of calendar entry: write the new one, then remove the old.
-			await store.create(defaultCalendarUrl(store, result.item.kind), result.item);
+			// A different calendar, or events and tasks (different kinds of entry): write the new one, then remove the old.
+			await store.create(target, result.item, result.item.kind === item.kind ? item.ics : undefined);
 			await store.remove(item);
 		}
 	},

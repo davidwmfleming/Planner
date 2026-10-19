@@ -7,6 +7,7 @@
 	--muted: #5d6676;
 	--rule: #c7d2e2;
 	--wash: #eef2f8;
+	--work: #fde4e4;
 	--line: 2.1rem;
 	--font: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 	color-scheme: light;
@@ -19,6 +20,7 @@
 		--muted: #9aa3b3;
 		--rule: #2b3342;
 		--wash: #1b2029;
+		--work: #3b2224;
 		color-scheme: dark;
 	}
 }

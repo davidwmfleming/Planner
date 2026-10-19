@@ -12,11 +12,18 @@ export function getStore(): Promise<CalendarStore> {
 			username: env.CALDAV_USER ?? 'david',
 			password: env.CALDAV_PASSWORD ?? 'dev'
 		});
-		store = s.connect().then(() => s);
+		store = s.connect().then(async () => {
+			// The Work calendar is where work meetings are entered by hand; make sure it exists.
+			await s.ensureCalendar(workCalendarName(), ['event']).catch((e) => console.error('Could not create the Work calendar', e));
+			return s;
+		});
 		store.catch(() => (store = undefined)); // retry on the next request if the server was down
 	}
 	return store;
 }
+
+/** The calendar whose events are shown as work meetings (light red, tagged Work). */
+export const workCalendarName = () => env.WORK_CALENDAR ?? 'Work';
 
 /** Where new items go: the calendar named in the environment, else the first one that accepts the kind. */
 export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind): string {
