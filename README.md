@@ -42,4 +42,3 @@ The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to An
 
 - **iPhone:** Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add CalDAV Account. Server: the planner's address without `https://`; then the user name and the calendar password.
 - **Mac:** Calendar → Settings → Accounts → + → Other CalDAV Account. Account type: Manual; server address: `https://<planner address>/dav/`.
-- **Trying it on a Mac:** with `npm run calendar` and `npm run dev` running, add a CalDAV account in Calendar (Manual) with server address `http://localhost:5173/dav/`, user `david`, password `dev`.
