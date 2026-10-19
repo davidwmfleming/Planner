@@ -46,6 +46,17 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		expect((await store.ensureCalendar('Personal', ['event'])).url).toBe(personal.url);
 	});
 
+	it('renames a calendar and keeps what is in it', async () => {
+		const old = await store.ensureCalendar('Old name', ['event']);
+		await store.create(old.url, { uid: 'rn-1', kind: 'event', title: 'Swim', date: '2026-10-22', state: 'open' });
+		await store.renameCalendar('Old name', 'Workouts & runs');
+		const renamed = store.calendars().find((c) => c.url === old.url);
+		expect(renamed?.name).toBe('Workouts & runs');
+		expect(store.calendars().some((c) => c.name === 'Old name')).toBe(false);
+		expect((await store.listItems()).find((i) => i.uid === 'rn-1')?.calendarUrl).toBe(old.url);
+		await store.renameCalendar('Not there', 'Anything'); // quietly does nothing
+	});
+
 	it('saves, reads back, updates and deletes events and tasks', async () => {
 		const personal = await store.ensureCalendar('Personal', ['event']);
 		const tasks = await store.ensureCalendar('Tasks', ['task']);

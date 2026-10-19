@@ -22,10 +22,11 @@ ViWoods / phone / Mac browser
 
 | Collection | Type | Who sees it |
 | --- | --- | --- |
-| Personal | events | David |
+| Me | events | David |
 | Family | events | David and his wife (shared) |
-| School meals | events | David and his wife |
+| Morgan Meals | events | David and his wife |
 | Workouts | events | David |
+| Work | events (entered by hand, shaded light red) | David |
 | Tasks | tasks | David |
 
 ## How planner items map to the .ics standard
@@ -33,7 +34,7 @@ ViWoods / phone / Mac browser
 | Planner | Stored as |
 | --- | --- |
 | Event (left column) | VEVENT with DTSTART (date or date-time), optional DTEND, LOCATION, RRULE |
-| Task (right column) | VTODO with optional DTSTART (the day and start time); no date = not scheduled |
+| Task (right column) | VTODO with optional DTSTART (the day and start time); no date = a future task |
 | Done | VTODO STATUS:COMPLETED + COMPLETED timestamp (events: X-PLANNER-TICKED) |
 | Dropped | STATUS:CANCELLED |
 | This month / Waiting on / Someday | CATEGORIES |
@@ -73,7 +74,7 @@ Each is one small PR with its own tests. 1–11 can be done before the server ar
 5. **Line entry**: tap a blank line, type, Enter; the time parser from the prototype with its tests.
 6. **Quick actions**: tick done, ✕ drop, → next day, and Today/Sat pulls.
 7. **Details sheet**: edit title, date, time, end time, location, list, notes; switch event ↔ task; delete.
-8. **Not scheduled panel**: hidden by default, with Today and Sat buttons.
+8. **Future tasks panel** (first called Not scheduled): hidden by default, with Today and Sat buttons.
 9. **Rollover**: nightly job plus a check on every page load; carried-over marker.
 10. **Repeating items**: show recurring events and tasks; create them from the details sheet. Tick, ✕ and → change one day (a standard one-off change, RECURRENCE-ID); the sheet edits the whole series; "Delete this day" skips one day (EXDATE). Edits keep one-off changes made on phones.
 11. **E-ink and phone polish**: installable app (PWA), large tap targets, no animation, fast page flips; QA on tablet and phone sizes.

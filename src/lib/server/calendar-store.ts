@@ -91,6 +91,23 @@ export class CalendarStore {
 		return created;
 	}
 
+	/** Changes a calendar's display name; its address and contents stay the same. Does nothing if it isn't there. */
+	async renameCalendar(from: string, to: string): Promise<void> {
+		const calendar = this.calendars().find((c) => c.name === from);
+		if (!calendar) return;
+		const escaped = to.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		const response = await fetch(calendar.url, {
+			method: 'PROPPATCH',
+			headers: {
+				Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
+				'Content-Type': 'application/xml; charset=utf-8'
+			},
+			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>${escaped}</d:displayname></d:prop></d:set></d:propertyupdate>`
+		});
+		if (!response.ok) throw new Error(`The calendar server refused to rename "${from}" (${response.status})`);
+		await this.refreshCalendars();
+	}
+
 	async listItems(): Promise<StoredItem[]> {
 		const all: StoredItem[] = [];
 		for (const calendar of this.davCalendars) {

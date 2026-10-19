@@ -10,8 +10,8 @@ const store = new CalendarStore({
 	password: process.env.CALDAV_PASSWORD ?? 'dev'
 });
 await store.connect();
-const personal = await store.ensureCalendar('Personal', ['event']);
-await store.ensureCalendar('Family', ['event']);
+const me = await store.ensureCalendar('Me', ['event']);
+for (const name of ['Family', 'Workouts', 'Morgan Meals']) await store.ensureCalendar(name, ['event']);
 const work = await store.ensureCalendar('Work', ['event']);
 const tasks = await store.ensureCalendar('Tasks', ['task']);
 
@@ -35,7 +35,7 @@ const todo = [
 	tk(undefined, 'Wills: signing meeting', { label: 'waiting' }), tk(undefined, 'Tax credit: awaiting adjudication', { label: 'waiting' }),
 	tk(undefined, 'French training: waiting to hear', { label: 'waiting' })
 ];
-for (const e of events) await store.create(personal.url, e);
+for (const e of events) await store.create(me.url, e);
 await store.create(work.url, ev(t, 'Economic Modelling', '09:00', { endTime: '10:00' }));
 for (const x of todo) await store.create(tasks.url, x);
 console.log(`Seeded ${events.length} events and ${todo.length} tasks.`);

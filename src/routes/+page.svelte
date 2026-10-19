@@ -14,8 +14,11 @@
 	// The details sheet: tap an item's title to see and edit everything about it.
 	let editing = $state<Item | null>(null);
 	let sheet = $state<HTMLDialogElement>();
+	// Picking "New calendar…" in the sheet asks for its name.
+	let newCalendar = $state(false);
 	function openDetails(item: Item) {
 		editing = item;
+		newCalendar = false;
 		sheet?.showModal();
 	}
 	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
@@ -23,7 +26,7 @@
 		if (result.type === 'success' || result.type === 'redirect') sheet?.close();
 	};
 
-	// "Not scheduled" stays out of the way until asked for; the choice is remembered on this device.
+	// "Future tasks" stays out of the way until asked for; the choice is remembered on this device.
 	let showUnscheduled = $state(false);
 	onMount(() => {
 		try {
@@ -95,7 +98,7 @@
 			{#if !item.recurrence}
 				<form method="POST" action="?page={data.start}&/unschedule" use:enhance class="inline">
 					<input type="hidden" name="uid" value={item.uid} />
-					<button class="act" aria-label="Put {item.title} back on Not scheduled" title="Back to Not scheduled">↩</button>
+					<button class="act" aria-label="Put {item.title} back on Future tasks" title="Back to Future tasks">↩</button>
 				</form>
 			{/if}
 		{/if}
@@ -122,7 +125,7 @@
 				autocomplete="off"
 				enterkeyhint="done"
 				placeholder={kind === 'event' ? 'add event' : 'add task'}
-				aria-label={date ? `Add ${kind} on ${date}` : 'Add a task that is not scheduled'}
+				aria-label={date ? `Add ${kind} on ${date}` : 'Add a future task'}
 			/>
 		</form>
 	</li>
@@ -176,9 +179,9 @@
 		{/each}
 	</main>
 
-	<section class="someday" aria-label="Not scheduled">
+	<section class="someday" aria-label="Future tasks">
 		<button type="button" class="btn wide" aria-expanded={showUnscheduled} onclick={toggleUnscheduled}>
-			{showUnscheduled ? 'Hide' : 'Show'} not scheduled ({data.unscheduled.length})
+			{showUnscheduled ? 'Hide' : 'Show'} future tasks ({data.unscheduled.length})
 		</button>
 		{#if showUnscheduled}
 			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
@@ -228,10 +231,14 @@
 				</div>
 				{#if editing.kind === 'event'}
 					<label class="field">Calendar
-						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar}>
+						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar} onchange={(e) => (newCalendar = e.currentTarget.value === '+new')}>
 							{#each data.eventCalendars as name (name)}<option value={name}>{name}</option>{/each}
+							<option value="+new">New calendar…</option>
 						</select>
 					</label>
+					{#if newCalendar}
+						<label class="field">New calendar's name <input name="newCalendar" id="f-new-calendar" maxlength="40" required /></label>
+					{/if}
 				{/if}
 				<label class="field">Repeats
 					<select name="repeat" id="f-repeat" value={repeatChoice(editing.recurrence)}>
@@ -243,7 +250,7 @@
 				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
 				{#if form?.message}<p class="error" role="alert">{form.message}</p>{/if}
 				<p class="hint">
-					Leave the date empty to keep a task unscheduled.
+					Leave the date empty to keep a task in Future tasks.
 					{#if editing.recurrence}Changes here apply to every day it repeats; tick, ✕ and → change just one day.{/if}
 				</p>
 				<div class="actions">

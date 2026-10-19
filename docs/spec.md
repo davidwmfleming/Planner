@@ -14,7 +14,7 @@
 6. **Tap marks (v1):** tap the box to mark done; a small ✕ button drops an item (shown struck through). Pen gestures come in a later version.
 
 ## Soon after
-- **Not scheduled list:** this month's to-dos, someday items and a "waiting on" list (wills, tax credit, French training). Hidden behind a button at the bottom of the page; each item has one-tap **Today** and **Sat** buttons to pull it onto today or the coming Saturday. (Moved up to day one after prototype feedback.)
+- **Future tasks list** (first called "Not scheduled"): this month's to-dos, someday items and a "waiting on" list (wills, tax credit, French training). Hidden behind a button at the bottom of the page; each item has one-tap **Today** and **Sat** buttons to pull it onto today or the coming Saturday. (Moved up to day one after prototype feedback.)
 - School-meal emails turned into entries on the school calendar automatically.
 - Work Outlook meetings shown as read-only events, if his employer allows a calendar feed.
 
