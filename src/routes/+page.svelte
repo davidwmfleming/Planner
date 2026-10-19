@@ -50,7 +50,7 @@
 
 	// Pen (or finger) marks on the page, like on paper: sweep sideways to turn the page, draw ✓ on an item to tick it,
 	// scribble over it to strike it out, or drag it onto another day. The tap buttons all still work.
-	type Active = { id: number; points: Point[]; uid?: string; occurrence?: string; from?: string; pen: boolean };
+	type Active = { id: number; points: Point[]; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
 	let stroke: Active | null = null;
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
@@ -62,14 +62,15 @@
 	function onStrokeStart(e: PointerEvent) {
 		const target = e.target as HTMLElement;
 		if (!e.isPrimary || target.closest('input, select, textarea, dialog, header, a')) return;
-		const row = target.closest<HTMLElement>('li[data-uid]');
+		swallowClick = false;
+		const row = target.closest<HTMLElement>('li[data-uid]') ?? undefined;
 		stroke = {
 			id: e.pointerId,
 			points: [{ x: e.clientX, y: e.clientY }],
+			row,
 			uid: row?.dataset.uid,
 			occurrence: row?.dataset.occurrence,
-			from: row ? (row.closest<HTMLElement>('section.day')?.dataset.date ?? '') : undefined,
-			pen: e.pointerType === 'pen'
+			from: row ? (row.closest<HTMLElement>('section.day')?.dataset.date ?? '') : undefined
 		};
 	}
 	function onStrokeMove(e: PointerEvent) {
@@ -79,6 +80,10 @@
 			const day = dayAt(e.clientX, e.clientY);
 			dragging = stroke.uid;
 			dropDay = day && day !== stroke.from ? day : null;
+			// Near the top or bottom edge, scroll so a day off screen can be reached (a phone shows only a day or two).
+			const edge = 60;
+			if (e.clientY > innerHeight - edge) scrollBy(0, 24);
+			else if (e.clientY < edge) scrollBy(0, -24);
 		}
 	}
 	function onStrokeEnd(e: PointerEvent) {
@@ -87,7 +92,8 @@
 		onStrokeCancel();
 		if (!done || e.pointerId !== done.id) return;
 		done.points.push({ x: e.clientX, y: e.clientY });
-		if (!movedFar(done.points[0], done.points[done.points.length - 1]) && done.points.length < 4) return;
+		// A tap with a little wobble is still a tap.
+		if (!done.points.some((p) => movedFar(done.points[0], p))) return;
 		swallowClick = true;
 		setTimeout(() => (swallowClick = false), 400);
 		const item = done.uid ? { uid: done.uid, ...(done.occurrence ? { occurrence: done.occurrence } : {}) } : undefined;
@@ -95,7 +101,7 @@
 		const read = readStroke(done.points);
 		if (read === 'next' || read === 'previous') return goto(pageUrl(read === 'next' ? data.next : data.previous));
 		if (!item) return;
-		const row = document.querySelector<HTMLElement>(`li[data-uid="${CSS.escape(item.uid)}"]`);
+		const row = done.row;
 		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
 		if (read === 'tick' && !row?.classList.contains('done')) return send('mark', { ...item, state: 'done' });
 		if (read === 'scratch' && !row?.classList.contains('dropped')) return send('mark', { ...item, state: 'dropped' });
