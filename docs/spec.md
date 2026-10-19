@@ -17,6 +17,9 @@
 - **Future tasks list** (first called "Not scheduled"): this month's to-dos, someday items and a "waiting on" list (wills, tax credit, French training). Hidden behind a button at the bottom of the page; each item has one-tap **Today** and **Sat** buttons to pull it onto today or the coming Saturday. (Moved up to day one after prototype feedback.)
 - School-meal emails turned into entries on the school calendar automatically.
 - Work Outlook meetings shown as read-only events, if his employer allows a calendar feed.
+- **Settings page:** add, rename and delete calendars (events) and the task categories (This month, Waiting, Someday and new ones).
+- **Export and backup:** download everything as standard .ics files that Apple Calendar, Google Calendar or any CalDAV app can import, so moving to another platform stays possible. Plus a nightly backup of the data volume on the server.
+- **Visual polish:** a design pass so the pages look good on e-ink, the phone and the Mac, keeping the paper-planner feel.
 
 ## Non-goals
 - No separate task and event apps: one kind of item, saved in the standard format.
