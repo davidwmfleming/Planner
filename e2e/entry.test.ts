@@ -117,3 +117,19 @@ test('on a slow connection, writing more and tapping another line saves both and
 	await expect(day.getByText(`Rake leaves ${tag}`)).toHaveCount(1);
 	await expect(eventLine).toBeFocused();
 });
+
+test('a line that loses focus for a moment mid-writing is not saved under the pen', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	const taskLine = page.locator(`#add-task-${tue}`);
+	await taskLine.fill(`Half a wor ${tag}`);
+	// The handwriting keyboard takes focus briefly, then gives it back.
+	await taskLine.evaluate((el: HTMLInputElement) => {
+		el.blur();
+		setTimeout(() => el.focus(), 150);
+	});
+	await page.waitForTimeout(1200);
+	await expect(taskLine).toHaveValue(`Half a wor ${tag}`);
+	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: `Half a wor ${tag}` })).toHaveCount(0);
+});

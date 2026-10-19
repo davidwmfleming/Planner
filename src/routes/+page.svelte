@@ -62,6 +62,8 @@
 	function onStrokeStart(e: PointerEvent) {
 		const target = e.target as HTMLElement;
 		if (!e.isPrimary || target.closest('input, select, textarea, dialog, header, a')) return;
+		// Writing on a line: the pen belongs to the handwriting keyboard, so no marks until the line is left.
+		if (document.activeElement?.classList.contains('entry')) return;
 		swallowClick = false;
 		const row = target.closest<HTMLElement>('li[data-uid]') ?? undefined;
 		stroke = {
@@ -147,6 +149,7 @@
 	// Tapping away from a line saves it too, so handwriting needs no Enter. The cursor then stays where you tapped.
 	// The line is cleared as soon as it is sent, so you can keep writing while it saves; if saving fails, the words come back.
 	// (Saving redraws the page, which can drop focus, so focus is put back on purpose.)
+	const LEAVE_DELAY = 700;
 	const saving = new Set<HTMLFormElement>();
 	const left = new Set<HTMLFormElement>();
 	const tappedTo = new Map<HTMLFormElement, HTMLElement>();
@@ -180,12 +183,19 @@
 	};
 	function saveOnLeave(e: FocusEvent) {
 		const input = e.currentTarget as HTMLInputElement;
-		if (!input.form || (!saving.has(input.form) && !input.value.trim())) return;
+		const form = input.form;
 		// SvelteKit parks focus on the page body while it redraws; that isn't a tap.
-		if (e.relatedTarget instanceof HTMLElement && e.relatedTarget !== document.body) tappedTo.set(input.form, e.relatedTarget);
-		if (saving.has(input.form)) return;
-		left.add(input.form);
-		input.form.requestSubmit();
+		const tapped = e.relatedTarget instanceof HTMLElement && e.relatedTarget !== document.body ? e.relatedTarget : undefined;
+		if (!form) return;
+		// Wait a moment: a handwriting keyboard can take focus briefly mid-word, and the line must not be saved under it.
+		setTimeout(() => {
+			if (document.activeElement === input || !document.hasFocus()) return;
+			if (!saving.has(form) && !input.value.trim()) return;
+			if (tapped) tappedTo.set(form, tapped);
+			if (saving.has(form)) return;
+			left.add(form);
+			form.requestSubmit();
+		}, LEAVE_DELAY);
 	}
 
 	function onJump(e: Event) {
@@ -484,7 +494,8 @@
 		min-height: var(--line);
 	}
 	.entry::placeholder { color: var(--muted); opacity: 0.6; font-size: 0.85rem; }
-	.entry:focus { background: var(--wash); outline-offset: 0; }
+	/* A line being written on opens up, so there's room for handwriting. */
+	.entry:focus { background: var(--wash); outline-offset: 0; min-height: calc(var(--line) * 2.2); font-size: 1.15rem; }
 	button.title {
 		font: inherit;
 		text-align: left;
