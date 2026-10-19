@@ -13,8 +13,12 @@ export function getStore(): Promise<CalendarStore> {
 			password: env.CALDAV_PASSWORD ?? 'dev'
 		});
 		store = s.connect().then(async () => {
-			// The Work calendar is where work meetings are entered by hand; make sure it exists.
-			await s.ensureCalendar(workCalendarName(), ['event']).catch((e) => console.error('Could not create the Work calendar', e));
+			// "Personal" was the first name for David's own calendar; it is now "Me".
+			if (!s.calendars().some((c) => c.name === 'Me')) await s.renameCalendar('Personal', 'Me').catch((e) => console.error('Could not rename Personal to Me', e));
+			// The starting set of event calendars, plus Work, where work meetings are entered by hand.
+			for (const name of [...eventCalendarNames(), workCalendarName()]) {
+				await s.ensureCalendar(name, ['event']).catch((e) => console.error(`Could not create the ${name} calendar`, e));
+			}
 			return s;
 		});
 		store.catch(() => (store = undefined)); // retry on the next request if the server was down
@@ -22,12 +26,16 @@ export function getStore(): Promise<CalendarStore> {
 	return store;
 }
 
+/** Event calendars every planner starts with. More can be added from the details sheet. */
+export const eventCalendarNames = () =>
+	(env.EVENT_CALENDARS ?? 'Me,Family,Workouts,Morgan Meals').split(',').map((n) => n.trim()).filter(Boolean);
+
 /** The calendar whose events are shown as work meetings (light red, tagged Work). */
 export const workCalendarName = () => env.WORK_CALENDAR ?? 'Work';
 
 /** Where new items go: the calendar named in the environment, else the first one that accepts the kind. */
 export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind): string {
-	const wanted = kind === 'event' ? (env.EVENTS_CALENDAR ?? 'Personal') : (env.TASKS_CALENDAR ?? 'Tasks');
+	const wanted = kind === 'event' ? (env.EVENTS_CALENDAR ?? 'Me') : (env.TASKS_CALENDAR ?? 'Tasks');
 	const options = store.calendars().filter((c) => c.accepts.includes(kind));
 	const chosen = options.find((c) => c.name === wanted) ?? options[0];
 	if (!chosen) throw new Error(`No calendar on the server accepts ${kind}s yet`);

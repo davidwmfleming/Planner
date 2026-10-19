@@ -11,6 +11,7 @@ import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const LIST_ORDER = ['month', 'waiting', 'someday', ''];
+const NEW_CALENDAR = '+new';
 
 /** Only plain item data goes to the browser, not where it lives on the server. */
 const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }): Item => item;
@@ -115,13 +116,13 @@ export const actions: Actions = {
 		else await store.update(item, moveTo(item));
 	},
 
-	/** Takes a task off its day and puts it back on the Not scheduled list. */
+	/** Takes a task off its day and puts it back on the Future tasks list. */
 	unschedule: async ({ request }) => {
 		const form = await request.formData();
 		const found = await findItem(String(form.get('uid') ?? ''));
 		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
 		const { store, item } = found;
-		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Not scheduled' });
+		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Future tasks' });
 		const { date, time, carriedFrom, ...rest } = item;
 		await store.replace(item, rest);
 	},
@@ -139,8 +140,18 @@ export const actions: Actions = {
 			repeat: field('repeat')
 		});
 		if ('error' in result) return fail(400, { message: result.error });
-		// Events can be filed in any calendar that takes events (Personal, Family, Work…).
-		const wanted = result.item.kind === 'event' ? store.calendars().find((c) => c.name === field('calendar') && c.accepts.includes('event')) : undefined;
+		// Events can be filed in any calendar that takes events (Me, Family, Work…), or in a new one made here.
+		let wanted;
+		if (result.item.kind === 'event' && field('calendar') === NEW_CALENDAR) {
+			const name = field('newCalendar').trim();
+			if (!name || name.length > 40) return fail(400, { message: 'Give the new calendar a name (up to 40 letters)' });
+			if (store.calendars().some((c) => c.name.toLowerCase() === name.toLowerCase() && !c.accepts.includes('event'))) {
+				return fail(400, { message: `"${name}" is a task list; pick another name` });
+			}
+			wanted = store.calendars().find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? (await store.ensureCalendar(name, ['event']));
+		} else if (result.item.kind === 'event') {
+			wanted = store.calendars().find((c) => c.name === field('calendar') && c.accepts.includes('event'));
+		}
 		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind));
 		if (result.item.kind === item.kind && target === item.calendarUrl) {
 			// Fields left blank are removed, so save the whole item rather than a merge.

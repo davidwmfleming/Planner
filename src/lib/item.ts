@@ -7,7 +7,7 @@ export interface Item {
 	uid: string;
 	kind: ItemKind;
 	title: string;
-	/** Day it sits on (YYYY-MM-DD). Tasks without a date are "not scheduled". */
+	/** Day it sits on (YYYY-MM-DD). Tasks without a date are "future tasks". */
 	date?: string;
 	/** Last day of a multi-day all-day event, inclusive. */
 	endDate?: string;
@@ -27,7 +27,7 @@ export interface Item {
 	occurrence?: string;
 	/** On one showing of a repeating item: the day the series starts. */
 	seriesStart?: string;
-	/** Name of the calendar it is kept in (Personal, Family, Work…). Shown only; not part of the .ics. */
+	/** Name of the calendar it is kept in (Me, Family, Work…). Shown only; not part of the .ics. */
 	calendar?: string;
 }
 
