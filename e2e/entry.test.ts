@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { unique } from './unique';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 test('writing a line in a column saves an event or a task on that day, ready for the next line', async ({ page }, info) => {
-	const tag = info.project.name; // tablet and phone share one calendar server
+	const tag = unique('', info).trim();
 	const today = iso(new Date());
 	await page.goto('/');
 	const day = page.locator(`section.day[data-date="${today}"]`);

@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { unique } from './unique';
 
 test('tick, drop and move a task with one tap each', async ({ page }, info) => {
-	const name = `Water plants ${info.project.name}`;
+	const name = unique('Water plants', info);
 	await page.goto('/?page=2026-10-19');
 	const monday = page.locator('section.day[data-date="2026-10-19"]');
 	const tuesday = page.locator('section.day[data-date="2026-10-20"]');
@@ -27,7 +28,7 @@ test('tick, drop and move a task with one tap each', async ({ page }, info) => {
 });
 
 test('an event can be ticked or dropped but not moved with the arrow', async ({ page }, info) => {
-	const name = `Haircut ${info.project.name}`;
+	const name = unique('Haircut', info);
 	await page.goto('/?page=2026-10-19');
 	const line = page.locator('#add-event-2026-10-19');
 	await line.fill(`10am ${name}`);

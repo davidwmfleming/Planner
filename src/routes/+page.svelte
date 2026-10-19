@@ -4,9 +4,42 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
+	import type { Item } from '$lib/item';
+	import { onMount } from 'svelte';
 	import type { PageProps } from './$types';
 
-	let { data }: PageProps = $props();
+	let { data, form }: PageProps = $props();
+
+	// The details sheet: tap an item's title to see and edit everything about it.
+	let editing = $state<Item | null>(null);
+	let sheet = $state<HTMLDialogElement>();
+	function openDetails(item: Item) {
+		editing = item;
+		sheet?.showModal();
+	}
+	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
+		await update();
+		if (result.type === 'success' || result.type === 'redirect') sheet?.close();
+	};
+
+	// "Not scheduled" stays out of the way until asked for; the choice is remembered on this device.
+	let showUnscheduled = $state(false);
+	onMount(() => {
+		try {
+			showUnscheduled = localStorage.getItem('planner-show-unscheduled') === '1';
+		} catch {
+			// private browsing: just start hidden
+		}
+	});
+	function toggleUnscheduled() {
+		showUnscheduled = !showUnscheduled;
+		try {
+			localStorage.setItem('planner-show-unscheduled', showUnscheduled ? '1' : '');
+		} catch {
+			// not remembered, still works
+		}
+	}
+	const LIST_NAMES = { month: 'This month', waiting: 'Waiting', someday: 'Someday' } as const;
 
 	const pageUrl = (start: string) => `?page=${start}`;
 
@@ -34,27 +67,35 @@
 	}
 </script>
 
-{#snippet itemRow(item: (typeof data.days)[number]['events'][number], date: string)}
+{#snippet itemRow(item: Item, date: string)}
 	<li class={item.state}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}">{item.state === 'done' ? '✓' : ''}</button>
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
-		<span class="title">{item.title}</span>
-		{#if item.label}<span class="tag">{{ month: 'This month', waiting: 'Waiting', someday: 'Someday' }[item.label]}</span>{/if}
+		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			<button class="act" name="state" value="dropped" aria-label="{item.state === 'dropped' ? 'Restore' : 'Drop'} {item.title}">✕</button>
 		</form>
-		{#if item.kind === 'task'}
+		{#if item.kind === 'task' && date}
 			<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
 				<input type="hidden" name="uid" value={item.uid} />
 				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
 			</form>
 		{/if}
 	</li>
+{/snippet}
+
+{#snippet pullButtons(item: Item)}
+	<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
+		<input type="hidden" name="uid" value={item.uid} />
+		<button class="pull" name="to" value={data.today} aria-label="Put {item.title} on today">Today</button>
+		<button class="pull" name="to" value={data.saturday} aria-label="Put {item.title} on Saturday">Sat</button>
+	</form>
 {/snippet}
 
 {#snippet blankLine(kind: 'event' | 'task', date: string)}
@@ -65,11 +106,11 @@
 			<input
 				class="entry"
 				name="text"
-				id="add-{kind}-{date}"
+				id="add-{kind}-{date || 'unscheduled'}"
 				autocomplete="off"
 				enterkeyhint="done"
 				placeholder={kind === 'event' ? 'add event' : 'add task'}
-				aria-label="Add {kind} on {date}"
+				aria-label={date ? `Add ${kind} on ${date}` : 'Add a task that is not scheduled'}
 			/>
 		</form>
 	</li>
@@ -122,7 +163,71 @@
 			</section>
 		{/each}
 	</main>
+
+	<section class="someday" aria-label="Not scheduled">
+		<button type="button" class="btn wide" aria-expanded={showUnscheduled} onclick={toggleUnscheduled}>
+			{showUnscheduled ? 'Hide' : 'Show'} not scheduled ({data.unscheduled.length})
+		</button>
+		{#if showUnscheduled}
+			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
+			<ul class="lines">
+				{#each data.unscheduled as item (item.uid)}
+					<li class={item.state}>
+						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+						{@render pullButtons(item)}
+					</li>
+				{/each}
+				{@render blankLine('task', '')}
+			</ul>
+		{/if}
+	</section>
 </div>
+
+<dialog bind:this={sheet} class="sheet" aria-label="Details" onclose={() => (editing = null)}>
+	{#if editing}
+		{#key editing.uid}
+			<form method="POST" action="?page={data.start}&/save" use:enhance={closeOnSuccess}>
+				<input type="hidden" name="uid" value={editing.uid} />
+				<h2 class="sheet-title">Details</h2>
+				<label class="field">Title <input name="title" id="f-title" value={editing.title} required /></label>
+				<fieldset class="field">
+					<legend>Kind</legend>
+					<div class="seg">
+						<label><input type="radio" name="kind" value="event" checked={editing.kind === 'event'} /> Event</label>
+						<label><input type="radio" name="kind" value="task" checked={editing.kind === 'task'} /> Task</label>
+					</div>
+				</fieldset>
+				<div class="row2">
+					<label class="field">Date <input type="date" name="date" id="f-date" value={editing.date ?? ''} /></label>
+					<label class="field">Time <input type="time" name="time" id="f-time" value={editing.time ?? ''} /></label>
+				</div>
+				<div class="row2">
+					<label class="field">Ends (events) <input type="time" name="endTime" id="f-end" value={editing.endTime ?? ''} /></label>
+					<label class="field">List
+						<select name="label" id="f-label" value={editing.label ?? ''}>
+							<option value="">None</option>
+							<option value="month">This month</option>
+							<option value="waiting">Waiting on</option>
+							<option value="someday">Someday</option>
+						</select>
+					</label>
+				</div>
+				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
+				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
+				{#if form?.message}<p class="error" role="alert">{form.message}</p>{/if}
+				<p class="hint">Leave the date empty to keep a task unscheduled. Repeating items arrive in a later step.</p>
+				<div class="actions">
+					<button class="btn" formaction="?page={data.start}&/delete" formnovalidate>Delete</button>
+					<span class="actions-right">
+						<button type="button" class="btn" onclick={() => sheet?.close()}>Cancel</button>
+						<button class="btn primary">Save</button>
+					</span>
+				</div>
+			</form>
+		{/key}
+	{/if}
+</dialog>
 
 <style>
 	.wrap {
@@ -205,10 +310,67 @@
 	}
 	.entry::placeholder { color: var(--muted); opacity: 0.6; font-size: 0.85rem; }
 	.entry:focus { background: var(--wash); outline-offset: 0; }
+	button.title {
+		font: inherit;
+		text-align: left;
+		background: none;
+		border: 0;
+		padding: 0;
+		cursor: pointer;
+		min-height: var(--line);
+	}
+	.someday { margin-top: 1.2rem; }
+	.btn.wide { width: 100%; }
+	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0; }
+	.pull {
+		font: inherit;
+		font-size: 0.82rem;
+		color: var(--ink);
+		background: var(--paper);
+		border: 1.5px solid var(--ink);
+		border-radius: 6px;
+		min-height: 36px;
+		padding: 0 0.6rem;
+		cursor: pointer;
+		margin-left: 0.3rem;
+	}
+	.sheet {
+		border: 2px solid var(--ink);
+		border-radius: 10px;
+		background: var(--paper);
+		color: var(--ink);
+		width: min(560px, calc(100vw - 32px));
+		padding: 1rem;
+	}
+	.sheet::backdrop { background: rgba(0, 0, 0, 0.35); }
+	.sheet form { display: grid; gap: 0.7rem; }
+	.sheet-title { font-size: 1.2rem; margin: 0; }
+	.field { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); border: 0; padding: 0; margin: 0; }
+	.field input, .field select, .field textarea {
+		font: inherit;
+		font-size: 1rem;
+		font-weight: 400;
+		letter-spacing: 0;
+		color: var(--ink);
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 6px;
+		min-height: 44px;
+		padding: 0.2rem 0.5rem;
+	}
+	.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+	.seg { display: flex; gap: 0.4rem; }
+	.seg label { display: flex; gap: 0.3rem; align-items: center; border: 2px solid var(--ink); border-radius: 6px; padding: 0 0.7rem; min-height: 44px; color: var(--ink); font-size: 1rem; font-weight: 400; }
+	.actions { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.5rem; }
+	.actions-right { display: flex; gap: 0.5rem; }
+	.btn.primary { background: var(--ink); color: var(--paper); }
+	button.btn { cursor: pointer; }
+	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
+		.row2 { grid-template-columns: 1fr; }
 		h1 span { display: none; }
 	}
 </style>
