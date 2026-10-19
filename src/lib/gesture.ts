@@ -36,7 +36,8 @@ function isTick(points: Point[], width: number, height: number): boolean {
 
 /**
  * A quick sideways stroke flips the page (leftward to the next page, like turning paper).
- * A back-and-forth scribble that stays on about one line is a scratch-out, and ✓ is a tick.
+ * A scribble on about one line is a scratch-out, whether it goes back and forth or zig-zags up and down along the line.
+ * ✓ is a tick.
  */
 export function readStroke(points: Point[]): Stroke {
 	if (points.length < 2) return 'none';
@@ -46,6 +47,8 @@ export function readStroke(points: Point[]): Stroke {
 	const height = Math.max(...ys) - Math.min(...ys);
 	const turns = reversals(points);
 	if (turns >= 3 && width >= 30 && height <= Math.max(60, width * 0.6)) return 'scratch';
+	// The other way to scratch out: a zig-zag up and down, moving along the line.
+	if (reversals(points, 'y') >= 4 && width >= 40 && height <= 80) return 'scratch';
 	if (isTick(points, width, height)) return 'tick';
 	const dx = points[points.length - 1].x - points[0].x;
 	const dy = points[points.length - 1].y - points[0].y;

@@ -117,3 +117,34 @@ test('on a slow connection, writing more and tapping another line saves both and
 	await expect(day.getByText(`Rake leaves ${tag}`)).toHaveCount(1);
 	await expect(eventLine).toBeFocused();
 });
+
+test('a line that loses focus for a moment mid-writing is not saved under the pen', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	const taskLine = page.locator(`#add-task-${tue}`);
+	await taskLine.fill(`Half a wor ${tag}`);
+	// The handwriting keyboard takes focus briefly, then gives it back.
+	await taskLine.evaluate((el: HTMLInputElement) => {
+		el.blur();
+		setTimeout(() => el.focus(), 150);
+	});
+	await page.waitForTimeout(1200);
+	await expect(taskLine).toHaveValue(`Half a wor ${tag}`);
+	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: `Half a wor ${tag}` })).toHaveCount(0);
+});
+
+test('words written just before turning the page or reloading are saved', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { mon, tue } = futureWeek();
+	await page.goto(`/?page=${mon}`);
+	await page.locator(`#add-task-${tue}`).fill(`Turn the page ${tag}`);
+	await page.getByRole('link', { name: 'Next page' }).click();
+	await expect(page).not.toHaveURL(new RegExp(`page=${mon}`));
+	await page.locator(`#add-task-${page.url().split('page=')[1]}`).fill(`Reload ${tag}`);
+	const nextStart = page.url().split('page=')[1];
+	await page.reload();
+	await expect(page.locator(`section.day[data-date="${nextStart}"]`).getByText(`Reload ${tag}`)).toBeVisible();
+	await page.goto(`/?page=${mon}`);
+	await expect(page.locator(`section.day[data-date="${tue}"]`).getByText(`Turn the page ${tag}`)).toBeVisible();
+});
