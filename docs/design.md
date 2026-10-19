@@ -16,7 +16,7 @@ ViWoods / phone / Mac browser
 
 - **Radicale** (Docker): calendars and task lists. Stores plain .ics files on disk, which makes backup and inspection trivial.
 - **planner** (Docker): SvelteKit server talks CalDAV to Radicale; the browser only talks to the planner. No separate database; the .ics data is the single source of truth.
-- **Rollover job**: runs inside the planner at 3 a.m. daily (and on first page load of the day as a safety net).
+- **Rollover job**: runs inside the planner at 3 a.m. daily, and again on every page load as a safety net (the server was off, or a task was written on a past day). Open, non-repeating tasks dated before today move to today and keep the day they were first written on. The server must run in David's time zone (set `TZ` in compose.yaml).
 
 ## Calendars and lists
 
@@ -74,7 +74,7 @@ Each is one small PR with its own tests. 1–11 can be done before the server ar
 6. **Quick actions**: tick done, ✕ drop, → next day, and Today/Sat pulls.
 7. **Details sheet**: edit title, date, time, end time, location, list, notes; switch event ↔ task; delete.
 8. **Not scheduled panel**: hidden by default, with Today and Sat buttons.
-9. **Rollover**: nightly job plus first-load check; carried-over marker.
+9. **Rollover**: nightly job plus a check on every page load; carried-over marker.
 10. **Repeating items**: show recurring events and tasks; create them from the details sheet.
 11. **E-ink and phone polish**: installable app (PWA), large tap targets, no animation, fast page flips; QA on tablet and phone sizes.
 12. **Package and deploy**: Docker Compose for Radicale and planner on `homebase`, Tailscale Serve, backups.

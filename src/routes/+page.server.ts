@@ -4,6 +4,7 @@ import { applyEdit, daysBetween } from '$lib/edit';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
+import { rollover } from '$lib/server/rollover';
 import { defaultCalendarUrl, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -21,6 +22,7 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	let items;
 	try {
+		await rollover(today);
 		items = await (await getStore()).listItems();
 	} catch (e) {
 		error(503, `The calendar server isn't answering. Check that it is running, then reload. (${(e as Error).message})`);
