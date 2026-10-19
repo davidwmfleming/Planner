@@ -25,6 +25,13 @@ Open the planner's address in the browser, then add it to the home screen: in Ch
 
 Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Set `WORK_CALENDAR` in `.env` to use a different calendar name.
 
+## Syncing with other calendar apps
+
+The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to Android with DAVx⁵, as a CalDAV account. Events and tasks added on either side show on the other. The planner passes everything under `/dav/` to the calendar server, which asks for its own user name (`CALDAV_USER`, usually `david`) and password (`CALDAV_PASSWORD` in `.env`).
+
+- **iPhone:** Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add CalDAV Account. Server: the planner's address without `https://`; then the user name and the calendar password.
+- **Mac:** Calendar → Settings → Accounts → + → Other CalDAV Account. Account type: Manual; server address: `https://<planner address>/dav/`.
+
 ## Temporary test copy on NearlyFreeSpeech.NET
 
 Until the home server is running, a test copy with **sample data only** can run on a NearlyFreeSpeech.NET site. It is on the open internet, so it sits behind a password (`TEST_PASSWORD`, checked by the browser's own password prompt) and must never hold real calendars. Over SSH on the site run `sh nfsn-setup.sh your-site.nfshost.com` (the script is `scripts/nfsn-setup.sh`); it installs and builds everything, makes the passwords, adds sample entries, and prints the three control-panel steps (two daemons and a proxy).
