@@ -1,11 +1,17 @@
 import { error, fail } from '@sveltejs/kit';
-import { addDays, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
+import { addDays, comingSaturday, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
+import { applyEdit, daysBetween } from '$lib/edit';
+import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { defaultCalendarUrl, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+const LIST_ORDER = ['month', 'waiting', 'someday', ''];
+
+/** Only plain item data goes to the browser, not where it lives on the server. */
+const plain = ({ calendarUrl, url, etag, ...item }: Item & { calendarUrl: string; url: string; etag?: string }): Item => item;
 
 export const load: PageServerLoad = async ({ url }) => {
 	const today = toISODate(new Date());
@@ -26,11 +32,15 @@ export const load: PageServerLoad = async ({ url }) => {
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
 		todayPage: pageStart(today),
-		// Only plain data goes to the browser: drop server locations.
+		saturday: comingSaturday(today),
+		unscheduled: items
+			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
+			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
+			.map(plain),
 		days: buildDays(dates, items).map((d) => ({
 			...d,
-			events: d.events.map(({ calendarUrl, url, etag, ...i }) => i),
-			tasks: d.tasks.map(({ calendarUrl, url, etag, ...i }) => i)
+			events: d.events.map(plain),
+			tasks: d.tasks.map(plain)
 		}))
 	};
 };
@@ -43,12 +53,18 @@ export const actions: Actions = {
 		const date = String(form.get('date') ?? '');
 		const text = String(form.get('text') ?? '');
 		if (kind !== 'event' && kind !== 'task') return fail(400, { message: 'Choose the events or tasks column' });
-		if (!ISO.test(date)) return fail(400, { message: 'That day is not a valid date' });
+		if (date ? !ISO.test(date) : kind === 'event') return fail(400, { message: 'That day is not a valid date' });
 		const { title, time } = parseLine(text);
 		if (!title) return fail(400, { message: 'Write something on the line first' });
 
 		const store = await getStore();
-		await store.create(defaultCalendarUrl(store, kind), { uid: crypto.randomUUID(), kind, title, date, time, state: 'open' });
+		await store.create(defaultCalendarUrl(store, kind), {
+			uid: crypto.randomUUID(),
+			kind,
+			title,
+			state: 'open',
+			...(date ? { date, time } : {})
+		});
 		return { added: title };
 	},
 
@@ -75,6 +91,35 @@ export const actions: Actions = {
 			? { date: to, endDate: addDays(to, daysBetween(item.date!, item.endDate)) }
 			: { date: to };
 		await store.update(item, changes);
+	},
+
+	/** The details sheet: edit any field, switch between event and task. */
+	save: async ({ request }) => {
+		const form = await request.formData();
+		const found = await findItem(String(form.get('uid') ?? ''));
+		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const { store, item } = found;
+		const field = (name: string) => String(form.get(name) ?? '');
+		const result = applyEdit(item, {
+			title: field('title'), kind: field('kind'), date: field('date'), time: field('time'),
+			endTime: field('endTime'), location: field('location'), label: field('label'), notes: field('notes')
+		});
+		if ('error' in result) return fail(400, { message: result.error });
+		if (result.item.kind === item.kind) {
+			// Fields left blank are removed, so save the whole item rather than a merge.
+			await store.replace(item, result.item);
+		} else {
+			// Events and tasks are different kinds of calendar entry: write the new one, then remove the old.
+			await store.create(defaultCalendarUrl(store, result.item.kind), result.item);
+			await store.remove(item);
+		}
+	},
+
+	delete: async ({ request }) => {
+		const form = await request.formData();
+		const found = await findItem(String(form.get('uid') ?? ''));
+		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		await found.store.remove(found.item);
 	}
 };
 
@@ -83,7 +128,3 @@ async function findItem(uid: string) {
 	const item = (await store.listItems()).find((i) => i.uid === uid);
 	return item ? { store, item } : undefined;
 }
-
-const daysBetween = (from: string, to: string) =>
-	Math.round((new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86_400_000);
-

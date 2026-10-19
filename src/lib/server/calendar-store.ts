@@ -111,6 +111,15 @@ export class CalendarStore {
 		return { ...next, etag: res.headers.get('etag') ?? undefined };
 	}
 
+	/** Saves an item exactly as given, dropping any field it no longer has. */
+	async replace(stored: StoredItem, item: Item): Promise<StoredItem> {
+		const res = await this.client.updateCalendarObject({
+			calendarObject: { url: stored.url, etag: stored.etag, data: itemToICS(item) }
+		});
+		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status}); reload and try again`);
+		return { ...item, calendarUrl: stored.calendarUrl, url: stored.url, etag: res.headers.get('etag') ?? undefined };
+	}
+
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } });
 		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
