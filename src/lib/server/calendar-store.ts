@@ -73,6 +73,8 @@ export class CalendarStore {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const late = new Promise<never>((_, reject) => {
 			timer = setTimeout(() => reject(new Error(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
+			// Only the request itself should keep the planner running, not the wait for it.
+			timer.unref();
 		});
 		return Promise.race([work, late]).finally(() => clearTimeout(timer));
 	}

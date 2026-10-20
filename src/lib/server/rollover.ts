@@ -41,6 +41,8 @@ export function scheduleNightlyRollover() {
 			}
 			tick();
 		}, untilThreeAm(new Date()));
+		// The wait mustn't keep the planner running on its own, or it can't stop when Docker asks it to.
+		timer.unref();
 	};
 	tick();
 }
