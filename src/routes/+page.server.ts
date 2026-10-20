@@ -7,7 +7,7 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
-import { RefusedError, type StoredItem } from '$lib/server/calendar-store';
+import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
@@ -118,6 +118,8 @@ export const actions: Actions = {
 			});
 		} catch (e) {
 			console.error(`Planner: could not save "${title}"`, e);
+			// No answer is not a no: the line may be saved, and writing it again could make two.
+			if (unanswered(e)) return fail(502, { message: `The calendar server didn't answer in time when asked to save "${shortTitle(title)}", so it may or may not be saved. Reload the page to see.` });
 			return fail(502, { message: `The calendar server didn't save "${shortTitle(title)}". Try again in a moment.` });
 		}
 		return { added: title };
@@ -268,6 +270,7 @@ function shownOn(item: StoredItem, day: string): Item | undefined {
 
 /** Makes a change on the calendar server. If it fails, the details go to the server's log and the page gets a plain
  * message rather than an error screen. The item may have been changed on a phone meanwhile, hence the reload.
+ * A change that got no answer in time may still be made, so the message says it may or may not be done.
  * A change refused because the item already looks as asked (a double tap: the first tap saved it) is not a failure. */
 async function change(what: string, work: () => Promise<unknown>, asked?: Wanted) {
 	try {
@@ -275,6 +278,8 @@ async function change(what: string, work: () => Promise<unknown>, asked?: Wanted
 	} catch (e) {
 		if (asked && (await alreadyDone(asked))) return;
 		console.error(`Planner: could not ${what}`, e);
+		// A late answer is not a refusal: the server may still carry the change out.
+		if (unanswered(e)) return fail(502, { message: `The calendar server didn't answer in time when asked to ${what}, so it may or may not be done. Reload the page to see.` });
 		return fail(502, { message: `The calendar server didn't ${what}. Reload the page and try again.` });
 	}
 }

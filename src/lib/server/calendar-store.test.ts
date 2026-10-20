@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CalendarStore, RefusedError } from './calendar-store';
+import { CalendarStore, NoAnswerError, RefusedError } from './calendar-store';
 import { occurrencesBetween } from './ical';
 
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
@@ -88,6 +88,7 @@ describe('CalendarStore without a server', () => {
 		const silent = storeWith({ deleteCalendarObject: () => new Promise(() => {}) }, 50);
 		const late = await silent.remove(item).catch((e) => e);
 		expect(late).not.toBeInstanceOf(RefusedError);
+		expect(late).toBeInstanceOf(NoAnswerError);
 		expect(late.message).toMatch(/did not answer/);
 	});
 

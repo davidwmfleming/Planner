@@ -57,6 +57,12 @@ export class RefusedError extends Error {
 	}
 }
 
+/** The calendar server didn't answer in time. It may still have done what was asked, or do it later. */
+export class NoAnswerError extends Error {}
+
+/** Whether a failure leaves it unknown if the change was made: no answer in time, or the connection dropped. */
+export const unanswered = (e: unknown) => e instanceof NoAnswerError || (e instanceof TypeError && e.message === 'fetch failed');
+
 export class CalendarStore {
 	private client: DAVClient;
 	private davCalendars: DAVCalendar[] = [];
@@ -83,7 +89,7 @@ export class CalendarStore {
 	private timed<T>(work: Promise<T>, what: string): Promise<T> {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const late = new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
+			timer = setTimeout(() => reject(new NoAnswerError(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
 			// Only the request itself should keep the planner running, not the wait for it.
 			timer.unref();
 		});
@@ -253,7 +259,7 @@ export class CalendarStore {
 			if (!response.ok) throw new Error(`The calendar server would not hand out "${name}" (${response.status})`);
 			return await response.text();
 		} catch (e) {
-			if (signal.aborted) throw new Error(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
+			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
 			throw e;
 		}
 	}

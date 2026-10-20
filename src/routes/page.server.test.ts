@@ -1,6 +1,6 @@
 // The planner page's server side with a pretend calendar server, for the cases a shared test server can't stage.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
+import { NoAnswerError, RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
@@ -149,11 +149,24 @@ describe('adding a line', () => {
 	it('says the calendar server did not save it when saving fails', async () => {
 		fake = fakeStore([cal('me', 'Me'), cal('tasks', 'Tasks', ['task'])]);
 		fake.create = async () => {
-			throw new Error('Saving failed (500)');
+			throw new RefusedError('Saving failed (500)', 500);
 		};
 		expect(await add({ kind: 'event', date: '2026-10-21', text: 'Dentist' })).toMatchObject({
 			status: 502,
 			data: { message: 'The calendar server didn\'t save "Dentist". Try again in a moment.' }
+		});
+	});
+});
+
+describe('adding a line when the calendar server does not answer in time', () => {
+	it('says it may or may not be saved, rather than that it was not', async () => {
+		fake = fakeStore([cal('me', 'Me'), cal('tasks', 'Tasks', ['task'])]);
+		fake.create = async () => {
+			throw new NoAnswerError('The calendar server did not answer in time (saving "Dentist")');
+		};
+		expect(await add({ kind: 'event', date: '2026-10-21', text: 'Dentist' })).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t answer in time when asked to save "Dentist", so it may or may not be saved. Reload the page to see.' }
 		});
 	});
 });
@@ -185,7 +198,7 @@ describe('the details sheet', () => {
 describe('when the calendar server fails during a change', () => {
 	const me = cal('me', 'Me');
 	const broken = async () => {
-		throw new Error('Saving "Dentist" failed (500) at http://10.1.2.3/ (secret detail)');
+		throw new RefusedError('Saving "Dentist" failed (500) at http://10.1.2.3/ (secret detail)', 500);
 	};
 	const water = (): StoredItem => ({ ...dentist(me), uid: 'water', kind: 'task', title: 'Water plants', calendarUrl: `${HOME}tasks/`, url: `${HOME}tasks/water.ics` });
 	const weekly = (): StoredItem => ({ ...dentist(me), uid: 'yoga', title: 'Yoga', recurrence: 'FREQ=WEEKLY' });
@@ -217,6 +230,25 @@ describe('when the calendar server fails during a change', () => {
 	it.each(cases)('%s says the server is not answering when it cannot be reached', async (action, fields) => {
 		connectError = new Error('connect ECONNREFUSED 10.1.2.3:5232');
 		expect(await act(action, fields)).toMatchObject({ status: 503, data: { message: "The calendar server isn't answering. Check that it is running, then reload." } });
+	});
+
+	it.each(cases)('%s says it may or may not be done when the calendar server did not answer in time', async (action, fields, message) => {
+		// A late answer is not a refusal: the server may still carry the change out.
+		fake.replace = fake.update = fake.updateOccurrence = fake.remove = fake.removeOccurrence = fake.create = fake.ensureCalendar = async () => {
+			throw new NoAnswerError('The calendar server did not answer in time (saving "Dentist")');
+		};
+		const asked = message.match(/didn't (.*)\. Reload/)![1];
+		expect(await act(action, fields)).toMatchObject({
+			status: 502,
+			data: { message: `The calendar server didn't answer in time when asked to ${asked}, so it may or may not be done. Reload the page to see.` }
+		});
+	});
+
+	it('treats a dropped connection like no answer', async () => {
+		fake.remove = async () => {
+			throw new TypeError('fetch failed');
+		};
+		expect(await act('delete', { uid: 'dentist' })).toMatchObject({ status: 502, data: { message: expect.stringContaining('may or may not be done') } });
 	});
 
 	it('quotes only the start of a long title, so the message fits on a phone', async () => {
