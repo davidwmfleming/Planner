@@ -22,7 +22,7 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 
 Open the planner's address in the browser, then add it to the home screen: in Chrome on Android (the ViWoods), menu → **Add to home screen** / **Install app**; in Safari on iPhone, Share → **Add to Home Screen**. It then opens full-screen like any app. With no browser buttons there, every message that says to reload has a **Reload** button, and a page that can't be shown offers **Reload** and **Back to the planner**. It needs the home server (over Tailscale) to show anything; there is no offline copy, because the calendar server is the one place the data lives.
 
-Left open overnight (the tablet asleep with the planner on screen), the page moves on to the new day by itself, at midnight or when the screen wakes: a page showing today turns to the new today's page, with unfinished tasks carried over; a page you turned to on purpose stays where it is. It waits while a line is being written or saved.
+Left open overnight (the tablet asleep with the planner on screen), the page moves on to the new day by itself, at midnight or when the screen wakes: a page showing today turns to the new today's page, with unfinished tasks carried over; a page you turned to on purpose stays where it is. It waits while a line is being written or saved, and says so under the header. If the server can't be reached just then (Wi-Fi still reconnecting), the page stays as it is and tries again a minute later.
 
 ## Work events
 
