@@ -120,3 +120,36 @@ test('calendar server down at midnight: the planner stays on screen, then moves 
 	await expect(todayTag(page, THU)).toBeVisible();
 	await expect(page).toHaveURL(new RegExp(`\\?page=${THU}$`));
 });
+
+/** Runs the page's clock on a step at a time until `done`, so a check waiting on the network can set its next timer. */
+async function runUntil(page: Page, step: number, done: () => boolean | Promise<boolean>) {
+	await expect.poll(async () => (await done()) || (await page.clock.runFor(step), false), { intervals: [50], timeout: 15_000 }).toBe(true);
+}
+
+test('a server clock well behind: the page keeps asking every ten minutes, and wakes meanwhile ask no more often', async ({ page }) => {
+	await serverDay(page, WED);
+	await page.clock.install({ time: at(23, 59) });
+	await page.goto('/');
+	// The planner's own checks (a refresh that follows one asks with x-sveltekit-invalidated), and when each was.
+	const asked: number[] = [];
+	page.on('request', async (r) => {
+		if (r.url().includes('__data.json') && !r.url().includes('x-sveltekit-invalidated')) asked.push(await page.evaluate(() => Date.now()));
+	});
+	// Past midnight here, but the server still says Wednesday: it asks, then five more times a minute apart
+	// (a little more here: the clock runs on in steps while a check waits on the network).
+	await runUntil(page, 5000, () => asked.length === 6);
+	await expect(todayTag(page, WED)).toBeVisible();
+	const gaps = asked.slice(1).map((t, i) => t - asked[i]);
+	expect(gaps.every((g) => g >= 60_000 && g < 120_000)).toBe(true);
+
+	// Then only every ten minutes: waking the screen meanwhile asks nothing.
+	for (let i = 0; i < 3; i++) await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+	await runUntil(page, 10_000, async () => (await page.evaluate(() => Date.now())) - asked[5] > 5 * 60_000);
+	expect(asked).toHaveLength(6);
+
+	// The server reaches Thursday; the next ten-minute try finds it.
+	await serverDay(page, THU);
+	await runUntil(page, 10_000, () => todayTag(page, THU).isVisible());
+	expect(asked).toHaveLength(7);
+	expect(asked[6] - asked[5]).toBeGreaterThanOrEqual(600_000);
+});

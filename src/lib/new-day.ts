@@ -12,6 +12,16 @@ export function untilMidnight(now: Date, after = 5000): number {
  * The server's answer decides; a device clock that is behind never makes the page go back. */
 export const dayBegun = (now: Date, today: string) => toISODate(now) > today;
 
+/** Asking again when the server's today hasn't moved on yet (its clock behind) or it couldn't be reached:
+ * a few times a minute apart, then every ten minutes, so the page still catches up the same morning. */
+export const QUICK_TRIES = 5;
+export const QUICK_WAIT = 60_000;
+export const SLOW_WAIT = 600_000;
+export const retryAfter = (tries: number) => (tries <= QUICK_TRIES ? QUICK_WAIT : SLOW_WAIT);
+
+/** Whether a wake (or new data) may ask the server again: freely during the quick tries, then at most once per slow wait. */
+export const mayAsk = (tries: number, sinceAsked: number) => tries < QUICK_TRIES || sinceAsked >= SLOW_WAIT;
+
 interface Shown {
 	today: string;
 	todayPage: string;

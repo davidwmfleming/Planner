@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dataAddress, dataAnswered, dayBegun, pageForNewDay, untilMidnight } from './new-day';
+import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, untilMidnight } from './new-day';
 
 // Wednesday 21 October 2026 is on the Mon–Wed page (from the 19th); Thursday starts the Thu–Sun page.
 const wed = { today: '2026-10-21', todayPage: '2026-10-19', start: '2026-10-19' };
@@ -66,5 +66,22 @@ describe('dataAnswered', () => {
 		expect(dataAnswered(502, ok)).toBe(false);
 		expect(dataAnswered(200, JSON.stringify({ type: 'redirect', location: '/' }))).toBe(false);
 		expect(dataAnswered(200, '<html>Bad gateway</html>')).toBe(false);
+	});
+});
+
+describe('retryAfter', () => {
+	it('asks again a minute later for the first five tries, then every ten minutes', () => {
+		expect([1, 5, 6, 40].map(retryAfter)).toEqual([60_000, 60_000, 600_000, 600_000]);
+	});
+});
+
+describe('mayAsk', () => {
+	it('lets a wake ask freely during the quick tries', () => {
+		expect(mayAsk(0, 0)).toBe(true);
+		expect(mayAsk(4, 1000)).toBe(true);
+	});
+	it('then lets a wake ask at most once per ten minutes', () => {
+		expect(mayAsk(5, 599_000)).toBe(false);
+		expect(mayAsk(9, 600_000)).toBe(true);
 	});
 });

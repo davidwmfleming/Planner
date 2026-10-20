@@ -6,7 +6,7 @@
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
-	import { dataAddress, dataAnswered, dayBegun, pageForNewDay, untilMidnight } from '$lib/new-day';
+	import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
@@ -349,8 +349,9 @@
 	// A page showing today moves on to the new today's page; one flipped to on purpose stays, refreshed.
 	// Nothing changes under a line being written or saved, a mark or tap saving, a stroke or the details sheet: it waits.
 	const WHILE_WRITING = 10_000;
-	// The server's clock may be a little behind this one, or it can't be reached yet: ask again shortly, a few times.
-	const SERVER_BEHIND = 60_000;
+	// The server's clock may be behind this one, or it can't be reached yet: ask again (see retryAfter), and don't
+	// let every wake or focus ask meanwhile (see mayAsk).
+	let lastAsked = 0;
 	let seen: { today: string; todayPage: string; start: string } | undefined;
 	let dayTimer: ReturnType<typeof setTimeout> | undefined;
 	let checking = false;
@@ -379,16 +380,21 @@
 			return false;
 		}
 	}
-	async function newDay() {
+	/** The timer's own checks always ask; a wake, focus or new data may be held back by mayAsk. */
+	async function newDay(timed = false) {
 		if (checking) return;
+		seen ??= shown();
+		const waiting = busy();
+		const begun = dayBegun(new Date(), data.today);
+		// Asked too often already: leave it to the timer, which is set.
+		if (!timed && !waiting && begun && !pageForNewDay(seen, shown()) && !mayAsk(tries, Date.now() - lastAsked)) return;
 		checking = true;
 		clearTimeout(dayTimer);
 		let wait;
 		try {
-			seen ??= shown();
-			const waiting = busy();
 			let failed = false;
-			if (!waiting && dayBegun(new Date(), data.today)) {
+			if (!waiting && begun) {
+				lastAsked = Date.now();
 				if (await answers()) await invalidateAll();
 				else failed = true;
 			}
@@ -402,13 +408,13 @@
 			} else if (!to) seen = shown();
 			const behind = dayBegun(new Date(), data.today);
 			tries = (behind || failed) && !held ? tries + 1 : 0;
-			wait = held && (to || behind) ? WHILE_WRITING : (behind || failed) && tries <= 5 ? SERVER_BEHIND : untilMidnight(new Date());
+			wait = held && (to || behind) ? WHILE_WRITING : behind || failed ? retryAfter(tries) : untilMidnight(new Date());
 		} catch {
-			wait = SERVER_BEHIND;
+			wait = retryAfter(++tries);
 		} finally {
 			checking = false;
 		}
-		if (!gone) dayTimer = setTimeout(newDay, wait);
+		if (!gone) dayTimer = setTimeout(() => newDay(true), wait);
 	}
 	// Any new data (a save, a turned page, a refresh) may bring a new today, or show where the viewer is now.
 	$effect(() => {
