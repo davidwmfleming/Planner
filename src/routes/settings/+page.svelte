@@ -205,7 +205,8 @@
 		<section aria-labelledby="h-export">
 			<h2 id="h-export">Export</h2>
 			<div class="edit">
-				<button type="button" class="btn" disabled={exporting} onclick={downloadEverything}>{exporting ? 'Making the export…' : 'Download everything (.ics)'}</button>
+				<!-- aria-disabled, not disabled: a disabled button drops keyboard and screen-reader focus to the page. -->
+				<button type="button" class="btn" aria-disabled={exporting} aria-busy={exporting} onclick={downloadEverything}>{exporting ? 'Making the export…' : 'Download everything (.ics)'}</button>
 				{#if unshared}<button type="button" class="btn primary" onclick={() => unshared && save(unshared)}>Save or share the zip</button>{/if}
 			</div>
 			{#if exportError}<p class="error" role="alert">{exportError}</p>{/if}
@@ -279,7 +280,8 @@
 	.announce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
 	button.btn { cursor: pointer; }
-	button.btn:disabled { color: var(--muted); border-color: var(--muted); cursor: progress; }
+	button.btn:disabled,
+	button.btn[aria-disabled='true'] { color: var(--muted); border-color: var(--muted); cursor: progress; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	.btn.small { font-size: 0.85rem; padding: 0 0.6rem; }
 	.lines li .btn { margin-block: 0.15rem; }

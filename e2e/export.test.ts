@@ -58,7 +58,7 @@ test('a second tap while the export is being made does not start another', async
 		await route.continue();
 	});
 	await page.getByRole('button', { name: button }).click();
-	await expect(page.getByRole('button', { name: /Download everything|Making the export/ })).toBeDisabled();
+	await expect(page.getByRole('button', { name: /Download everything|Making the export/ })).toHaveAttribute('aria-disabled', 'true');
 	await page.getByRole('button', { name: /Download everything|Making the export/ }).click({ force: true });
 	const download = page.waitForEvent('download');
 	release();
@@ -106,4 +106,22 @@ test('in the installed app, if the share sheet is refused after a slow export, o
 	await again.click();
 	await expect.poll(() => page.evaluate(() => (window as unknown as { shared: { name: string }[] }).shared.map((f) => f.name))).toEqual([`planner-export-${iso(new Date())}.zip`]);
 	await expect(again).toHaveCount(0);
+});
+
+test('keyboard focus stays on "Download everything" after an export, so Enter can be pressed again', async ({ page }) => {
+	await page.goto('/settings');
+	const button = page.getByRole('button', { name: /Download everything|Making the export/ });
+	await button.focus();
+	await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]);
+	await expect(page.getByRole('button', { name: 'Download everything (.ics)' })).toBeFocused();
+	await Promise.all([page.waitForEvent('download'), page.keyboard.press('Enter')]); // a second export, no re-tabbing
+});
+
+test('after a failed export, focus is not lost', async ({ page }) => {
+	await page.goto('/settings');
+	await page.route('**/export', (route) => route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'The calendar server did not hand out "Family".' }) }));
+	await page.getByRole('button', { name: 'Download everything (.ics)' }).focus();
+	await page.keyboard.press('Enter');
+	await expect(page.getByRole('alert')).toBeVisible();
+	expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
 });
