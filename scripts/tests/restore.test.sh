@@ -29,12 +29,23 @@ check "the safety copy is private" test "$(stat -c %a "$SAFETY")" = 600
 check "it says where the safety copy is" grep -q "before-restore-" "$WORK/out"
 check "the planner is running again" compose_running
 
+echo "== A restore waits for a backup that is running"
+flock "$WORK/srv/backups" sleep 3 &
+holder=$!
+sleep 0.5
+start=$(date +%s)
+bash "$REPO/scripts/restore.sh" --yes "$ARCHIVE" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "restore.sh exits cleanly"; }
+check "it waited for the backup to finish" test $(($(date +%s) - start)) -ge 2
+wait "$holder"
+check "the deleted event is still back" volume_has dentist.ics
+COPIES=$(safety_copies)
+
 echo "== Answering anything but yes changes nothing"
 docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" rm "/data/$EVENT"
 if echo no | bash "$REPO/scripts/restore.sh" "$ARCHIVE" >"$WORK/out" 2>&1; then bad "restore.sh stops"; else ok "restore.sh stops"; fi
 check "the data is untouched" not volume_has dentist.ics
 check "the planner was left running" compose_running
-check "no extra safety copy" test "$(safety_copies)" = 1
+check "no extra safety copy" test "$(safety_copies)" = "$COPIES"
 
 echo "== A file that isn't a planner backup is refused"
 echo "not an archive" >"$WORK/junk.tar.gz"
@@ -43,6 +54,6 @@ for f in "$WORK/junk.tar.gz" "$WORK/other.tar.gz" "$WORK/missing.tar.gz"; do
 	if bash "$REPO/scripts/restore.sh" --yes "$f" >"$WORK/out" 2>&1; then bad "refuses $(basename "$f")"; else ok "refuses $(basename "$f")"; fi
 done
 check "the planner was left running" compose_running
-check "no extra safety copy" test "$(safety_copies)" = 1
+check "no extra safety copy" test "$(safety_copies)" = "$COPIES"
 
 finish

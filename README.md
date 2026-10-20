@@ -39,12 +39,16 @@ The script installs Docker and Tailscale if needed (Tailscale prints a sign-in l
 
 ## Backups
 
-Every night at 02:30 the server copies all the calendars, the planner's settings and the (hashed) calendar password into one file, `/srv/backups/planner/planner-YYYY-MM-DD.tar.gz`, and deletes copies older than 30 days. If the server was off at 02:30, the copy is made soon after it starts. The calendar server pauses for the second or two the copy takes, so no calendar is caught half-saved. `server-setup.sh` sets this up and makes the first copy straight away. Only your account (and root) can read the copies.
+Every night at 02:30 the server copies all the calendars, the planner's settings and the (hashed) calendar password into one file, `/srv/backups/planner/planner-YYYY-MM-DD.tar.gz`, and deletes copies older than 30 days. If the server was off at 02:30, the copy is made soon after it starts. The calendar server pauses for the second or two the copy takes, so no calendar is caught half-saved. `server-setup.sh` sets this up and makes the first copy straight away. If a copy is made a second time on one day (say, by hand), it is saved as `planner-YYYY-MM-DD-HHMMSS.tar.gz`; an existing copy is never replaced. Two backups never run at once; the second waits.
+
+The copies and their folder belong to root. Your account can read them (through its group) but can't change or add anything there; no other account can see them.
+
+The times and dates follow the server's clock, so set its time zone once: `timedatectl` shows it; if it doesn't say `America/Toronto`, run `sudo timedatectl set-timezone America/Toronto`.
 
 - See when it last ran and when it runs next: `systemctl list-timers planner-backup.timer`
 - Make a copy now: `sudo systemctl start planner-backup`, then `ls -l /srv/backups/planner`
-- If it went wrong: `journalctl -u planner-backup`
-- Settings (folder, days kept): `/etc/default/planner-backup`. `server-setup.sh` never overwrites your edits.
+- If it went wrong: `journalctl -u planner-backup`. Every problem starts with "Backup failed:", for example a full disk (check with `df -h /srv/backups`).
+- Settings (folder, days kept): `/etc/default/planner-backup`. `server-setup.sh` never overwrites your edits. Days kept must be a whole number, 1 or more.
 
 The copies don't include `.env`; `server-setup.sh` makes a new one with a new calendar password on a new machine.
 

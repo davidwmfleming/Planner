@@ -6,6 +6,7 @@
 # It stops the planner, saves the current data as before-restore-<time>.tar.gz in the backup
 # folder (so the restore itself can be undone), replaces the data with the archive, and starts
 # the planner again. It asks before changing anything (--yes skips the question).
+# The safety copy is made by backup.sh (next to this script), with the same care over who owns it.
 # Settings: /etc/default/planner-backup (PLANNER_BACKUP_CONFIG points elsewhere, for the tests).
 set -euo pipefail
 
@@ -15,8 +16,8 @@ CONFIG="${PLANNER_BACKUP_CONFIG:-/etc/default/planner-backup}"
 BACKUP_DIR="${BACKUP_DIR:-/srv/backups/planner}"
 VOLUME="${VOLUME:-planner_data}"
 PLANNER_DIR="${PLANNER_DIR:-/srv/planner}"
-IMAGE="${IMAGE:-debian:bookworm-slim}"
-BACKUP_OWNER="${BACKUP_OWNER:-}"
+IMAGE="${IMAGE:-debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f}"
+BACKUP_SCRIPT="$(dirname "$0")/backup.sh"
 
 die() { echo "Restore stopped: $1" >&2; exit 1; }
 
@@ -31,6 +32,8 @@ LIST=$(tar -tzf "$ARCHIVE" 2>/dev/null) || die "$ARCHIVE isn't a readable .tar.g
 grep -qE '^(\./)?collections/' <<<"$LIST" || die "$ARCHIVE doesn't look like a planner backup (it has no calendars folder)."
 [ -f "$PLANNER_DIR/compose.yaml" ] || die "the planner isn't in $PLANNER_DIR (no compose.yaml there)."
 docker volume inspect "$VOLUME" >/dev/null 2>&1 || die "there is no Docker volume called $VOLUME. On a new machine, run server-setup.sh first."
+[ -d "$BACKUP_DIR" ] || die "there is no backup folder $BACKUP_DIR for the safety copy. Make one with: sudo systemctl start planner-backup"
+[ -f "$BACKUP_SCRIPT" ] || die "$BACKUP_SCRIPT is missing; run this from the planner's scripts folder."
 compose() { docker compose -f "$PLANNER_DIR/compose.yaml" "$@"; }
 
 echo "This replaces ALL the planner's calendars, tasks and settings with the copy in"
@@ -41,10 +44,11 @@ if [ "$YES" != yes ]; then
 	[ "$answer" = yes ] || die "nothing was changed."
 fi
 
-mkdir -p "$(dirname "$BACKUP_DIR")"
-umask 077
-mkdir -p "$BACKUP_DIR"
-SAFETY="$BACKUP_DIR/before-restore-$(date +%F-%H%M%S).tar.gz"
+# No backup may run while the data is being replaced; a nightly one that is running is waited for.
+exec 9<"$BACKUP_DIR"
+flock -w 1800 9 || die "a backup has been running for 30 minutes."
+SAFETY_NAME="before-restore-$(date +%F-%H%M%S).tar.gz"
+SAFETY="${BACKUP_DIR%/}/$SAFETY_NAME"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 
 STAGE=stopping
@@ -69,11 +73,7 @@ compose down
 
 echo "== Saving the current data"
 STAGE=saving
-docker run --rm --network none -v "$VOLUME:/data:ro" "$IMAGE" \
-	tar --numeric-owner -C /data -czf - . >"$SAFETY"
-tar -tzf "$SAFETY" >/dev/null
-chmod 600 "$SAFETY"
-[ -z "$BACKUP_OWNER" ] || chown "$BACKUP_OWNER:" "$SAFETY"
+PLANNER_BACKUP_LOCKED=yes bash "$BACKUP_SCRIPT" --safety-copy "$SAFETY_NAME"
 echo "Safety copy: $SAFETY"
 
 echo "== Putting back the copy"

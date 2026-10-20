@@ -6,13 +6,19 @@
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WORK=$(mktemp -d)
 TEST_VOLUME="plannertest_data"
-IMAGE="${TEST_IMAGE:-debian:bookworm-slim}"
+IMAGE="${TEST_IMAGE:-debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f}"
 FAILED=0
+ROOT_WORK="" # a folder only root can change, for the checks that need root (see root_work)
 
 cleanup() {
 	docker compose --project-directory "$WORK/compose" down >/dev/null 2>&1 || true
 	docker volume rm -f "$TEST_VOLUME" >/dev/null 2>&1 || true
 	rm -rf "$WORK"
+	if [ -n "$ROOT_WORK" ]; then
+		# $ROOT_WORK/full is where a test may mount a tiny disk.
+		# shellcheck disable=SC2016 # expanded by the inner sh
+		as_root sh -c 'umount "$1/full" 2>/dev/null; rm -rf "$1"' _ "$ROOT_WORK" || true
+	fi
 }
 trap cleanup EXIT
 
@@ -24,6 +30,16 @@ check() { # check "description" command...
 	if "$@"; then ok "$what"; else bad "$what"; fi
 }
 not() { ! "$@"; }
+
+# The real backup runs as root. These run a command as root: directly when the tests already run
+# as root, otherwise with sudo if it needs no password (as on CI). Without either, those checks are skipped.
+as_root() { if [ "$(id -u)" = 0 ]; then "$@"; else sudo -n "$@"; fi; }
+can_be_root() { [ "$(id -u)" = 0 ] || sudo -n true 2>/dev/null; }
+# Makes ROOT_WORK: a folder owned by root (755) that cleanup removes.
+root_work() {
+	ROOT_WORK=$(as_root mktemp -d)
+	as_root chmod 755 "$ROOT_WORK"
+}
 finish() {
 	[ "$FAILED" = 0 ] || { echo "Some checks failed."; exit 1; }
 	echo "All checks passed."
