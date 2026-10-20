@@ -48,3 +48,7 @@ The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to An
 
 - **iPhone:** Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add CalDAV Account. Server: the planner's address without `https://`; then the user name and the calendar password.
 - **Mac:** Calendar → Settings → Accounts → + → Other CalDAV Account. Account type: Manual; server address: `https://<planner address>/dav/`.
+
+## Downloading everything
+
+**Download everything (.ics)**, at the bottom of the planner page, saves `planner-export-YYYY-MM-DD.zip` with one .ics file per calendar (`Me.ics`, `Family.ics`, `Tasks.ics` and so on), so each can be imported into its own calendar elsewhere. Apple Calendar and Google Calendar import the event files (Google also takes the whole zip); they ignore the tasks in `Tasks.ics`, which Thunderbird and CalDAV task apps can import. The address is `/export` if you want to bookmark it.

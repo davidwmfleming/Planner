@@ -393,6 +393,12 @@
 			</ul>
 		{/if}
 	</section>
+
+	<!-- Moves to the settings page once it exists. -->
+	<footer class="export">
+		<a class="btn" href="/export" download>Download everything (.ics)</a>
+		<p class="hint">A zip with one file per calendar, to import elsewhere. Apple Calendar and Google Calendar skip the tasks in Tasks.ics; task apps such as Thunderbird read them.</p>
+	</footer>
 </div>
 
 <dialog bind:this={sheet} class="sheet" aria-label="Details" onclose={() => (editing = null)}>
@@ -571,6 +577,7 @@
 		min-height: var(--line);
 	}
 	.someday { margin-top: 1.2rem; }
+	.export { margin-top: 2rem; }
 	.btn.wide { width: 100%; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0; }
 	.pull {

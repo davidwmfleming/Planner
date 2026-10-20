@@ -214,7 +214,7 @@ export class CalendarStore {
 		const response = await fetch(url, {
 			method: 'PROPPATCH',
 			headers: {
-				Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
+				Authorization: this.authorization(),
 				'Content-Type': 'application/xml; charset=utf-8'
 			},
 			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>${prop}</d:prop></d:set></d:propertyupdate>`,
@@ -223,6 +223,14 @@ export class CalendarStore {
 		if (!response.ok) return response.status;
 		const inner = [...(await response.text()).matchAll(/<(?:\w+:)?status>HTTP\/[\d.]+ (\d{3})/g)].map((m) => Number(m[1]));
 		return inner.find((status) => status >= 300) ?? response.status;
+	}
+
+	/** A whole calendar as one .ics file, time zones included, exactly as the server hands it out. */
+	async calendarFile(url: string): Promise<string> {
+		const calendar = this.calendarAt(url);
+		const response = await fetch(calendar.url, { headers: { Authorization: this.authorization(), Accept: 'text/calendar' } });
+		if (!response.ok) throw new Error(`The calendar server would not hand out "${calendar.displayName ?? url}" (${response.status})`);
+		return response.text();
 	}
 
 	async listItems(): Promise<StoredItem[]> {
@@ -301,6 +309,10 @@ export class CalendarStore {
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
 		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
+	}
+
+	private authorization(): string {
+		return `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`;
 	}
 
 	private calendarAt(url: string): DAVCalendar {
