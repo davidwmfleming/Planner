@@ -64,6 +64,9 @@ test('an event stored in two calendars under one UID still shows, and the page s
 		await page.goto(`/?page=${day}`);
 		const copies = page.locator('li[data-uid]', { hasText: name });
 		await expect(copies).toHaveCount(2);
+		// Each copy says which calendar it is in, so "delete the one in …" can be followed.
+		await expect(copies.filter({ hasText: `${name} A` })).toHaveCount(1);
+		await expect(copies.filter({ hasText: `${name} B` })).toHaveCount(1);
 		// Each copy can be dealt with on its own: ticking one leaves the other as it was.
 		await copies.nth(1).getByRole('button', { name: `Tick ${name}` }).click();
 		await expect(page.locator('li.done[data-uid]', { hasText: name })).toHaveCount(1);

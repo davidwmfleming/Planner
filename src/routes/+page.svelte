@@ -128,6 +128,18 @@
 	// One row on the page. A UID alone isn't enough: a move between calendars that stopped halfway can leave
 	// the same item in two calendars, and both copies are shown (each can be ticked or deleted on its own).
 	const rowKey = (item: { uid: string; occurrence?: string; calendar?: string }) => `${item.calendar ?? ''} ${item.uid} ${item.occurrence ?? ''}`;
+	// Items shown more than once on a day (or on Future tasks): each copy says which calendar it is in.
+	const twice = $derived.by(() => {
+		const seen = new Set<string>();
+		const again = new Set<string>();
+		const lists = [...data.days.map((d) => ({ date: d.date, items: [...d.events, ...d.tasks] })), { date: '', items: data.unscheduled }];
+		for (const { date, items } of lists)
+			for (const item of items) {
+				const key = `${date} ${item.uid}`;
+				(seen.has(key) ? again : seen).add(key);
+			}
+		return again;
+	});
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -349,6 +361,7 @@
 		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
+		{@render copyTag(item, date)}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
@@ -370,6 +383,13 @@
 			{/if}
 		{/if}
 	</li>
+{/snippet}
+
+{#snippet copyTag(item: Item, date: string)}
+	{#if twice.has(`${date} ${item.uid}`) && item.calendar}
+		{@const name = data.calendarLabels[item.calendar] ?? item.calendar}
+		<span class="tag cal-tag" title="In {name}">{name}</span>
+	{/if}
 {/snippet}
 
 {#snippet pullButtons(item: Item)}
@@ -484,6 +504,7 @@
 					<li class={[marking[rowKey(item)] ?? item.state, marking[rowKey(item)] && 'marked', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-calendar={item.calendar}>
 						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+						{@render copyTag(item, '')}
 						{@render pullButtons(item)}
 					</li>
 				{/each}
@@ -741,6 +762,8 @@
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
+	/* A long calendar name wraps rather than pushing the row off a phone screen; all of it shows, so the copies can be told apart. */
+	.cal-tag { max-width: 6rem; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }

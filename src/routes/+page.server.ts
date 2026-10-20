@@ -64,6 +64,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		eventCalendars: menuLabels(eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
 		defaultEventCalendar: newEvents && pathOf(newEvents),
 		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
+		// Every calendar's name, as messages name them: shown on an item that is in two calendars (a move that stopped halfway).
+		calendarLabels: calendarLabels(calendars),
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -335,11 +337,14 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	});
 }
 
+/** Each calendar's name by path, told apart as the menus do when two share a name. */
+const calendarLabels = (calendars: { url: string; name: string }[]) =>
+	Object.fromEntries(menuLabels(calendars.map((c) => ({ path: pathOf(c.url), name: c.name }))).map((c) => [c.path, c.label]));
+
 /** After a delete that got no answer: it may still land, so deleting the other copy straight away could leave none.
  * Say to wait, and which copy to delete: the one whose delete is pending, named as the menus name its calendar. */
 function waitThenDelete(store: Awaited<ReturnType<typeof getStore>>, pending: StoredItem) {
-	const calendars = menuLabels(store.calendars().map((c) => ({ path: pathOf(c.url), name: c.name })));
-	const where = calendars.find((c) => c.path === pathOf(pending.calendarUrl))?.label ?? 'the calendar it came from';
+	const where = calendarLabels(store.calendars())[pathOf(pending.calendarUrl)] ?? 'the calendar it came from';
 	return `Wait a minute before reloading the page; then, if it's still in two, delete the one in ${where}.`;
 }
 

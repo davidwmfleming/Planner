@@ -289,6 +289,11 @@ describe('an item stored in two calendars under one UID (a move whose delete fai
 		expect(data.days.flatMap((d) => d.events).map((e) => `${e.uid} ${e.calendar}`)).toEqual(['dentist /david/me/', 'dentist /david/family/']);
 	});
 
+	it('names every calendar as the menus do, so the page can say which calendar each copy is in', async () => {
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarLabels).toEqual({ '/david/me/': 'Me', '/david/family/': 'Family', '/david/tasks/': 'Tasks' });
+	});
+
 	it('changes the copy in the calendar the tap came from', async () => {
 		const changed: string[] = [];
 		fake.update = async (stored: StoredItem) => void changed.push(stored.calendarUrl);
