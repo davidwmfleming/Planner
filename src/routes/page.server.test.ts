@@ -174,3 +174,41 @@ describe('the details sheet', () => {
 		expect(fake.made).toEqual([]);
 	});
 });
+
+describe('when the calendar server fails during a change', () => {
+	const me = cal('me', 'Me');
+	const broken = async () => {
+		throw new Error('Saving "Dentist" failed (500) at http://10.1.2.3/ (secret detail)');
+	};
+	const water = (): StoredItem => ({ ...dentist(me), uid: 'water', kind: 'task', title: 'Water plants', calendarUrl: `${HOME}tasks/`, url: `${HOME}tasks/water.ics` });
+	const weekly = (): StoredItem => ({ ...dentist(me), uid: 'yoga', title: 'Yoga', recurrence: 'FREQ=WEEKLY' });
+	beforeEach(() => {
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me), water(), weekly()];
+		fake.replace = fake.update = fake.updateOccurrence = fake.remove = fake.removeOccurrence = fake.create = broken;
+		fake.ensureCalendar = broken;
+	});
+
+	const cases: [keyof typeof actions, Record<string, string>, string][] = [
+		['mark', { uid: 'dentist', state: 'done' }, 'The calendar server didn\'t save the mark on "Dentist". Reload the page and try again.'],
+		['mark', { uid: 'yoga', state: 'dropped', occurrence: '2026-10-21' }, 'The calendar server didn\'t save the mark on "Yoga". Reload the page and try again.'],
+		['move', { uid: 'water', to: '2026-10-22' }, 'The calendar server didn\'t move "Water plants". Reload the page and try again.'],
+		['unschedule', { uid: 'water' }, 'The calendar server didn\'t move "Water plants". Reload the page and try again.'],
+		['save', { ...inNewCalendar(''), calendar: '/david/me/' }, 'The calendar server didn\'t save "Dentist". Reload the page and try again.'],
+		['save', inNewCalendar('Lessons'), 'The calendar server didn\'t save "Dentist". Reload the page and try again.'],
+		['delete', { uid: 'dentist' }, 'The calendar server didn\'t delete "Dentist". Reload the page and try again.'],
+		['deleteOne', { uid: 'yoga', occurrence: '2026-10-21' }, 'The calendar server didn\'t delete that day of "Yoga". Reload the page and try again.']
+	];
+
+	it.each(cases)('%s says so plainly, keeping the server\'s own error in the log', async (action, fields, message) => {
+		const log: unknown[] = [];
+		console.error = (...args) => log.push(...args);
+		expect(await act(action, fields)).toMatchObject({ status: 502, data: { message } });
+		expect(log.some((e) => e instanceof Error && e.message.includes('secret detail'))).toBe(true);
+	});
+
+	it.each(cases)('%s says the server is not answering when it cannot be reached', async (action, fields) => {
+		connectError = new Error('connect ECONNREFUSED 10.1.2.3:5232');
+		expect(await act(action, fields)).toMatchObject({ status: 503, data: { message: "The calendar server isn't answering. Check that it is running, then reload." } });
+	});
+});

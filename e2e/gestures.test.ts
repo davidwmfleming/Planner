@@ -168,6 +168,22 @@ test('if a mark cannot be saved, the item goes back as it was and says so', asyn
 	await expect(row).not.toHaveClass(/done|marked/);
 });
 
+test('if the calendar server refuses a mark, the item goes back as it was and the page says why', async ({ page }, info) => {
+	const name = unique('Refused mark', info);
+	const message = `The calendar server didn't save the mark on "${name}". Reload the page and try again.`;
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await page.route('**/*&/mark', (route) =>
+		route.fulfill({ contentType: 'application/json', body: JSON.stringify({ type: 'failure', status: 502, data: JSON.stringify([{ message: 1 }, message]) }) })
+	);
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await expect(page.getByRole('alert')).toHaveText(message);
+	await expect(row).not.toHaveClass(/done|marked/);
+	await expect(page.getByRole('heading', { name: /500|Internal Error/ })).toHaveCount(0);
+});
+
 /** A finger stroke (pointerType 'touch'), sent straight to the browser. */
 async function fingerStroke(page: Page, points: [number, number][]) {
 	const cdp = await page.context().newCDPSession(page);

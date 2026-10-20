@@ -10,21 +10,35 @@
 	import { onMount } from 'svelte';
 	import type { PageProps } from './$types';
 
-	let { data, form }: PageProps = $props();
+	let { data }: PageProps = $props();
 
 	// The details sheet: tap an item's title to see and edit everything about it.
 	let editing = $state<Item | null>(null);
 	let sheet = $state<HTMLDialogElement>();
 	// Picking "New calendar…" in the sheet asks for its name.
 	let newCalendar = $state(false);
+	// Why the sheet's last save or delete didn't work.
+	let sheetMessage = $state('');
 	function openDetails(item: Item) {
 		editing = item;
 		newCalendar = false;
+		sheetMessage = '';
 		sheet?.showModal();
 	}
+	const DID_NOT_WORK = 'That did not work; try again';
+	/** A refusal or failure as a plain sentence. Never the error screen, which in the installed app has no way back. */
+	const problemOf = (result: { type: string; data?: Record<string, unknown> }) =>
+		result.type === 'failure' ? String(result.data?.message ?? DID_NOT_WORK) : result.type === 'error' ? DID_NOT_WORK : '';
 	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
+		sheetMessage = problemOf(result);
+		if (sheetMessage) return;
 		await update();
-		if (result.type === 'success' || result.type === 'redirect') sheet?.close();
+		sheet?.close();
+	};
+	// Tick, ✕, → and the other taps on a row: a problem is said at the top of the page, like a line that didn't save.
+	const reportProblems: SubmitFunction = () => async ({ result, update }) => {
+		gestureMessage = problemOf(result);
+		if (!gestureMessage) await update();
 	};
 
 	// "Future tasks" stays out of the way until asked for; the choice is remembered on this device.
@@ -166,8 +180,9 @@
 			gestureMessage = 'That did not save. Check the connection and try again.';
 			return false;
 		}
-		gestureMessage = result.type === 'failure' ? String(result.data?.message ?? 'That did not work; try again') : result.type === 'error' ? 'That did not work; try again' : '';
-		await invalidateAll();
+		gestureMessage = problemOf(result);
+		// Only redraw after a change: with the calendar server down, redrawing would swap the page for an error screen.
+		if (!gestureMessage) await invalidateAll();
 		return result.type === 'success';
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
@@ -255,7 +270,7 @@
 {#snippet itemRow(item: Item, date: string)}
 	{@const mark = marking[markKey(item.uid, item.occurrence)]}
 	<li class={[mark ?? item.state, mark && 'marked', item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
-		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
+		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}"><span class="sq">{item.state === 'done' ? '✓' : ''}</span></button>
@@ -266,19 +281,19 @@
 		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
-		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
+		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="act" name="state" value="dropped" aria-label="{item.state === 'dropped' ? 'Restore' : 'Drop'} {item.title}">✕</button>
 		</form>
 		{#if item.kind === 'task' && date}
-			<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
+			<form method="POST" action="?page={data.start}&/move" use:enhance={reportProblems} class="inline">
 				<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
 			</form>
 			{#if !item.recurrence}
-				<form method="POST" action="?page={data.start}&/unschedule" use:enhance class="inline">
+				<form method="POST" action="?page={data.start}&/unschedule" use:enhance={reportProblems} class="inline">
 					<input type="hidden" name="uid" value={item.uid} />
 					<button class="act" aria-label="Put {item.title} back on Future tasks" title="Back to Future tasks">↩</button>
 				</form>
@@ -288,7 +303,7 @@
 {/snippet}
 
 {#snippet pullButtons(item: Item)}
-	<form method="POST" action="?page={data.start}&/move" use:enhance class="inline">
+	<form method="POST" action="?page={data.start}&/move" use:enhance={reportProblems} class="inline">
 		<input type="hidden" name="uid" value={item.uid} />
 		<button class="pull" name="to" value={data.today} aria-label="Put {item.title} on today">Today</button>
 		<button class="pull" name="to" value={data.saturday} aria-label="Put {item.title} on Saturday">Sat</button>
@@ -444,7 +459,7 @@
 				</label>
 				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
 				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
-				{#if form?.message}<p class="error" role="alert">{form.message}</p>{/if}
+				{#if sheetMessage}<p class="error" role="alert">{sheetMessage}</p>{/if}
 				<p class="hint">
 					Leave the date empty to keep a task in Future tasks.
 					{#if editing.recurrence}Changes here apply to every day it repeats; tick, ✕ and → change just one day.{/if}

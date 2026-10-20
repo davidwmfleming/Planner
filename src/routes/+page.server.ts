@@ -124,14 +124,15 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const state = form.get('state');
 		if (state !== 'done' && state !== 'dropped') return fail(400, { message: 'Unknown mark' });
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const set = form.get('set') === 'yes';
 		const toggle = (current: Item): Partial<Item> => ({ state: current.state === state && !set ? 'open' : state });
 		const day = String(form.get('occurrence') ?? '');
-		if (item.recurrence && ISO.test(day)) await store.updateOccurrence(item, day, toggle);
-		else await store.update(item, toggle(item));
+		return change(`save the mark on "${item.title}"`, () =>
+			item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, toggle) : store.update(item, toggle(item))
+		);
 	},
 
 	/** Move a task to another day (the arrow moves it to the next day). */
@@ -139,33 +140,34 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const to = String(form.get('to') ?? '');
 		if (!ISO.test(to)) return fail(400, { message: 'That day is not a valid date' });
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const moveTo = (current: Item) => current.kind === 'event' && current.endDate
 			? { date: to, endDate: addDays(to, daysBetween(current.date!, current.endDate)) }
 			: { date: to };
 		const day = String(form.get('occurrence') ?? '');
-		if (item.recurrence && ISO.test(day)) await store.updateOccurrence(item, day, moveTo);
-		else await store.update(item, moveTo(item));
+		return change(`move "${item.title}"`, () =>
+			item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, moveTo) : store.update(item, moveTo(item))
+		);
 	},
 
 	/** Takes a task off its day and puts it back on the Future tasks list. */
 	unschedule: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
 		const { store, item } = found;
 		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Future tasks' });
 		const { date, time, carriedFrom, ...rest } = item;
-		await store.replace(item, rest);
+		return change(`move "${item.title}"`, () => store.replace(item, rest));
 	},
 
 	/** The details sheet: edit any field, switch between event and task. */
 	save: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const field = (name: string) => String(form.get(name) ?? '');
 		const result = applyEdit(item, {
@@ -175,31 +177,33 @@ export const actions: Actions = {
 		});
 		if ('error' in result) return fail(400, { message: result.error });
 		// Events can be filed in any calendar that takes events (Me, Family, Work…), or in a new one made here.
-		let wanted;
-		if (result.item.kind === 'event' && field('calendar') === NEW_CALENDAR) {
-			// The same name rules as the settings page; a calendar that already exists is picked from the list.
-			const checked = checkCalendarName(field('newCalendar'), store.calendars());
-			if ('error' in checked) return fail(400, { message: checked.error });
-			wanted = await store.ensureCalendar(checked.name, ['event']);
-		} else if (result.item.kind === 'event') {
-			wanted = calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'));
-		}
-		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, await getSettings(store)));
-		if (result.item.kind === item.kind && target === item.calendarUrl) {
-			// Fields left blank are removed, so save the whole item rather than a merge.
-			await store.replace(item, result.item);
-		} else {
-			// A different calendar, or events and tasks (different kinds of entry): write the new one, then remove the old.
-			await store.create(target, result.item, result.item.kind === item.kind ? item.ics : undefined);
-			await store.remove(item);
-		}
+		// The same name rules as the settings page; a calendar that already exists is picked from the list.
+		const newName = result.item.kind === 'event' && field('calendar') === NEW_CALENDAR ? checkCalendarName(field('newCalendar'), store.calendars()) : undefined;
+		if (newName && 'error' in newName) return fail(400, { message: newName.error });
+		return change(`save "${item.title}"`, async () => {
+			const wanted = newName
+				? await store.ensureCalendar(newName.name, ['event'])
+				: result.item.kind === 'event'
+					? calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'))
+					: undefined;
+			const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, await getSettings(store)));
+			if (result.item.kind === item.kind && target === item.calendarUrl) {
+				// Fields left blank are removed, so save the whole item rather than a merge.
+				await store.replace(item, result.item);
+			} else {
+				// A different calendar, or events and tasks (different kinds of entry): write the new one, then remove the old.
+				await store.create(target, result.item, result.item.kind === item.kind ? item.ics : undefined);
+				await store.remove(item);
+			}
+		});
 	},
 
 	delete: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
-		await found.store.remove(found.item);
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
+		const { store, item } = found;
+		return change(`delete "${item.title}"`, () => store.remove(item));
 	},
 
 	/** Removes one day of a repeating item and keeps the rest of the series. */
@@ -207,15 +211,35 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const day = String(form.get('occurrence') ?? '');
 		if (!ISO.test(day)) return fail(400, { message: 'Which day should be removed?' });
-		const found = await findItem(String(form.get('uid') ?? ''));
-		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
-		if (!found.item.recurrence) return fail(400, { message: 'This item does not repeat' });
-		await found.store.removeOccurrence(found.item, day);
+		const found = await findItem(form);
+		if (!('item' in found)) return found;
+		const { store, item } = found;
+		if (!item.recurrence) return fail(400, { message: 'This item does not repeat' });
+		return change(`delete that day of "${item.title}"`, () => store.removeOccurrence(item, day));
 	}
 };
 
-async function findItem(uid: string) {
-	const store = await getStore();
-	const item = (await store.listItems()).find((i) => i.uid === uid);
-	return item ? { store, item } : undefined;
+/** The item a form is about, or a plain message for the page if it is gone or the calendar server isn't answering. */
+async function findItem(form: FormData) {
+	const uid = String(form.get('uid') ?? '');
+	let store, item;
+	try {
+		store = await getStore();
+		item = (await store.listItems()).find((i) => i.uid === uid);
+	} catch (e) {
+		console.error('Planner: could not reach the calendar server to change an item', e);
+		return fail(503, { message: NOT_ANSWERING });
+	}
+	return item ? { store, item } : fail(404, { message: 'That item is no longer on the calendar; reload the page' });
+}
+
+/** Makes a change on the calendar server. If it fails, the details go to the server's log and the page gets a plain
+ * message rather than an error screen. The item may have been changed on a phone meanwhile, hence the reload. */
+async function change(what: string, work: () => Promise<unknown>) {
+	try {
+		await work();
+	} catch (e) {
+		console.error(`Planner: could not ${what}`, e);
+		return fail(502, { message: `The calendar server didn't ${what}. Reload the page and try again.` });
+	}
 }
