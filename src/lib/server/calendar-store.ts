@@ -79,9 +79,8 @@ export class CalendarStore {
 		if (existing) return existing;
 		const home = this.client.account?.homeUrl;
 		if (!home) throw new Error('The calendar server did not report a home folder for this user');
-		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 		const made = this.client.makeCalendar({
-			url: new URL(`${slug}/`, home).href,
+			url: this.freeAddress(name, home),
 			props: {
 				displayname: name,
 				'c:supported-calendar-component-set': {
@@ -97,12 +96,27 @@ export class CalendarStore {
 		return created;
 	}
 
+	/** An address for a new calendar, from its name, that no calendar uses yet. A renamed calendar keeps
+	 * its old address, so "Work" renamed to "Office" still sits at work/ and a new "Work" gets work-2/. */
+	private freeAddress(name: string, home: string): string {
+		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'calendar';
+		const used = new Set(this.calendars().map((c) => new URL(c.url).pathname));
+		for (let n = 1; ; n++) {
+			const url = new URL(`${n === 1 ? slug : `${slug}-${n}`}/`, home);
+			if (!used.has(url.pathname)) return url.href;
+		}
+	}
+
 	/** Changes a calendar's display name; its address and contents stay the same. Does nothing if it isn't there. */
 	async renameCalendar(from: string, to: string): Promise<void> {
 		const calendar = this.calendars().find((c) => c.name === from);
-		if (!calendar) return;
-		const status = await this.proppatch(calendar.url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
-		if (status >= 300) throw new Error(`The calendar server refused to rename "${from}" (${status})`);
+		if (calendar) await this.renameCalendarAt(calendar.url, to);
+	}
+
+	/** Renames the calendar at this address, so two calendars with the same name can't be mixed up. */
+	async renameCalendarAt(url: string, to: string): Promise<void> {
+		const status = await this.proppatch(url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
+		if (status >= 300) throw new Error(`The calendar server refused to rename ${url} (${status})`);
 		await this.refreshCalendars();
 	}
 

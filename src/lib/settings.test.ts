@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calendarAtPath, DEFAULT_CATEGORIES, parseSettings } from './settings';
+import { calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -53,5 +53,35 @@ describe('calendarAtPath', () => {
 	it('finds nothing for no choice or a calendar that is gone', () => {
 		expect(calendarAtPath(calendars, null)).toBeUndefined();
 		expect(calendarAtPath(calendars, '/david/old/')).toBeUndefined();
+	});
+});
+
+describe('checkCalendarName', () => {
+	const all = [...calendars, { url: 'http://127.0.0.1:5232/david/tasks/', name: 'Tasks' }];
+
+	it('accepts a new name, tidying spaces', () => {
+		expect(checkCalendarName('  School   run ', all)).toEqual({ name: 'School run' });
+	});
+
+	it('refuses an empty name', () => {
+		expect(checkCalendarName('', all)).toEqual({ error: 'Give the calendar a name' });
+		expect(checkCalendarName('   ', all)).toEqual({ error: 'Give the calendar a name' });
+	});
+
+	it('allows 40 letters but not 41, counting an emoji as one', () => {
+		expect(checkCalendarName('a'.repeat(40), all)).toEqual({ name: 'a'.repeat(40) });
+		expect(checkCalendarName('a'.repeat(41), all)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
+		expect(checkCalendarName(`${'a'.repeat(38)}🎹`, all)).toEqual({ name: `${'a'.repeat(38)}🎹` });
+	});
+
+	it('refuses a name already used by any calendar or list, whatever the case', () => {
+		expect(checkCalendarName('family', all)).toEqual({ error: 'There is already a calendar called "Family"' });
+		expect(checkCalendarName('TASKS', all)).toEqual({ error: 'There is already a calendar called "Tasks"' });
+	});
+
+	it('lets a calendar being renamed keep its name or change only its case', () => {
+		expect(checkCalendarName('Work', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ name: 'Work' });
+		expect(checkCalendarName('WORK', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ name: 'WORK' });
+		expect(checkCalendarName('Me', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ error: 'There is already a calendar called "Me"' });
 	});
 });

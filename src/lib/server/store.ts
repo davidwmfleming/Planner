@@ -32,6 +32,9 @@ const tasksCalendarName = () => env.TASKS_CALENDAR ?? 'Tasks';
 /** WORK_CALENDAR and EVENTS_CALENDAR only fill in the settings the first time; after that the settings decide. */
 const seed = () => ({ workCalendar: env.WORK_CALENDAR ?? 'Work', eventsCalendar: env.EVENTS_CALENDAR ?? 'Me' });
 
+/** The collection every task lives in; it holds the settings, so it is never renamed or deleted. */
+export const tasksUrl = (store: CalendarStore) => tasksCalendarUrl(store, tasksCalendarName());
+
 /** David's settings, kept on the Tasks collection. */
 export async function getSettings(store: CalendarStore): Promise<Settings> {
 	const { workCalendar, eventsCalendar } = seed();

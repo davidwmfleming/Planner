@@ -68,6 +68,19 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		await store.renameCalendar('Not there', 'Anything'); // quietly does nothing
 	});
 
+	it('makes a calendar whose name a renamed calendar once had, or that has no plain letters', async () => {
+		const first = await store.ensureCalendar('Piano', ['event']);
+		await store.renameCalendarAt(first.url, 'Music');
+		const again = await store.ensureCalendar('Piano', ['event']);
+		expect(again.url).not.toBe(first.url);
+		expect(store.calendars().find((c) => c.url === first.url)?.name).toBe('Music');
+
+		const greek = await store.ensureCalendar('Μουσική', ['event']);
+		const japanese = await store.ensureCalendar('音楽', ['event']);
+		expect(new Set([greek.url, japanese.url]).size).toBe(2);
+		expect(greek.accepts).toEqual(['event']);
+	});
+
 	it('saves, reads back, updates and deletes events and tasks', async () => {
 		const personal = await store.ensureCalendar('Personal', ['event']);
 		const tasks = await store.ensureCalendar('Tasks', ['task']);

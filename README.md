@@ -29,7 +29,7 @@ The starting calendars (Me, Family, Workouts, Morgan Meals, Work and the Tasks l
 
 ## Settings
 
-The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. For now it only shows them; changing them from this page comes in later versions. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
+The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. **Add** makes a new event calendar, and **Rename** changes a calendar's name; phones that sync it pick up the new name on their next sync. A name can be up to 40 letters and can't match another calendar or list (capitals don't count). The Tasks list can't be renamed, since every task and the settings live there. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
 
 ## Running it on the server (or a test VM)
 

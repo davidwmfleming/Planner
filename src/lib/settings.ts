@@ -47,3 +47,17 @@ export function parseSettings(raw: string | undefined, calendars: { url: string;
 export function calendarAtPath<T extends { url: string }>(calendars: T[], path: string | null): T | undefined {
 	return path ? calendars.find((c) => new URL(c.url).pathname === path) : undefined;
 }
+
+/** Longest calendar name the settings page accepts. */
+export const MAX_NAME = 40;
+
+/** Checks a name for a new or renamed calendar: 1 to 40 letters, not used by any other collection (case ignored).
+ * `current` is the URL of the calendar being renamed, which may keep its own name. */
+export function checkCalendarName(raw: string, calendars: { url: string; name: string }[], current?: string): { name: string } | { error: string } {
+	const name = raw.replace(/\s+/g, ' ').trim();
+	if (!name) return { error: 'Give the calendar a name' };
+	if ([...name].length > MAX_NAME) return { error: `Keep the name to ${MAX_NAME} letters or fewer` };
+	const taken = calendars.find((c) => c.url !== current && c.name.toLowerCase() === name.toLowerCase());
+	if (taken) return { error: `There is already a calendar called "${taken.name}"` };
+	return { name };
+}
