@@ -359,6 +359,17 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(result).toMatchObject({ status: 502, data: { message: expect.stringContaining('may now be in two calendars') } });
 	});
 
+	it.each([500, 502, 503, 504])('keeps the new copy when the old one\'s delete gets a %i, which may not be the last word', async (status) => {
+		// A server error or a proxy giving up is not a refusal: the calendar server may still carry the delete out,
+		// and taking the new copy out then would leave "Dentist" in no calendar at all.
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError(`Deleting "Dentist" failed (${status})`, status);
+			removed.push(stored.url);
+		};
+		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: expect.stringContaining("didn't confirm it removed the old one") } });
+		expect(removed).toEqual([]);
+	});
+
 	it('keeps the new copy when the connection drops during the old one\'s delete', async () => {
 		fake.remove = async (stored: StoredItem) => {
 			if (stored.calendarUrl === me.url) throw new TypeError('fetch failed');

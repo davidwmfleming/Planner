@@ -17,6 +17,9 @@ const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 const NEW_CALENDAR = '+new';
 /** What the calendar server says when asked for something that isn't there (any more). */
 const GONE = [404, 410];
+/** The calendar server answered and said no (4xx), so the change surely wasn't made. A 5xx is not that sure: a proxy
+ * that gave up waiting (502, 503, 504) or a server that failed partway may still see the change carried out. */
+const refused = (e: unknown): e is RefusedError => e instanceof RefusedError && e.status < 500;
 const NOT_ANSWERING = "The calendar server isn't answering. Check that it is running, then reload.";
 
 /** Calendars are passed to the page by path, which stays the same through a rename and tells two of one name apart. */
@@ -297,10 +300,10 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
 }
 
 /** The second half of moving an item to another calendar: remove the old copy, and say what happened.
- * Only a delete the calendar server answered with a refusal surely wasn't done; then the new copy is taken back out,
+ * Only a delete the calendar server answered with a refusal (4xx) surely wasn't done; then the new copy is taken back out,
  * so the item isn't left in two calendars. A delete that got no answer may still be done later (the server can queue
  * it), so then the new copy always stays: taking it out could leave the item in no calendar at all. Reading the
- * calendars again only tells whether the move is surely done or says it may be in two.
+ * calendars again only tells whether the move is surely done or says it may be in two. A server error (5xx) counts as no answer.
  * An old copy already gone (404) was removed by someone else: by another move of the same item, perhaps, whose copy
  * is now somewhere else. So once the old copy is gone, any other copy left is reported too. */
 async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited = false) {
@@ -312,8 +315,8 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 		await store.remove(old);
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
-		if (e instanceof RefusedError && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
-		answered = e instanceof RefusedError;
+		if (refused(e) && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
+		answered = refused(e);
 	}
 	const left = await elsewhere(store, old, copy);
 	if (left === 0 || (answered && left === undefined)) return;
