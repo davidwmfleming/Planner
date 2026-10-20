@@ -181,7 +181,7 @@ export const actions: Actions = {
 	/** The details sheet: edit any field, switch between event and task. */
 	save: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(form);
+		const found = await findItem(form, true);
 		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const field = (name: string) => String(form.get(name) ?? '');
@@ -217,8 +217,9 @@ export const actions: Actions = {
 
 	delete: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(form);
-		if (!('item' in found)) return found;
+		const found = await findItem(form, true);
+		// The copy tapped is gone already: that is what was asked for.
+		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
 		// Already gone (deleted on a phone, or an earlier delete that got no answer landed after all) is done, not a failure.
 		return change(`delete "${shortTitle(item.title)}"`, () =>
@@ -233,8 +234,8 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const day = String(form.get('occurrence') ?? '');
 		if (!ISO.test(day)) return fail(400, { message: 'Which day should be removed?' });
-		const found = await findItem(form);
-		if (!('item' in found)) return found;
+		const found = await findItem(form, true);
+		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
 		if (!item.recurrence) return fail(400, { message: 'This item does not repeat' });
 		return change(`delete that day of "${shortTitle(item.title)}"`, () => store.removeOccurrence(item, day));
@@ -242,8 +243,10 @@ export const actions: Actions = {
 };
 
 /** The item a form is about, or a plain message for the page if it is gone or the calendar server isn't answering.
- * One UID can be in two calendars (a move between calendars that stopped halfway); the form says which copy. */
-async function findItem(form: FormData) {
+ * One UID can be in two calendars (a move between calendars that stopped halfway); the form says which copy.
+ * A tick may fall back to another copy, but anything that can remove a copy (a delete, or a save that moves it)
+ * asks for `exact`: then only the copy tapped will do, so the other one, perhaps now the only one, is never touched. */
+async function findItem(form: FormData, exact = false) {
 	const uid = String(form.get('uid') ?? '');
 	// Not "calendar": the details sheet uses that for the calendar to file it in.
 	const keptIn = String(form.get('keptIn') ?? '');
@@ -251,7 +254,7 @@ async function findItem(form: FormData) {
 	try {
 		store = await getStore();
 		const copies = (await store.listItems()).filter((i) => i.uid === uid);
-		item = copies.find((i) => pathOf(i.calendarUrl) === keptIn) ?? copies[0];
+		item = copies.find((i) => pathOf(i.calendarUrl) === keptIn) ?? (!exact ? copies[0] : !keptIn && copies.length === 1 ? copies[0] : undefined);
 	} catch (e) {
 		console.error('Planner: could not reach the calendar server to change an item', e);
 		return fail(503, { message: NOT_ANSWERING });

@@ -41,11 +41,11 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 			this.listed = this.onServer = [...this.onServer, made];
 			return made;
 		},
-		async replace() {},
+		async replace(..._args: unknown[]) {},
 		async update(..._args: unknown[]) {},
 		async updateOccurrence() {},
 		async remove(..._args: unknown[]) {},
-		async removeOccurrence() {},
+		async removeOccurrence(..._args: unknown[]) {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
 		async readSettings() {
 			return settings;
@@ -544,5 +544,53 @@ describe('a second tap that arrives while the first is saving', () => {
 		fake.listItems = async () => (reads++ === 0 ? [before] : [{ ...before, state: 'dropped' as const }]);
 		fake.update = refused;
 		expect(await act('mark', { uid: 'dentist', state: 'done' })).toMatchObject({ status: 502 });
+	});
+});
+// After a move whose delete got no answer, the page shows two copies and says to delete the one in the old calendar.
+// If that old copy goes meanwhile (its late delete lands, or a phone deletes it), the tap on its Delete must not
+// fall through to the other copy, which is now the only one.
+describe('deleting a copy that went away after the page was drawn', () => {
+	const me = cal('me', 'Me');
+	const family = cal('family', 'Family');
+	beforeEach(() => {
+		fake = fakeStore([me, family, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(family)]; // the copy in Me is already gone
+	});
+
+	it('leaves the copy in another calendar alone', async () => {
+		const removed: string[] = [];
+		fake.remove = async (stored: StoredItem) => void removed.push(stored.calendarUrl);
+		await act('delete', { uid: 'dentist', keptIn: '/david/me/' });
+		expect(removed).toEqual([]);
+	});
+
+	it('counts the delete as done, since the copy tapped is gone', async () => {
+		expect(await act('delete', { uid: 'dentist', keptIn: '/david/me/' })).toBeUndefined();
+	});
+
+	it('leaves the other copy alone for "Delete this day" too', async () => {
+		fake.items = [{ ...dentist(family), recurrence: 'FREQ=WEEKLY' }];
+		const changed: string[] = [];
+		fake.removeOccurrence = async (stored: StoredItem) => void changed.push(stored.calendarUrl);
+		expect(await act('deleteOne', { uid: 'dentist', keptIn: '/david/me/', occurrence: '2026-10-21' })).toBeUndefined();
+		expect(changed).toEqual([]);
+	});
+
+	it('does not save the sheet onto the other copy, which a move would then remove', async () => {
+		const touched: string[] = [];
+		fake.replace = fake.remove = async (stored: StoredItem) => void touched.push(stored.calendarUrl);
+		fake.create = async (url: string) => void touched.push(url);
+		expect(await act('save', { ...inNewCalendar(''), keptIn: '/david/me/', calendar: '/david/me/' })).toMatchObject({
+			status: 404,
+			data: { message: 'That item is no longer on the calendar; reload the page' }
+		});
+		expect(touched).toEqual([]);
+	});
+
+	it('still deletes the only copy when the page did not say which calendar it is in', async () => {
+		const removed: string[] = [];
+		fake.remove = async (stored: StoredItem) => void removed.push(stored.calendarUrl);
+		await act('delete', { uid: 'dentist' });
+		expect(removed).toEqual([family.url]);
 	});
 });
