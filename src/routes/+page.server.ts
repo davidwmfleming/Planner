@@ -15,6 +15,8 @@ import type { Actions, PageServerLoad } from './$types';
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 const NEW_CALENDAR = '+new';
+/** What the calendar server says when asked for something that isn't there (any more). */
+const GONE = [404, 410];
 const NOT_ANSWERING = "The calendar server isn't answering. Check that it is running, then reload.";
 
 /** Calendars are passed to the page by path, which stays the same through a rename and tells two of one name apart. */
@@ -293,19 +295,33 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
  * Only a delete the calendar server answered with a refusal surely wasn't done; then the new copy is taken back out,
  * so the item isn't left in two calendars. A delete that got no answer may still be done later (the server can queue
  * it), so then the new copy always stays: taking it out could leave the item in no calendar at all. Reading the
- * calendars again only tells whether the move is surely done (the old copy is gone) or says it may be in two. */
+ * calendars again only tells whether the move is surely done or says it may be in two.
+ * An old copy already gone (404) was removed by someone else: by another move of the same item, perhaps, whose copy
+ * is now somewhere else. So once the old copy is gone, any other copy left is reported too. */
 async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
 	// The "copy" took the old one's place (same address): there is nothing to remove, and removing would lose it.
 	if (copy.url === old.url) return;
 	const title = shortTitle(old.title);
-	const maybeTwice = `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Reload the page and delete the one you don't want.`;
+	let answered = true;
 	try {
 		await store.remove(old);
-		return;
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
-		if (!(e instanceof RefusedError)) return (await elsewhere(store, old, copy)) === 0 ? undefined : fail(502, { message: maybeTwice });
+		if (e instanceof RefusedError && !GONE.includes(e.status)) return takeBack(store, old, copy);
+		answered = e instanceof RefusedError;
 	}
+	const left = await elsewhere(store, old, copy);
+	if (left === 0 || (answered && left === undefined)) return;
+	return fail(502, {
+		message: answered
+			? `"${title}" may now be in two calendars, because it seems to have been moved on another device at the same time. Reload the page and delete the one you don't want.`
+			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Reload the page and delete the one you don't want.`
+	});
+}
+
+/** The calendar server refused to remove the old copy, so it is surely still there: take the new one back out. */
+async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
+	const title = shortTitle(old.title);
 	try {
 		await store.remove(copy);
 		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was. Reload the page and try again.` });

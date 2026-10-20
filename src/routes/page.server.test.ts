@@ -352,6 +352,46 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(removed).toEqual([]);
 	});
 
+	describe('while someone else moves it at the same time', () => {
+		const work = cal('work', 'Work');
+		const twice = '"Dentist" may now be in two calendars, because it seems to have been moved on another device at the same time. Reload the page and delete the one you don\'t want.';
+
+		it('says it may be in two calendars when the old copy was already removed by the other move', async () => {
+			// The other move saved its copy in Work and removed the old one before this delete arrived.
+			fake.remove = async (stored: StoredItem) => {
+				if (stored.calendarUrl === me.url) {
+					fake.items = [dentist(work), dentist(family)];
+					throw new RefusedError('Deleting "Dentist" failed (404)', 404);
+				}
+				removed.push(stored.url);
+			};
+			expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: twice } });
+			expect(removed).toEqual([]);
+		});
+
+		it('says it may be in two calendars when the other move\'s copy is there after this one removed the old copy', async () => {
+			fake.remove = async (stored: StoredItem) => {
+				if (stored.calendarUrl === me.url) fake.items = [dentist(work), dentist(family)];
+				else removed.push(stored.url);
+			};
+			expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: twice } });
+			expect(removed).toEqual([]);
+		});
+
+		it('counts the move as done when the old copy is gone and no other copy is left', async () => {
+			// Deleted on a phone in the meantime, say: the new copy is the only one, so it must stay.
+			fake.remove = async (stored: StoredItem) => {
+				if (stored.calendarUrl === me.url) {
+					fake.items = [dentist(family)];
+					throw new RefusedError('Deleting "Dentist" failed (404)', 404);
+				}
+				removed.push(stored.url);
+			};
+			expect(await act('save', toFamily)).toBeUndefined();
+			expect(removed).toEqual([]);
+		});
+	});
+
 	it('says plainly when the item is left in both calendars', async () => {
 		fake.remove = async () => {
 			throw new RefusedError('Deleting "Dentist" failed (403)', 403);
