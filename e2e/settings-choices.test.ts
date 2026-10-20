@@ -190,3 +190,21 @@ test('deleting the Work and new-events calendar sets Work to none and new events
 	const first = (await calendars.getByLabel('New events go in').locator('option').allInnerTexts())[0];
 	await expect(calendars.getByLabel('New events go in').locator('option:checked')).toHaveText(first);
 });
+
+test('at 320 wide, a calendar tagged "New events" keeps its words whole', async ({ page }) => {
+	await choose(page, { newEvents: 'Morgan Meals' });
+	await page.setViewportSize({ width: 320, height: 700 });
+	const row = page.getByRole('region', { name: 'Event calendars' }).getByRole('listitem').filter({ hasText: 'New events' });
+	await expect(row).toContainText('Morgan Meals');
+	// Each word of the name fits on its line: the name is at least as wide as its longest word.
+	const [shown, longestWord] = await row.locator('.name').evaluate((el) => {
+		const probe = Object.assign(document.createElement('span'), { textContent: 'Morgan' });
+		el.append(probe);
+		const word = probe.getBoundingClientRect().width;
+		probe.remove();
+		return [el.getBoundingClientRect().width, word];
+	});
+	expect(shown).toBeGreaterThanOrEqual(longestWord);
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+	expect(overflow).toBe(0);
+});

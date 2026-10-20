@@ -76,6 +76,12 @@ test('a calendar can be deleted with its items, and Cancel leaves it alone', asy
 		await expect(confirm).toHaveCount(0);
 		await expect(del).toBeFocused();
 
+		// Escape closes it too, back on the Delete button.
+		await del.click();
+		await confirm.getByRole('radio', { name: 'Delete them too' }).press('Escape');
+		await expect(confirm).toHaveCount(0);
+		await expect(del).toBeFocused();
+
 		await del.click();
 		await confirm.getByRole('radio', { name: 'Delete them too' }).check();
 		await confirm.getByRole('button', { name: `Delete ${doomed.name} and its 1 item` }).click();

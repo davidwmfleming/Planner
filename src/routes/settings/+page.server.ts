@@ -268,7 +268,12 @@ function unfinished(name: string, toName: string, total: number, tally: Record<M
 /** Points Work and new events away from the calendar, then deletes it, only at the version given. */
 async function finish(store: CalendarStore, calendar: Calendar, version: string | undefined, done: Deleted): Promise<Deleted | Refusal> {
 	const name = shortTitle(calendar.name);
-	if (!version) return refuse(502, `The calendar server didn't say which version of ${name} it holds, so nothing was deleted. Try again in a moment.`);
+	// Once the items have moved, "nothing was deleted" would be untrue: say what was done.
+	const notDeleted = (why: string) =>
+		done.movedTo
+			? refuse(502, `Moved ${items(done.count)} to ${shortTitle(done.movedTo)}, but ${why}, so ${name} is still there, empty. Try deleting it again in a moment.`)
+			: refuse(502, `${why[0].toUpperCase()}${why.slice(1)}, so nothing was deleted. Try again in a moment.`);
+	if (!version) return notDeleted(`the calendar server didn't say which version of ${name} it holds`);
 	const tasks = tasksUrl(store);
 	const path = pathOf(calendar.url);
 	let before: Settings | undefined;
@@ -282,17 +287,16 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 		}
 	} catch (e) {
 		console.error(`Settings: could not change the choices before deleting "${calendar.name}"`, e);
-		return refuse(502, "The calendar server didn't change the Work and new-event choices, so nothing was deleted. Try again in a moment.");
+		return notDeleted("the calendar server didn't change the Work and new-event choices");
 	}
 	try {
 		await store.deleteCalendar(calendar.url, version);
 	} catch (e) {
 		if (e instanceof RefusedError && GONE.includes(e.status)) return done; // deleted elsewhere meanwhile
 		console.error(`Settings: could not delete "${calendar.name}"`, e);
-		// A late answer is not a refusal: the server may still delete it.
-		if (unanswered(e) || (e instanceof RefusedError && e.status >= 500)) {
-			return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);
-		}
+		// A late answer, or a server error, is not a refusal: the server may still delete it, or have done so.
+		if (unanswered(e)) return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);
+		if (e instanceof RefusedError && e.status >= 500) return refuse(502, `The calendar server had a problem deleting ${name}, so it may or may not be gone. Reload the page to see.`);
 		// Surely not deleted: put the choices back as they were.
 		if (before && tasks) await store.writeSettings(tasks, before).catch((e) => console.error('Settings: could not put the choices back', e));
 		if (e instanceof RefusedError && e.status === 412) return refuse(409, `${name} changed just now, on another device perhaps, so it wasn't deleted. Reload the page and try again.`);

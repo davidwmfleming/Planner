@@ -98,3 +98,42 @@ test('after a move that stopped part way, the confirm names what is left, not th
 		await deleteCalendar(request, to.path);
 	}
 });
+
+test('choosing a calendar that takes tasks clears the reason the last choice was refused', async ({ page, request }, info) => {
+	const mixed = await calendarWith(request, info, 'Mix', ['VEVENT', 'VTODO']);
+	const eventsOnly = await calendarWith(request, info, 'Evo');
+	const both = await calendarWith(request, info, 'Both', ['VEVENT', 'VTODO']);
+	await putEntry(request, mixed.path, 't.ics', todo(`t-${mixed.slug}`, 'A task'));
+	try {
+		await page.goto('/settings');
+		const calendars = calendarsOn(page);
+		await calendars.getByRole('button', { name: `Delete ${mixed.name}` }).click();
+		const confirm = calendars.getByRole('group', { name: `Delete ${mixed.name}` });
+		await confirm.getByLabel('Calendar to move them to').selectOption({ label: eventsOnly.name });
+		await confirm.getByRole('button', { name: /^Move 1 item/ }).click();
+		await expect(confirm.getByRole('alert')).toContainText('only takes events');
+		await confirm.getByLabel('Calendar to move them to').selectOption({ label: both.name });
+		await expect(confirm.getByRole('alert')).toHaveCount(0);
+	} finally {
+		for (const c of [mixed, eventsOnly, both]) await deleteCalendar(request, c.path);
+	}
+});
+
+test('after a refused delete, the keyboard stays on the confirm, not the top of the page', async ({ page, request }, info) => {
+	const busy = await calendarWith(request, info, 'Focus');
+	await putEntry(request, busy.path, 'a.ics', event(`a-${busy.slug}`, 'First'));
+	try {
+		await page.goto('/settings');
+		const calendars = calendarsOn(page);
+		await calendars.getByRole('button', { name: `Delete ${busy.name}` }).click();
+		const confirm = calendars.getByRole('group', { name: `Delete ${busy.name}` });
+		await confirm.getByRole('radio', { name: 'Delete them too' }).check();
+		await putEntry(request, busy.path, 'late.ics', event(`late-${busy.slug}`, 'Added on the phone'));
+		await confirm.getByRole('button', { name: `Delete ${busy.name} and its 1 item` }).focus();
+		await page.keyboard.press('Enter');
+		await expect(confirm.getByRole('alert')).toContainText('changed since you looked');
+		expect(await page.evaluate(() => !!document.activeElement?.closest('[role="group"]'))).toBe(true);
+	} finally {
+		await deleteCalendar(request, busy.path);
+	}
+});

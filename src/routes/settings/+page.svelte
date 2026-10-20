@@ -84,8 +84,20 @@
 		deleting = deletePath = deleteError = mode = undefined;
 	}
 
+	/** A new choice of where the items go: the reason the last one was refused no longer applies. */
+	function choiceChanged() {
+		if (deleteError?.path === deletePath) deleteError = undefined;
+	}
+
+	function confirmKeys(e: KeyboardEvent) {
+		if (e.key !== 'Escape' || !deleting || busyPath) return;
+		e.preventDefault();
+		cancelDelete();
+	}
+
 	/** Closes the confirm and puts the keyboard back on that calendar's Delete button. */
 	async function cancelDelete() {
+		if (busyPath) return; // it can't be stopped once sent
 		const path = deletePath;
 		closeDelete();
 		await tick();
@@ -147,6 +159,9 @@
 		// The calendar changed since it was counted: show the new count, which a second tap then deletes.
 		const fresh = result.type === 'failure' ? (result.data as { count?: number; version?: string }) : {};
 		if (deleting?.path === path && fresh.count !== undefined && fresh.version) deleting = { ...deleting, count: fresh.count, version: fresh.version };
+		// The button that was tapped has given way to "Deleting…" and back; keep the keyboard in the confirm, on the count.
+		await tick();
+		if (deleting?.path === path) document.querySelector<HTMLElement>('#delete-count')?.focus();
 	}
 
 	// "Download everything": one export at a time; a failure is said here, on the page.
@@ -223,12 +238,12 @@
 				<fieldset>
 					<legend>What happens to {counted.count === 1 ? 'it' : 'them'}</legend>
 					<div class="move">
-						<label class="choice"><input type="radio" name="mode" value="move" bind:group={mode} /> Move them to</label>
-						<select name="to" aria-label="Calendar to move them to" bind:value={moveTo} onchange={() => (mode = 'move')}>
+						<label class="choice"><input type="radio" name="mode" value="move" bind:group={mode} onchange={choiceChanged} /> Move them to</label>
+						<select name="to" aria-label="Calendar to move them to" bind:value={moveTo} onchange={() => ((mode = 'move'), choiceChanged())}>
 							{#each others as other (other.path)}<option value={other.path}>{other.label}</option>{/each}
 						</select>
 					</div>
-					<label class="choice"><input type="radio" name="mode" value="delete" bind:group={mode} /> Delete them too</label>
+					<label class="choice"><input type="radio" name="mode" value="delete" bind:group={mode} onchange={choiceChanged} /> Delete them too</label>
 				</fieldset>
 			{:else}
 				<input type="hidden" name="mode" value="delete" />
@@ -253,6 +268,9 @@
 		</div>
 	</form>
 {/snippet}
+
+<!-- Escape closes the delete confirm, as Cancel does (not while the delete is under way). -->
+<svelte:window onkeydown={confirmKeys} />
 
 <svelte:head>
 	<title>Planner · Settings</title>
@@ -405,7 +423,9 @@
 	h2 { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; font-weight: 700; }
 	.lines { list-style: none; margin: 0; padding: 0; }
 	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
-	.name { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
+	/* A name never shrinks below its longest word: if that word and the tags and buttons don't fit on one line,
+	   they wrap below it, rather than the name breaking mid-word. Only a word wider than the whole row is broken. */
+	.name { flex: 1 1 0%; max-width: 100%; overflow-wrap: break-word; color: var(--pen); }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	/* Work: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }

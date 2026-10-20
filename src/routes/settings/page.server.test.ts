@@ -166,6 +166,22 @@ describe('deleting a calendar with its items', () => {
 		expect(fake.settings.workCalendar).toBe('/david/family/');
 	});
 
+	it('says a server error is not the same as no answer', async () => {
+		fake = fakeStore([me, family, tasks]);
+		fake.deleteError = new RefusedError('broken', 500);
+		expect(await act('delete', { path: '/david/family/', mode: 'delete', version: '"v1"' })).toEqual(
+			refusal(502, { message: 'The calendar server had a problem deleting Family, so it may or may not be gone. Reload the page to see.' })
+		);
+	});
+
+	it('does not say "nothing was deleted" once the items have moved', async () => {
+		fake = fakeStore([me, family, work, tasks], { [family.url]: [doc(family, 'a')] }, { workCalendar: '/david/family/' });
+		fake.writeError = new RefusedError('no', 403);
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
+			refusal(502, { message: "Moved 1 item to Me, but the calendar server didn't change the Work and new-event choices, so Family is still there, empty. Try deleting it again in a moment." })
+		);
+	});
+
 	it('does not say a calendar is gone when the server never answered the delete', async () => {
 		fake = fakeStore([me, family, tasks]);
 		fake.deleteError = new NoAnswerError('late');
