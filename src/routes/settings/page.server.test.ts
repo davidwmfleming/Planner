@@ -166,6 +166,27 @@ describe('deleting a calendar with its items', () => {
 		expect(fake.settings.workCalendar).toBe('/david/family/');
 	});
 
+	it('puts back only what it changed, keeping choices made elsewhere meanwhile', async () => {
+		fake = fakeStore([me, family, work, tasks], {}, { workCalendar: '/david/family/', defaultEventCalendar: '/david/me/' });
+		fake.deleteCalendar = async () => {
+			// Another device saves new choices and categories while this delete is on its way.
+			fake.settings = { ...fake.settings, categories: ['Errands'], defaultEventCalendar: '/david/work/' };
+			throw new RefusedError('changed', 412);
+		};
+		expect(await act('delete', { path: '/david/family/', mode: 'delete', version: '"v1"' })).toMatchObject({ status: 409 });
+		expect(fake.settings).toEqual({ categories: ['Errands'], workCalendar: '/david/family/', defaultEventCalendar: '/david/work/' });
+	});
+
+	it('does not put a choice back if it was changed again meanwhile', async () => {
+		fake = fakeStore([me, family, work, tasks], {}, { workCalendar: '/david/family/' });
+		fake.deleteCalendar = async () => {
+			fake.settings = { ...fake.settings, workCalendar: '/david/me/' };
+			throw new RefusedError('changed', 412);
+		};
+		await act('delete', { path: '/david/family/', mode: 'delete', version: '"v1"' });
+		expect(fake.settings.workCalendar).toBe('/david/me/');
+	});
+
 	it('says a server error is not the same as no answer', async () => {
 		fake = fakeStore([me, family, tasks]);
 		fake.deleteError = new RefusedError('broken', 500);

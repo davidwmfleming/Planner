@@ -190,6 +190,17 @@ export const actions: Actions = {
 	}
 };
 
+const nulls = (fields: object) => Object.fromEntries(Object.keys(fields).map((k) => [k, null]));
+
+/** Puts back the choices a delete cleared, read fresh first, so settings saved elsewhere meanwhile (categories, the
+ * other choice) are kept. A choice is put back only if it is still cleared: one made again meanwhile wins. */
+async function putBack(store: CalendarStore, tasks: string, cleared: Partial<Pick<Settings, 'workCalendar' | 'defaultEventCalendar'>>) {
+	if (!Object.keys(cleared).length) return;
+	const now = await getSettings(store);
+	const restore = Object.fromEntries(Object.entries(cleared).filter(([field]) => now[field as keyof typeof cleared] === null));
+	if (Object.keys(restore).length) await store.writeSettings(tasks, { ...now, ...restore });
+}
+
 /** Why a calendar can't be deleted (or not yet), as shown next to it. */
 type Refusal = ActionFailure<{ action: 'delete'; message: string }>;
 const refuse = (status: number, message: string): Refusal => fail(status, { action: 'delete' as const, message });
@@ -276,14 +287,16 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 	if (!version) return notDeleted(`the calendar server didn't say which version of ${name} it holds`);
 	const tasks = tasksUrl(store);
 	const path = pathOf(calendar.url);
-	let before: Settings | undefined;
+	/** The choices this delete cleared, as they were, to put back if the calendar surely isn't deleted. */
+	const cleared: Partial<Pick<Settings, 'workCalendar' | 'defaultEventCalendar'>> = {};
 	try {
 		const settings = await getSettings(store);
-		if (settings.workCalendar === path || settings.defaultEventCalendar === path) {
+		if (settings.workCalendar === path) cleared.workCalendar = path;
+		if (settings.defaultEventCalendar === path) cleared.defaultEventCalendar = path;
+		if (Object.keys(cleared).length) {
 			if (!tasks) throw new Error('There is no Tasks list to keep the settings on');
 			// None for Work; new events go to the first calendar left by name, as when the chosen one is missing.
-			await store.writeSettings(tasks, { ...settings, workCalendar: settings.workCalendar === path ? null : settings.workCalendar, defaultEventCalendar: settings.defaultEventCalendar === path ? null : settings.defaultEventCalendar });
-			before = settings;
+			await store.writeSettings(tasks, { ...settings, ...nulls(cleared) });
 		}
 	} catch (e) {
 		console.error(`Settings: could not change the choices before deleting "${calendar.name}"`, e);
@@ -297,8 +310,8 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 		// A late answer, or a server error, is not a refusal: the server may still delete it, or have done so.
 		if (unanswered(e)) return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);
 		if (e instanceof RefusedError && e.status >= 500) return refuse(502, `The calendar server had a problem deleting ${name}, so it may or may not be gone. Reload the page to see.`);
-		// Surely not deleted: put the choices back as they were.
-		if (before && tasks) await store.writeSettings(tasks, before).catch((e) => console.error('Settings: could not put the choices back', e));
+		// Surely not deleted: put the choices back.
+		if (tasks) await putBack(store, tasks, cleared).catch((e) => console.error('Settings: could not put the choices back', e));
 		if (e instanceof RefusedError && e.status === 412) return refuse(409, `${name} changed just now, on another device perhaps, so it wasn't deleted. Reload the page and try again.`);
 		return refuse(502, `The calendar server didn't delete ${name}. Try again in a moment.`);
 	}
