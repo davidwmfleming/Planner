@@ -207,3 +207,19 @@ test('two calendars with the same name are told apart in the list, Rename button
 		for (const path of paths) await deleteCalendar(request, path);
 	}
 });
+
+// A calendar really deleted on another device while Settings is open (not a staged answer): renaming it should say
+// to reload, with a Reload button. At e90755a it says "Try again in a moment", which can never work.
+test('renaming a calendar deleted on another device says to reload, with a Reload button', async ({ page, request }, info) => {
+	const name = unique('Gone soon', info);
+	const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+	const path = await makeCalendar(request, slug, name);
+	await page.goto('/settings');
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await deleteCalendar(request, path);
+	await calendars.getByRole('button', { name: `Rename ${name}` }).click();
+	await page.locator('#rename-field').fill(`${name} 2`);
+	await calendars.getByRole('button', { name: 'Save name' }).click();
+	await expect(calendars.getByRole('alert')).toContainText(/reload/i);
+	await expect(calendars.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
+});

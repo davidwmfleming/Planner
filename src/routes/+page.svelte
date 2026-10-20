@@ -4,7 +4,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, shortTitle } from '$lib/format';
+	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick } from 'svelte';
@@ -35,8 +35,8 @@
 			: result.type === 'error'
 				? result.error instanceof TypeError ? OFFLINE : DID_NOT_WORK
 				: '';
-	/** Messages that ask for a reload get a Reload button: the installed app has no browser controls. */
-	const saysReload = (message: string) => /\breload\b/i.test(message);
+	/** The calendar server didn't answer in time: the change may be made after all, so sending it again could make two. */
+	const mayBeDone = (message: string) => /\bmay or may not\b/i.test(message);
 	let sheetTrouble = $state<HTMLElement>();
 	let saveButton = $state<HTMLButtonElement>();
 	/** Closing the sheet's message leaves focus on Save, ready to try again, not at the top of the page. */
@@ -45,16 +45,27 @@
 		await tick();
 		saveButton?.focus();
 	}
-	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
-		sheetMessage = problemOf(result);
-		if (sheetMessage) {
-			// The message sits in the sheet's Save bar, which a phone keeps on screen; make sure it is in view anyway.
-			await tick();
-			sheetTrouble?.scrollIntoView({ block: 'nearest' });
-			return;
-		}
-		await update();
-		sheet?.close();
+	// A second tap on Save (or Delete) while the sheet is still saving is ignored, like a double tap on a tick:
+	// it would send the change twice, and a move between calendars could make two copies.
+	let sheetSaving = false;
+	const closeOnSuccess: SubmitFunction = ({ cancel }) => {
+		if (sheetSaving) return cancel();
+		sheetSaving = true;
+		return async ({ result, update }) => {
+			try {
+				sheetMessage = problemOf(result);
+				if (sheetMessage) {
+					// The message sits in the sheet's Save bar, which a phone keeps on screen; make sure it is in view anyway.
+					await tick();
+					sheetTrouble?.scrollIntoView({ block: 'nearest' });
+					return;
+				}
+				await update();
+				sheet?.close();
+			} finally {
+				sheetSaving = false;
+			}
+		};
 	};
 	// Tick, ✕, → and the other taps on a row: a problem is said under the page's header, like a line that didn't save.
 	// The same tap again while it is still saving (a double tap, a slow connection) is ignored: it would undo the first.
@@ -117,6 +128,18 @@
 	// One row on the page. A UID alone isn't enough: a move between calendars that stopped halfway can leave
 	// the same item in two calendars, and both copies are shown (each can be ticked or deleted on its own).
 	const rowKey = (item: { uid: string; occurrence?: string; calendar?: string }) => `${item.calendar ?? ''} ${item.uid} ${item.occurrence ?? ''}`;
+	// Items shown more than once on a day (or on Future tasks): each copy says which calendar it is in.
+	const twice = $derived.by(() => {
+		const seen = new Set<string>();
+		const again = new Set<string>();
+		const lists = [...data.days.map((d) => ({ date: d.date, items: [...d.events, ...d.tasks] })), { date: '', items: data.unscheduled }];
+		for (const { date, items } of lists)
+			for (const item of items) {
+				const key = `${date} ${item.uid}`;
+				(seen.has(key) ? again : seen).add(key);
+			}
+		return again;
+	});
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -245,11 +268,15 @@
 	const saving = new Set<HTMLFormElement>();
 	const left = new Set<HTMLFormElement>();
 	const tappedTo = new Map<HTMLFormElement, HTMLElement>();
+	// Lines that may or may not have been saved (no answer in time) keep their words, but are only sent again on Enter:
+	// sending them when the cursor leaves, or the page turns, could make a second copy.
+	const unsure = new Set<HTMLFormElement>();
 	const lineOf = (form: HTMLFormElement) => form.querySelector<HTMLInputElement>('input[name="text"]')!;
 	const keepWriting: SubmitFunction = ({ formElement, formData }) => {
 		const line = lineOf(formElement);
 		const written = String(formData.get('text') ?? '');
 		saving.add(formElement);
+		unsure.delete(formElement);
 		line.value = '';
 		return async ({ result, update }) => {
 			if (result.type === 'success' || result.type === 'redirect') {
@@ -260,12 +287,13 @@
 				troubleAbout = line;
 				gestureMessage =
 					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${shortTitle(written)}"; try again`) : `Couldn't save "${shortTitle(written)}". Check the connection, then tap the line and try again.`;
+				if (result.type === 'failure' && mayBeDone(gestureMessage)) unsure.add(formElement);
 			}
 			saving.delete(formElement);
 			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
 			if (next?.isConnected && (document.activeElement === document.body || document.activeElement === null)) next.focus();
 			// Words written while the last line was saving, then left: save those too (and keep the cursor where it went).
-			if (result.type !== 'error' && line.value.trim() && document.activeElement !== line) {
+			if (result.type !== 'error' && !unsure.has(formElement) && line.value.trim() && document.activeElement !== line) {
 				left.add(formElement);
 				formElement.requestSubmit();
 				return;
@@ -287,6 +315,7 @@
 			// The whole page lost focus (another app or the keyboard): decide when it comes back.
 			if (!document.hasFocus()) return void addEventListener('focus', () => setTimeout(decide, LEAVE_DELAY), { once: true });
 			if (!saving.has(form) && !input.value.trim()) return;
+			if (unsure.has(form)) return;
 			if (tapped) tappedTo.set(form, tapped);
 			if (saving.has(form)) return;
 			left.add(form);
@@ -296,7 +325,7 @@
 	}
 
 	// Turning the page or leaving it right after writing: save the words now rather than after the pause.
-	const unsaved = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].filter((i) => i.form && i.value.trim() && !saving.has(i.form));
+	const unsaved = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].filter((i) => i.form && i.value.trim() && !saving.has(i.form) && !unsure.has(i.form));
 	function sendLine(input: HTMLInputElement, keepalive = false) {
 		const body = new FormData(input.form!);
 		input.value = '';
@@ -329,7 +358,7 @@
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}"><span class="sq">{item.state === 'done' ? '✓' : ''}</span></button>
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
-		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+		{@render titleOf(item, date)}
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
@@ -355,6 +384,20 @@
 	</li>
 {/snippet}
 
+<!-- An item's title, which opens its details. A copy of an item shown twice says which calendar it is in, under
+     the title when the row is narrow, so the title keeps most of the row. -->
+{#snippet titleOf(item: Item, date: string)}
+	{#if twice.has(`${date} ${item.uid}`) && item.calendar}
+		{@const name = data.calendarLabels[item.calendar] ?? item.calendar}
+		<span class="titled">
+			<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+			<span class="tag cal-tag" title="In {name}">{name}</span>
+		</span>
+	{:else}
+		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+	{/if}
+{/snippet}
+
 {#snippet pullButtons(item: Item)}
 	<form method="POST" action="?page={data.start}&/move" use:enhance={reportProblems} class="inline">
 		<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
@@ -372,6 +415,10 @@
 				class="entry"
 				onfocus={(e) => e.currentTarget.classList.add('writing')}
 				onblur={saveOnLeave}
+				oninput={(e) => {
+					// Emptied: whatever is written next is a new line, saved as usual.
+					if (!e.currentTarget.value.trim()) unsure.delete(e.currentTarget.form!);
+				}}
 				name="text"
 				id="add-{kind}-{date || 'unscheduled'}"
 				autocomplete="off"
@@ -461,7 +508,7 @@
 			<ul class="lines">
 				{#each data.unscheduled as item (rowKey(item))}
 					<li class={[marking[rowKey(item)] ?? item.state, marking[rowKey(item)] && 'marked', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-calendar={item.calendar}>
-						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+						{@render titleOf(item, '')}
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 						{@render pullButtons(item)}
 					</li>
@@ -681,7 +728,9 @@
 		padding: 1rem;
 	}
 	.sheet::backdrop { background: rgba(0, 0, 0, 0.35); }
-	.sheet form { display: grid; gap: 0.7rem; }
+	/* One column no wider than the sheet: a long title, or a long calendar name in a menu, must not widen it,
+	   or the sheet scrolls sideways on a narrow phone (and slides when a message is brought into view). */
+	.sheet form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; }
 	.sheet-title { font-size: 1.2rem; margin: 0; }
 	.field { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); border: 0; padding: 0; margin: 0; }
 	.field input, .field select, .field textarea {
@@ -695,8 +744,11 @@
 		border-radius: 6px;
 		min-height: 44px;
 		padding: 0.2rem 0.5rem;
+		min-width: 0;
+		max-width: 100%;
+		text-overflow: ellipsis;
 	}
-	.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+	.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
 	.seg { display: flex; gap: 0.4rem; }
 	.seg label { display: flex; gap: 0.3rem; align-items: center; border: 2px solid var(--ink); border-radius: 6px; padding: 0 0.7rem; min-height: 44px; color: var(--ink); font-size: 1rem; font-weight: 400; }
 	/* Save stays in reach on a phone while the rest of the sheet scrolls. */
@@ -720,10 +772,16 @@
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
+	/* The title and its calendar tag share the title's place. The title wants 8rem; when the tag doesn't fit beside it,
+	   the tag goes on the line below. A long name wraps rather than widening the row; all of it shows, so the copies
+	   can be told apart. */
+	.titled { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.45rem; }
+	.titled .title { flex: 1 1 8rem; }
+	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
-		.row2 { grid-template-columns: 1fr; }
+		.row2 { grid-template-columns: minmax(0, 1fr); }
 		/* Title, month and the gear on one line, the four page controls on the next: no third row eating the page. */
 		h1 { flex: 1; }
 		nav { flex-wrap: nowrap; width: 100%; order: 1; }

@@ -64,6 +64,9 @@ test('an event stored in two calendars under one UID still shows, and the page s
 		await page.goto(`/?page=${day}`);
 		const copies = page.locator('li[data-uid]', { hasText: name });
 		await expect(copies).toHaveCount(2);
+		// Each copy says which calendar it is in, so "delete the one in …" can be followed.
+		await expect(copies.filter({ hasText: `${name} A` })).toHaveCount(1);
+		await expect(copies.filter({ hasText: `${name} B` })).toHaveCount(1);
 		// Each copy can be dealt with on its own: ticking one leaves the other as it was.
 		await copies.nth(1).getByRole('button', { name: `Tick ${name}` }).click();
 		await expect(page.locator('li.done[data-uid]', { hasText: name })).toHaveCount(1);
@@ -228,6 +231,34 @@ for (const [width, height, most] of [[375, 667, 0.42], [320, 568, 0.6]] as const
 	});
 }
 
+// QA (save-safety): at 320x568 the sheet was wider than its box, so showing a message slid it sideways.
+for (const [width, height] of [[320, 568], [375, 667]] as const) {
+	test(`the details sheet fits a ${width}x${height} screen, long calendar names and a message included`, async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'phone', 'a phone size, set here');
+		await page.setViewportSize({ width, height });
+		const name = unique('Reg dentist appointment with a long title', info);
+		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+		const calendar = await makeCalendar(request, slug, `Holiday trip to the coast ${slug}`.slice(0, 40));
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${slug}`, 'DTSTAMP:20260101T000000Z',
+			`DTSTART;VALUE=DATE:${day.replaceAll('-', '')}`, `SUMMARY:${name}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+		try {
+			await putEntry(request, calendar, `${slug}.ics`, ics);
+			await page.goto(`/?page=${day}`);
+			await page.getByRole('button', { name: `Details for ${name}` }).click();
+			const sheet = page.getByRole('dialog', { name: 'Details' });
+			const sideways = () => sheet.evaluate((el) => el.scrollWidth - el.clientWidth);
+			expect(await sideways()).toBeLessThanOrEqual(0);
+			await page.route('**/*&/save', (r) => r.fulfill(refused(`"${name.slice(0, 39)}…" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Wait a minute before reloading the page; then, if it's still in two, delete the one in Holiday trip to the coast.`)));
+			await sheet.getByRole('button', { name: 'Save' }).click();
+			await expect(sheet.getByRole('alert')).toBeVisible();
+			expect(await sideways()).toBeLessThanOrEqual(0);
+			expect(await sheet.evaluate((el) => el.scrollLeft)).toBe(0);
+		} finally {
+			await deleteCalendar(request, calendar);
+		}
+	});
+}
+
 test('closing a message puts focus back on what it was about, not the top of the page', async ({ page }, info) => {
 	const name = unique('Focus back', info);
 	const row = await addTask(page, name);
@@ -245,4 +276,32 @@ test('closing a message puts focus back on what it was about, not the top of the
 	await expect(sheet.getByRole('alert')).toHaveText('No');
 	await sheet.getByRole('button', { name: 'Close the message' }).click();
 	await expect(sheet.getByRole('button', { name: 'Save' })).toBeFocused();
+});
+
+// The calendar tag on a doubled item must not squeeze the title into a column of single letters on a small phone
+// (320 wide: iPhone SE with Display Zoom). At e90755a the title gets about 30px and the row is about 400px tall.
+test('an item in two calendars keeps a readable title at 320 wide', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'phone', 'a phone size, set here');
+	const { wed } = futureWeek();
+	await page.setViewportSize({ width: 320, height: 568 });
+	const name = unique('Dentist appointment', info);
+	const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+	const uid = `qa-tag-${slug}`;
+	const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20260101T000000Z',
+		`DTSTART:${wed.replaceAll('-', '')}T090000`, `SUMMARY:${name}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+	const calendars = [await makeCalendar(request, `${slug}-a`, 'Kids activities'), await makeCalendar(request, `${slug}-b`, 'Family')];
+	try {
+		for (const path of calendars) await putEntry(request, path, `${uid}.ics`, ics);
+		await page.goto(`/?page=${wed}`);
+		const copies = page.locator('li[data-uid]', { hasText: name });
+		await expect(copies).toHaveCount(2);
+		for (const copy of await copies.all()) {
+			const title = (await copy.getByRole('button', { name: `Details for ${name}` }).boundingBox())!;
+			const row = (await copy.boundingBox())!;
+			expect(title.width, 'title column width').toBeGreaterThan(row.width * 0.35);
+			expect(row.height, 'row height').toBeLessThan(140);
+		}
+	} finally {
+		for (const path of calendars) await deleteCalendar(request, path);
+	}
 });

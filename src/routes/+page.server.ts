@@ -17,6 +17,9 @@ const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 const NEW_CALENDAR = '+new';
 /** What the calendar server says when asked for something that isn't there (any more). */
 const GONE = [404, 410];
+/** The calendar server answered and said no (4xx), so the change surely wasn't made. A 5xx is not that sure: a proxy
+ * that gave up waiting (502, 503, 504) or a server that failed partway may still see the change carried out. */
+const refused = (e: unknown): e is RefusedError => e instanceof RefusedError && e.status < 500;
 const NOT_ANSWERING = "The calendar server isn't answering. Check that it is running, then reload.";
 
 /** Calendars are passed to the page by path, which stays the same through a rename and tells two of one name apart. */
@@ -61,6 +64,8 @@ export const load: PageServerLoad = async ({ url }) => {
 		eventCalendars: menuLabels(eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
 		defaultEventCalendar: newEvents && pathOf(newEvents),
 		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
+		// Every calendar's name, as messages name them: shown on an item that is in two calendars (a move that stopped halfway).
+		calendarLabels: calendarLabels(calendars),
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -178,7 +183,7 @@ export const actions: Actions = {
 	/** The details sheet: edit any field, switch between event and task. */
 	save: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(form);
+		const found = await findItem(form, true);
 		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const field = (name: string) => String(form.get(name) ?? '');
@@ -214,10 +219,16 @@ export const actions: Actions = {
 
 	delete: async ({ request }) => {
 		const form = await request.formData();
-		const found = await findItem(form);
-		if (!('item' in found)) return found;
+		const found = await findItem(form, true);
+		// The copy tapped is gone already: that is what was asked for.
+		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
-		return change(`delete "${shortTitle(item.title)}"`, () => store.remove(item));
+		// Already gone (deleted on a phone, or an earlier delete that got no answer landed after all) is done, not a failure.
+		return change(`delete "${shortTitle(item.title)}"`, () =>
+			store.remove(item).catch((e) => {
+				if (!(e instanceof RefusedError && GONE.includes(e.status))) throw e;
+			})
+		);
 	},
 
 	/** Removes one day of a repeating item and keeps the rest of the series. */
@@ -225,8 +236,8 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const day = String(form.get('occurrence') ?? '');
 		if (!ISO.test(day)) return fail(400, { message: 'Which day should be removed?' });
-		const found = await findItem(form);
-		if (!('item' in found)) return found;
+		const found = await findItem(form, true);
+		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
 		if (!item.recurrence) return fail(400, { message: 'This item does not repeat' });
 		return change(`delete that day of "${shortTitle(item.title)}"`, () => store.removeOccurrence(item, day));
@@ -234,8 +245,10 @@ export const actions: Actions = {
 };
 
 /** The item a form is about, or a plain message for the page if it is gone or the calendar server isn't answering.
- * One UID can be in two calendars (a move between calendars that stopped halfway); the form says which copy. */
-async function findItem(form: FormData) {
+ * One UID can be in two calendars (a move between calendars that stopped halfway); the form says which copy.
+ * A tick may fall back to another copy, but anything that can remove a copy (a delete, or a save that moves it)
+ * asks for `exact`: then only the copy tapped will do, so the other one, perhaps now the only one, is never touched. */
+async function findItem(form: FormData, exact = false) {
 	const uid = String(form.get('uid') ?? '');
 	// Not "calendar": the details sheet uses that for the calendar to file it in.
 	const keptIn = String(form.get('keptIn') ?? '');
@@ -243,7 +256,7 @@ async function findItem(form: FormData) {
 	try {
 		store = await getStore();
 		const copies = (await store.listItems()).filter((i) => i.uid === uid);
-		item = copies.find((i) => pathOf(i.calendarUrl) === keptIn) ?? copies[0];
+		item = copies.find((i) => pathOf(i.calendarUrl) === keptIn) ?? (!exact ? copies[0] : !keptIn && copies.length === 1 ? copies[0] : undefined);
 	} catch (e) {
 		console.error('Planner: could not reach the calendar server to change an item', e);
 		return fail(503, { message: NOT_ANSWERING });
@@ -297,10 +310,10 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
 }
 
 /** The second half of moving an item to another calendar: remove the old copy, and say what happened.
- * Only a delete the calendar server answered with a refusal surely wasn't done; then the new copy is taken back out,
+ * Only a delete the calendar server answered with a refusal (4xx) surely wasn't done; then the new copy is taken back out,
  * so the item isn't left in two calendars. A delete that got no answer may still be done later (the server can queue
  * it), so then the new copy always stays: taking it out could leave the item in no calendar at all. Reading the
- * calendars again only tells whether the move is surely done or says it may be in two.
+ * calendars again only tells whether the move is surely done or says it may be in two. A server error (5xx) counts as no answer.
  * An old copy already gone (404) was removed by someone else: by another move of the same item, perhaps, whose copy
  * is now somewhere else. So once the old copy is gone, any other copy left is reported too. */
 async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited = false) {
@@ -312,16 +325,27 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 		await store.remove(old);
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
-		if (e instanceof RefusedError && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
-		answered = e instanceof RefusedError;
+		if (refused(e) && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
+		answered = refused(e);
 	}
 	const left = await elsewhere(store, old, copy);
 	if (left === 0 || (answered && left === undefined)) return;
 	return fail(502, {
 		message: answered
 			? `"${title}" may now be in two calendars, because it seems to have been moved on another device at the same time. Reload the page and delete the one you don't want.`
-			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Reload the page and delete the one you don't want.`
+			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. ${waitThenDelete(store, old)}`
 	});
+}
+
+/** Each calendar's name by path, told apart as the menus do when two share a name. */
+const calendarLabels = (calendars: { url: string; name: string }[]) =>
+	Object.fromEntries(menuLabels(calendars.map((c) => ({ path: pathOf(c.url), name: c.name }))).map((c) => [c.path, c.label]));
+
+/** After a delete that got no answer: it may still land, so deleting the other copy straight away could leave none.
+ * Say to wait, and which copy to delete: the one whose delete is pending, named as the menus name its calendar. */
+function waitThenDelete(store: Awaited<ReturnType<typeof getStore>>, pending: StoredItem) {
+	const where = calendarLabels(store.calendars())[pathOf(pending.calendarUrl)] ?? 'the calendar it came from';
+	return `Wait a minute before reloading the page; then, if it's still in two, delete the one in ${where}.`;
 }
 
 /** The calendar server refused to remove the old copy, so it is surely still there: take the new one back out.
@@ -329,11 +353,16 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited: boolean) {
 	const title = shortTitle(old.title);
 	const alsoLost = edited ? ", and your other changes weren't saved either" : '';
+	const stayed = fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
 	try {
 		await store.remove(copy);
-		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
+		return stayed;
 	} catch (e) {
+		// The new copy is gone already, so only the old one is left: the same as taking it back.
+		if (e instanceof RefusedError && GONE.includes(e.status)) return stayed;
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
+		// No answer: the new copy's delete may still land, so the old one must not be deleted straight away.
+		if (!refused(e)) return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, and didn't confirm it took the new copy back out. ${waitThenDelete(store, copy)}` });
 		return fail(502, { message: `"${title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
 	}
 }

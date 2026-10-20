@@ -3,6 +3,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { tick } from 'svelte';
 	import { fetchExport } from '$lib/export-download';
+	import { saysReload } from '$lib/format';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -113,6 +114,11 @@
 	}
 </script>
 
+<!-- Messages that ask for a reload get a Reload button: the installed app has no browser controls. -->
+{#snippet problem(message: string)}
+	<p class="error" role="alert">{message}{#if saysReload(message)} <button type="button" class="btn small" onclick={() => location.reload()}>Reload</button>{/if}</p>
+{/snippet}
+
 <svelte:head>
 	<title>Planner · Settings</title>
 </svelte:head>
@@ -137,7 +143,7 @@
 								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.label}" autocomplete="off" onkeydown={renameKeys} />
 								<button class="btn primary">Save name</button>
 								<button type="button" class="btn" onclick={stopRename}>Cancel</button>
-								{#if renameError}<p class="error" role="alert">{renameError}</p>{/if}
+								{#if renameError}{@render problem(renameError)}{/if}
 							</form>
 						{:else}
 							<!-- Two calendars can share a name (one made on a phone, say); the label adds the end of the address. -->
@@ -155,7 +161,7 @@
 					<input id="new-calendar" class="text" name="name" value={form?.action === 'add' ? form.name : ''} placeholder="Name, up to 40 letters" autocomplete="off" />
 					<button class="btn" aria-label="Add calendar">Add</button>
 				</div>
-				{#if addError}<p class="error" role="alert">{addError}</p>{/if}
+				{#if addError}{@render problem(addError)}{/if}
 			</form>
 			{#if data.eventCalendars.length}
 				<form method="POST" action="?/choose" use:enhance={chose} class="choices">
@@ -176,7 +182,7 @@
 						<button class="btn primary">Save choices</button>
 						<span role="status">{saved ? 'Saved' : ''}</span>
 					</div>
-					{#if form?.action === 'choose' && form.message}<p class="error" role="alert">{form.message}</p>{/if}
+					{#if form?.action === 'choose' && form.message}{@render problem(form.message)}{/if}
 				</form>
 			{:else}
 				<p class="hint">Add a calendar first; new events need somewhere to go.</p>

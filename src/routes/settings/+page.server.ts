@@ -1,5 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
+import { RefusedError } from '$lib/server/calendar-store';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -16,6 +17,9 @@ async function connect() {
 }
 
 const NOT_ANSWERING = "The calendar server isn't answering. Check that it is running, then try again.";
+const CALENDAR_GONE = "That calendar isn't there any more; reload the page";
+/** What the calendar server says about a calendar that isn't there (any more): deleted on a phone, say. */
+const GONE = [404, 410];
 
 export const load: PageServerLoad = async () => {
 	let store, settings;
@@ -75,7 +79,7 @@ export const actions: Actions = {
 		const store = await connect();
 		if (!store) return fail(503, { action: 'rename', path, name: asked, message: NOT_ANSWERING });
 		const calendar = calendarAtPath(store.calendars(), path);
-		if (!calendar) return fail(404, { action: 'rename', path, name: asked, message: "That calendar isn't there any more; reload the page" });
+		if (!calendar) return fail(404, { action: 'rename', path, name: asked, message: CALENDAR_GONE });
 		if (!calendar.accepts.includes('event') || calendar.url === tasksUrl(store)) return fail(400, { action: 'rename', path, name: asked, message: `${calendar.name} holds every task, so it can't be renamed` });
 		const checked = checkCalendarName(asked, store.calendars(), calendar.url);
 		if ('error' in checked) return fail(400, { action: 'rename', path, name: asked, message: checked.error });
@@ -84,6 +88,8 @@ export const actions: Actions = {
 			await store.renameCalendarAt(calendar.url, checked.name);
 		} catch (e) {
 			console.error(`Settings: could not rename "${calendar.name}" to "${checked.name}"`, e);
+			// Deleted on another device since this page was drawn: trying again can never work.
+			if (e instanceof RefusedError && GONE.includes(e.status)) return fail(404, { action: 'rename', path, name: asked, message: CALENDAR_GONE });
 			return fail(502, { action: 'rename', path, name: asked, message: `The calendar server didn't rename "${calendar.name}". Try again in a moment.` });
 		}
 		return { action: 'rename', renamed: checked.name };
@@ -94,6 +100,13 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const store = await connect();
 		if (!store) return fail(503, { action: 'choose', message: NOT_ANSWERING });
+		try {
+			// A fresh list, so a calendar deleted on another device since this page was drawn isn't chosen.
+			await store.refreshCalendars();
+		} catch (e) {
+			console.error('Settings: could not read the calendars to check the choices', e);
+			return fail(503, { action: 'choose', message: NOT_ANSWERING });
+		}
 		const events = store.calendars().filter((c) => c.accepts.includes('event'));
 		const work = String(form.get('work') ?? '');
 		const newEvents = String(form.get('newEvents') ?? '');

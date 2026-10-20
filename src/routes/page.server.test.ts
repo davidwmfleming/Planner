@@ -41,11 +41,11 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 			this.listed = this.onServer = [...this.onServer, made];
 			return made;
 		},
-		async replace() {},
+		async replace(..._args: unknown[]) {},
 		async update(..._args: unknown[]) {},
 		async updateOccurrence() {},
 		async remove(..._args: unknown[]) {},
-		async removeOccurrence() {},
+		async removeOccurrence(..._args: unknown[]) {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
 		async readSettings() {
 			return settings;
@@ -260,6 +260,22 @@ describe('when the calendar server fails during a change', () => {
 	});
 });
 
+describe('deleting an item that is already gone from the calendar server', () => {
+	const me = cal('me', 'Me');
+	beforeEach(() => {
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me)];
+	});
+
+	it.each([404, 410])('counts a %i as deleted, not as a failure to try again', async (status) => {
+		// Deleted on a phone meanwhile, or an earlier delete that got no answer landed after all.
+		fake.remove = async () => {
+			throw new RefusedError(`Deleting "Dentist" failed (${status})`, status);
+		};
+		expect(await act('delete', { uid: 'dentist' })).toBeUndefined();
+	});
+});
+
 describe('an item stored in two calendars under one UID (a move whose delete failed)', () => {
 	const me = cal('me', 'Me');
 	const family = cal('family', 'Family');
@@ -271,6 +287,11 @@ describe('an item stored in two calendars under one UID (a move whose delete fai
 	it('shows both copies, each with its own calendar, so the page can tell them apart', async () => {
 		const data = (await run('http://localhost/?page=2026-10-21')) as { days: { events: { uid: string; calendar: string }[] }[] };
 		expect(data.days.flatMap((d) => d.events).map((e) => `${e.uid} ${e.calendar}`)).toEqual(['dentist /david/me/', 'dentist /david/family/']);
+	});
+
+	it('names every calendar as the menus do, so the page can say which calendar each copy is in', async () => {
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarLabels).toEqual({ '/david/me/': 'Me', '/david/family/': 'Family', '/david/tasks/': 'Tasks' });
 	});
 
 	it('changes the copy in the calendar the tap came from', async () => {
@@ -359,6 +380,17 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(result).toMatchObject({ status: 502, data: { message: expect.stringContaining('may now be in two calendars') } });
 	});
 
+	it.each([500, 502, 503, 504])('keeps the new copy when the old one\'s delete gets a %i, which may not be the last word', async (status) => {
+		// A server error or a proxy giving up is not a refusal: the calendar server may still carry the delete out,
+		// and taking the new copy out then would leave "Dentist" in no calendar at all.
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError(`Deleting "Dentist" failed (${status})`, status);
+			removed.push(stored.url);
+		};
+		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: expect.stringContaining("didn't confirm it removed the old one") } });
+		expect(removed).toEqual([]);
+	});
+
 	it('keeps the new copy when the connection drops during the old one\'s delete', async () => {
 		fake.remove = async (stored: StoredItem) => {
 			if (stored.calendarUrl === me.url) throw new TypeError('fetch failed');
@@ -390,9 +422,59 @@ describe('moving an item to another calendar from the details sheet', () => {
 		};
 		expect(await act('save', toFamily)).toMatchObject({
 			status: 502,
-			data: { message: '"Dentist" may now be in two calendars, because the calendar server didn\'t confirm it removed the old one. Reload the page and delete the one you don\'t want.' }
+			data: { message: WAIT_THEN_DELETE_OLD }
 		});
 		expect(removed).toEqual([]);
+	});
+
+	// The old copy's delete may still be waiting on the calendar server. Reloading at once and deleting the new copy
+	// would leave nothing once that delete lands, so the message says to wait, and to delete the one in the old calendar.
+	const WAIT_THEN_DELETE_OLD =
+		'"Dentist" may now be in two calendars, because the calendar server didn\'t confirm it removed the old one. Wait a minute before reloading the page; then, if it\'s still in two, delete the one in Me.';
+
+	it('says to wait, then delete the copy in the old calendar, when the old one\'s delete timed out', async () => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new NoAnswerError('The calendar server did not answer in time (deleting "Dentist")');
+			removed.push(stored.url);
+		};
+		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: WAIT_THEN_DELETE_OLD } });
+	});
+
+	it('names the old calendar as the menus do when two calendars share its name', async () => {
+		const otherMe = cal('me-2', 'Me');
+		fake = fakeStore([me, otherMe, family, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me)];
+		fake.create = async (url: string) => ({ ...dentist(cal('x', 'X')), calendarUrl: url, url: `${url}dentist.ics` });
+		fake.remove = async () => {
+			throw new NoAnswerError('The calendar server did not answer in time (deleting "Dentist")');
+		};
+		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: expect.stringContaining('delete the one in Me (me).') } });
+	});
+
+	it.each([404, 410])('says it stayed where it was when the new copy is already gone (%i) as it is taken back', async (status) => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError('Deleting "Dentist" failed (403)', 403);
+			throw new RefusedError(`Deleting "Dentist" failed (${status})`, status);
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t move "Dentist" to another calendar, so it stays where it was. Reload the page and try again.' }
+		});
+	});
+
+	it('says to wait, then delete the new copy, when taking it back out timed out', async () => {
+		// The old copy surely stays (its delete was refused); the new copy's delete may still land.
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError('Deleting "Dentist" failed (403)', 403);
+			throw new NoAnswerError('The calendar server did not answer in time (deleting "Dentist")');
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: {
+				message:
+					'The calendar server didn\'t move "Dentist" to another calendar, and didn\'t confirm it took the new copy back out. Wait a minute before reloading the page; then, if it\'s still in two, delete the one in Family.'
+			}
+		});
 	});
 
 	describe('while someone else moves it at the same time', () => {
@@ -478,5 +560,53 @@ describe('a second tap that arrives while the first is saving', () => {
 		fake.listItems = async () => (reads++ === 0 ? [before] : [{ ...before, state: 'dropped' as const }]);
 		fake.update = refused;
 		expect(await act('mark', { uid: 'dentist', state: 'done' })).toMatchObject({ status: 502 });
+	});
+});
+// After a move whose delete got no answer, the page shows two copies and says to delete the one in the old calendar.
+// If that old copy goes meanwhile (its late delete lands, or a phone deletes it), the tap on its Delete must not
+// fall through to the other copy, which is now the only one.
+describe('deleting a copy that went away after the page was drawn', () => {
+	const me = cal('me', 'Me');
+	const family = cal('family', 'Family');
+	beforeEach(() => {
+		fake = fakeStore([me, family, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(family)]; // the copy in Me is already gone
+	});
+
+	it('leaves the copy in another calendar alone', async () => {
+		const removed: string[] = [];
+		fake.remove = async (stored: StoredItem) => void removed.push(stored.calendarUrl);
+		await act('delete', { uid: 'dentist', keptIn: '/david/me/' });
+		expect(removed).toEqual([]);
+	});
+
+	it('counts the delete as done, since the copy tapped is gone', async () => {
+		expect(await act('delete', { uid: 'dentist', keptIn: '/david/me/' })).toBeUndefined();
+	});
+
+	it('leaves the other copy alone for "Delete this day" too', async () => {
+		fake.items = [{ ...dentist(family), recurrence: 'FREQ=WEEKLY' }];
+		const changed: string[] = [];
+		fake.removeOccurrence = async (stored: StoredItem) => void changed.push(stored.calendarUrl);
+		expect(await act('deleteOne', { uid: 'dentist', keptIn: '/david/me/', occurrence: '2026-10-21' })).toBeUndefined();
+		expect(changed).toEqual([]);
+	});
+
+	it('does not save the sheet onto the other copy, which a move would then remove', async () => {
+		const touched: string[] = [];
+		fake.replace = fake.remove = async (stored: StoredItem) => void touched.push(stored.calendarUrl);
+		fake.create = async (url: string) => void touched.push(url);
+		expect(await act('save', { ...inNewCalendar(''), keptIn: '/david/me/', calendar: '/david/me/' })).toMatchObject({
+			status: 404,
+			data: { message: 'That item is no longer on the calendar; reload the page' }
+		});
+		expect(touched).toEqual([]);
+	});
+
+	it('still deletes the only copy when the page did not say which calendar it is in', async () => {
+		const removed: string[] = [];
+		fake.remove = async (stored: StoredItem) => void removed.push(stored.calendarUrl);
+		await act('delete', { uid: 'dentist' });
+		expect(removed).toEqual([family.url]);
 	});
 });

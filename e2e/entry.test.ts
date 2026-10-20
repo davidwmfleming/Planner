@@ -148,3 +148,31 @@ test('words written just before turning the page or reloading are saved', async 
 	await page.goto(`/?page=${mon}`);
 	await expect(page.locator(`section.day[data-date="${tue}"]`).getByText(`Turn the page ${tag}`)).toBeVisible();
 });
+
+test('a line the server may or may not have saved is not sent again when the cursor leaves it', async ({ page }, info) => {
+	const { mon, tue } = futureWeek();
+	const name = unique('Maybe saved', info);
+	await page.goto(`/?page=${mon}`);
+	let sent = 0;
+	await page.route('**/*&/add', async (r) => {
+		sent++;
+		if (sent === 1) {
+			const message = `The calendar server didn't answer in time when asked to save "${name}", so it may or may not be saved. Reload the page to see.`;
+			return r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ type: 'failure', status: 502, data: JSON.stringify([{ message: 1 }, message]) }) });
+		}
+		await r.continue();
+	});
+	await page.locator(`#add-task-${tue}`).fill(name);
+	await page.locator(`#add-task-${tue}`).press('Enter');
+	await expect(page.getByRole('alert')).toContainText('may or may not be saved');
+	await page.getByRole('button', { name: 'Close the message' }).click();
+	await page.locator('h1').click();
+	await page.waitForTimeout(1000);
+	// Sending it again could make two; the person should look first (Reload), then decide.
+	expect(sent).toBe(1);
+	// The words stay on the line, and Enter sends them again on purpose.
+	await expect(page.locator(`#add-task-${tue}`)).toHaveValue(name);
+	await page.locator(`#add-task-${tue}`).press('Enter');
+	await expect.poll(() => sent).toBe(2);
+	await expect(page.locator(`section.day[data-date="${tue}"]`).getByText(name)).toBeVisible();
+});

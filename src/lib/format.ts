@@ -21,6 +21,10 @@ export function formatTime(time?: string): string {
 /** What a person sees as letters: an emoji family, a flag or a letter with a separately typed accent counts as one. */
 export const letters = (text: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
 
+/** Whether a message asks for a reload ("reload the page", "before reloading"…). Those get a Reload button:
+ * the installed app has no browser controls. */
+export const saysReload = (message: string) => /\breload/i.test(message);
+
 /** A title as quoted in a message: long ones are cut to about 40 characters, so the message stays short on a phone. */
 export function shortTitle(title: string, most = 40): string {
 	const chars = letters(title.trim());
