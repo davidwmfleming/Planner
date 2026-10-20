@@ -252,6 +252,28 @@ describe('calendarTags', () => {
 		expect(new Set(all).size).toBe(names.length);
 	});
 
+	// Names come from the calendar server, which doesn't limit their length (a phone or another app may set any name).
+	it('stays quick with very long names that differ only at the end, and still tells them apart', () => {
+		const calendars = Array.from({ length: 20 }, (_, i) => ({ path: `/david/c${i}/`, name: `${'x'.repeat(99_999)}${String.fromCharCode(97 + i)}` }));
+		const started = performance.now();
+		const tagged = Object.values(calendarTags(calendars));
+		expect(performance.now() - started).toBeLessThan(50);
+		expect(new Set(tagged.map((t) => t.toLowerCase())).size).toBe(20);
+	});
+
+	it('grows a clashing tag up to 12 letters; names alike that far keep 4 letters and add the end of the address', () => {
+		const tagged = calendarTags([
+			{ path: '/david/a/', name: 'Kids activities this autumn' },
+			{ path: '/david/b/', name: 'Kids activities this winter' }
+		]);
+		expect(tagged).toEqual({ '/david/a/': 'Kids (a)', '/david/b/': 'Kids (b)' });
+		expect(tags('Kids activities', 'Kids actors')).toEqual(['Kids acti', 'Kids acto']);
+	});
+
+	it('gives a very long name a short tag', () => {
+		expect(tags('y'.repeat(100_000))).toEqual(['yyyy']);
+	});
+
 	it('is empty for a calendar with no name', () => {
 		expect(tags('', '   ')).toEqual(['', '']);
 	});

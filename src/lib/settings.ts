@@ -105,21 +105,31 @@ export function menuLabels<T extends { path: string; name: string }>(calendars: 
 
 /** Letters a calendar's tag on the planner page shows, when no other calendar's tag starts the same way. */
 export const TAG_LETTERS = 4;
+/** Most letters a tag grows to when it clashes with another; beyond that the end of the address tells them apart. */
+const MOST_TAG_LETTERS = 12;
+/** Letters of a name looked at. Names come from the calendar server, which doesn't limit their length. */
+const NAME_LETTERS = 64;
 
 /** Each calendar's tag on the planner page, by path: the first 4 letters of its name (an emoji or an accented letter
  * counts as one), without spaces at the ends. When two tags would look the same, whatever the case, those calendars
- * get more letters until they differ. Two calendars with the same name get the end of their address, as the menus do. */
+ * get more letters until they differ, up to 12. Calendars still alike after that (two with the same name, say) get
+ * the end of their address, as the menus do. No two calendars get the same tag. */
 export function calendarTags(calendars: { path: string; name: string }[]): Record<string, string> {
-	type Tagged = { path: string; chars: string[]; shown: number };
-	const all: Tagged[] = calendars.map((c) => ({ path: c.path, chars: letters(c.name.trim()), shown: 0 }));
-	for (const c of all) c.shown = Math.min(TAG_LETTERS, c.chars.length);
+	type Tagged = { path: string; chars: string[]; most: number; shown: number; alike: string };
+	const all: Tagged[] = calendars.map((c) => {
+		// Cut the text before splitting it into letters, so a huge name costs no more than a short one.
+		const chars = letters(c.name.trim().slice(0, NAME_LETTERS * 4)).slice(0, NAME_LETTERS);
+		const most = Math.min(MOST_TAG_LETTERS, chars.length);
+		return { path: c.path, chars, most, shown: Math.min(TAG_LETTERS, most), alike: '' };
+	});
 	const tagOf = (c: Tagged) => c.chars.slice(0, c.shown).join('').trimEnd();
-	const fullName = (c: Tagged) => c.chars.join('').toLowerCase();
-	// More letters can't tell apart two calendars with the same name, so those keep 4 letters and get the address.
-	const twin = (c: Tagged) => all.some((other) => other !== c && fullName(other) === fullName(c));
+	for (const c of all) c.alike = c.chars.slice(0, c.most).join('').toLowerCase();
+	// More letters can't tell apart two calendars whose names agree as far as a tag can grow, so those keep 4 letters.
+	const alikeCount = new Map<string, number>();
+	for (const c of all) alikeCount.set(c.alike, (alikeCount.get(c.alike) ?? 0) + 1);
 	const clashing = () => [...Map.groupBy(all.filter((c) => c.chars.length), (c) => tagOf(c).toLowerCase()).values()].filter((group) => group.length > 1);
 	for (;;) {
-		const growing = clashing().flat().filter((c) => c.shown < c.chars.length && !twin(c));
+		const growing = clashing().flat().filter((c) => c.shown < c.most && alikeCount.get(c.alike)! === 1);
 		if (!growing.length) break;
 		for (const c of growing) c.shown++;
 	}
