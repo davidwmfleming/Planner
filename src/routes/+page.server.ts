@@ -353,10 +353,13 @@ function waitThenDelete(store: Awaited<ReturnType<typeof getStore>>, pending: St
 async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited: boolean) {
 	const title = shortTitle(old.title);
 	const alsoLost = edited ? ", and your other changes weren't saved either" : '';
+	const stayed = fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
 	try {
 		await store.remove(copy);
-		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
+		return stayed;
 	} catch (e) {
+		// The new copy is gone already, so only the old one is left: the same as taking it back.
+		if (e instanceof RefusedError && GONE.includes(e.status)) return stayed;
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
 		// No answer: the new copy's delete may still land, so the old one must not be deleted straight away.
 		if (!refused(e)) return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, and didn't confirm it took the new copy back out. ${waitThenDelete(store, copy)}` });

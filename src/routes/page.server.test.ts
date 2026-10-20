@@ -451,6 +451,17 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: expect.stringContaining('delete the one in Me (me).') } });
 	});
 
+	it.each([404, 410])('says it stayed where it was when the new copy is already gone (%i) as it is taken back', async (status) => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError('Deleting "Dentist" failed (403)', 403);
+			throw new RefusedError(`Deleting "Dentist" failed (${status})`, status);
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t move "Dentist" to another calendar, so it stays where it was. Reload the page and try again.' }
+		});
+	});
+
 	it('says to wait, then delete the new copy, when taking it back out timed out', async () => {
 		// The old copy surely stays (its delete was refused); the new copy's delete may still land.
 		fake.remove = async (stored: StoredItem) => {
