@@ -159,6 +159,14 @@ export function occurrencesBetween(ics: string, from: string, to: string): Item[
 	return shown;
 }
 
+/** One showing of a repeating item as it stands now: the day's one-off change if there is one, or else the series on that day. */
+export function occurrenceOn(ics: string, day: string): Item | undefined {
+	const { master, overrides } = parts(ics);
+	if (!master) return undefined;
+	const existing = overrides.get(day);
+	return existing ? { ...componentToItem(existing), occurrence: day } : showing(componentToItem(master), day);
+}
+
 /** Changes one showing of a repeating item (tick, drop, move) by writing a one-off change for that day. */
 export function withOccurrence(ics: string, day: string, change: (current: Item) => Partial<Item>): string {
 	const { cal, master, overrides } = parts(ics);

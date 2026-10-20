@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
-import { itemToICS, occurrencesBetween, withOccurrence, withoutOccurrence } from './ical';
+import { itemToICS, occurrenceOn, occurrencesBetween, withOccurrence, withoutOccurrence } from './ical';
 
 const lift: Item = { uid: 'r1', kind: 'event', title: 'Lift', date: '2026-10-05', time: '06:30', endTime: '07:30', state: 'open', recurrence: 'FREQ=WEEKLY;BYDAY=MO,TH' };
 const days = (items: Item[]) => items.map((i) => i.date).sort();
@@ -101,5 +101,13 @@ describe('repeating items', () => {
 	it('repeats tasks too', () => {
 		const bins: Item = { uid: 'r3', kind: 'task', title: 'Green cart', date: '2026-10-06', state: 'open', recurrence: 'FREQ=WEEKLY;INTERVAL=2' };
 		expect(days(occurrencesBetween(itemToICS(bins), '2026-10-19', '2026-11-08'))).toEqual(['2026-10-20', '2026-11-03']);
+	});
+});
+
+describe('occurrenceOn', () => {
+	it('gives one day of a series as it stands: the series on a plain day, the one-off change on a changed one', () => {
+		const ticked = withOccurrence(itemToICS(lift), '2026-10-08', () => ({ state: 'done' }));
+		expect(occurrenceOn(ticked, '2026-10-05')).toMatchObject({ date: '2026-10-05', state: 'open', occurrence: '2026-10-05' });
+		expect(occurrenceOn(ticked, '2026-10-08')).toMatchObject({ date: '2026-10-08', state: 'done', occurrence: '2026-10-08' });
 	});
 });

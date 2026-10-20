@@ -42,15 +42,15 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 			return made;
 		},
 		async replace() {},
-		async update() {},
+		async update(..._args: unknown[]) {},
 		async updateOccurrence() {},
-		async remove() {},
+		async remove(..._args: unknown[]) {},
 		async removeOccurrence() {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
 		async readSettings() {
 			return settings;
 		},
-		async create(url: string) {
+		async create(url: string): Promise<StoredItem | void> {
 			if (!this.listed.some((c) => c.url === url)) throw new Error('No calendar there');
 			if (!this.onServer.some((c) => c.url === url)) throw new Error('Saving failed (409)');
 			this.created.push(url);
@@ -217,5 +217,107 @@ describe('when the calendar server fails during a change', () => {
 	it.each(cases)('%s says the server is not answering when it cannot be reached', async (action, fields) => {
 		connectError = new Error('connect ECONNREFUSED 10.1.2.3:5232');
 		expect(await act(action, fields)).toMatchObject({ status: 503, data: { message: "The calendar server isn't answering. Check that it is running, then reload." } });
+	});
+});
+
+describe('an item stored in two calendars under one UID (a move whose delete failed)', () => {
+	const me = cal('me', 'Me');
+	const family = cal('family', 'Family');
+	beforeEach(() => {
+		fake = fakeStore([me, family, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me), dentist(family)];
+	});
+
+	it('shows both copies, each with its own calendar, so the page can tell them apart', async () => {
+		const data = (await run('http://localhost/?page=2026-10-21')) as { days: { events: { uid: string; calendar: string }[] }[] };
+		expect(data.days.flatMap((d) => d.events).map((e) => `${e.uid} ${e.calendar}`)).toEqual(['dentist /david/me/', 'dentist /david/family/']);
+	});
+
+	it('changes the copy in the calendar the tap came from', async () => {
+		const changed: string[] = [];
+		fake.update = async (stored: StoredItem) => void changed.push(stored.calendarUrl);
+		await act('mark', { uid: 'dentist', keptIn: '/david/family/', state: 'done' });
+		await act('mark', { uid: 'dentist', keptIn: '/david/me/', state: 'done' });
+		expect(changed).toEqual([family.url, me.url]);
+	});
+});
+
+describe('future tasks', () => {
+	it('say which calendar each is kept in, like the items on the days', async () => {
+		const tasks = cal('tasks', 'Tasks', ['task']);
+		fake = fakeStore([cal('me', 'Me'), tasks]);
+		fake.items = [{ ...dentist(tasks), kind: 'task', date: undefined }];
+		const data = (await run()) as { unscheduled: { calendar: string }[] };
+		expect(data.unscheduled.map((t) => t.calendar)).toEqual(['/david/tasks/']);
+	});
+});
+
+describe('moving an item to another calendar from the details sheet', () => {
+	const me = cal('me', 'Me');
+	const family = cal('family', 'Family');
+	const removed: string[] = [];
+	beforeEach(() => {
+		removed.length = 0;
+		fake = fakeStore([me, family, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me)];
+		fake.create = async (url: string) => ({ ...dentist(cal('x', 'X')), calendarUrl: url, url: `${url}dentist.ics` });
+	});
+	const toFamily = { ...inNewCalendar(''), calendar: '/david/family/' };
+
+	it('takes the new copy back out when the old one cannot be deleted, so there is still only one', async () => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new Error('Deleting "Dentist" failed (403)');
+			removed.push(stored.url);
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t move "Dentist" to another calendar, so it stays where it was. Reload the page and try again.' }
+		});
+		expect(removed).toEqual([`${family.url}dentist.ics`]);
+	});
+
+	it('says plainly when the item is left in both calendars', async () => {
+		fake.remove = async () => {
+			throw new Error('Deleting "Dentist" failed (403)');
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: { message: '"Dentist" is now in two calendars, because the calendar server wouldn\'t remove the old one. Reload the page and delete the one you don\'t want.' }
+		});
+	});
+});
+
+describe('a second tap that arrives while the first is saving', () => {
+	const me = cal('me', 'Me');
+	beforeEach(() => {
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])]);
+	});
+	const refused = async () => {
+		throw new Error('Saving "Dentist" failed (412); reload and try again');
+	};
+
+	it('is not a failure when the first tap already made the change it asked for', async () => {
+		const before = dentist(me);
+		let reads = 0;
+		// The second tap read the item before the first one's save landed, so its own save is refused.
+		fake.listItems = async () => (reads++ === 0 ? [before] : [{ ...before, state: 'done' as const, etag: 'new' }]);
+		fake.update = refused;
+		expect(await act('mark', { uid: 'dentist', state: 'done' })).toBeUndefined();
+	});
+
+	it('is not a failure for a move that already happened', async () => {
+		const before = { ...dentist(me), kind: 'task' as const };
+		let reads = 0;
+		fake.listItems = async () => (reads++ === 0 ? [before] : [{ ...before, date: '2026-10-22' }]);
+		fake.update = refused;
+		expect(await act('move', { uid: 'dentist', to: '2026-10-22' })).toBeUndefined();
+	});
+
+	it('is still a failure when the item ended up some other way', async () => {
+		const before = dentist(me);
+		let reads = 0;
+		fake.listItems = async () => (reads++ === 0 ? [before] : [{ ...before, state: 'dropped' as const }]);
+		fake.update = refused;
+		expect(await act('mark', { uid: 'dentist', state: 'done' })).toMatchObject({ status: 502 });
 	});
 });

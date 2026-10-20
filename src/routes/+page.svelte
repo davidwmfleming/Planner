@@ -64,14 +64,16 @@
 
 	// Marks on the page, like on paper: sweep a finger sideways to turn the page; with the pen, draw ✓ on an item to tick it,
 	// scribble over it to strike it out, or drag it onto another day. The pen never scrolls; fingers do. The tap buttons all still work.
-	type Active = { id: number; points: Point[]; pen: boolean; finger: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
+	type Active = { id: number; points: Point[]; pen: boolean; finger: boolean; row?: HTMLElement; uid?: string; occurrence?: string; calendar?: string; from?: string };
 	let stroke: Active | null = null;
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
 	let gestureMessage = $state('');
 	// Marks drawn on items, shown at once while they save.
 	let marking = $state<Record<string, 'done' | 'dropped'>>({});
-	const markKey = (uid: string, occurrence?: string) => `${uid} ${occurrence ?? ''}`;
+	// One row on the page. A UID alone isn't enough: a move between calendars that stopped halfway can leave
+	// the same item in two calendars, and both copies are shown (each can be ticked or deleted on its own).
+	const rowKey = (item: { uid: string; occurrence?: string; calendar?: string }) => `${item.calendar ?? ''} ${item.uid} ${item.occurrence ?? ''}`;
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -95,6 +97,7 @@
 			row,
 			uid: row?.dataset.uid,
 			occurrence: row?.dataset.occurrence,
+			calendar: row?.dataset.calendar,
 			from: row ? (row.closest<HTMLElement>('section.day')?.dataset.date ?? '') : undefined
 		};
 	}
@@ -103,7 +106,7 @@
 		stroke.points.push({ x: e.clientX, y: e.clientY });
 		if (stroke.uid && movedFar(stroke.points[0], stroke.points[stroke.points.length - 1])) {
 			const day = dayAt(e.clientX, e.clientY);
-			dragging = stroke.uid;
+			dragging = rowKey({ ...stroke, uid: stroke.uid });
 			dropDay = day && day !== stroke.from ? day : null;
 			// Near the top or bottom edge, scroll so a day off screen can be reached (a phone shows only a day or two).
 			const edge = 60;
@@ -121,7 +124,9 @@
 		if (!done.points.some((p) => movedFar(done.points[0], p))) return;
 		swallowClick = true;
 		setTimeout(() => (swallowClick = false), 400);
-		const item = done.uid ? { uid: done.uid, ...(done.occurrence ? { occurrence: done.occurrence } : {}) } : undefined;
+		const item = done.uid
+			? { uid: done.uid, ...(done.occurrence ? { occurrence: done.occurrence } : {}), ...(done.calendar ? { keptIn: done.calendar } : {}) }
+			: undefined;
 		if (item && target) return send('move', { ...item, to: target });
 		const read = readStroke(done.points);
 		// Fingers (and a mouse) turn pages; the pen only makes marks, so a sloppy scribble never flips the page.
@@ -132,7 +137,7 @@
 		if (!mark || done.row?.classList.contains(mark)) return;
 		// Show the mark at once; once saved, the page redraws from the server. A mark only ever sets a state,
 		// so drawing it again (on a slow save, or on a page that is out of date) never undoes it.
-		const key = markKey(item.uid, item.occurrence);
+		const key = rowKey({ ...done, uid: item.uid });
 		marking[key] = mark;
 		return send('mark', { ...item, state: mark, set: 'yes' }).finally(() => {
 			if (marking[key] === mark) delete marking[key];
@@ -268,10 +273,10 @@
 </script>
 
 {#snippet itemRow(item: Item, date: string)}
-	{@const mark = marking[markKey(item.uid, item.occurrence)]}
-	<li class={[mark ?? item.state, mark && 'marked', item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
+	{@const mark = marking[rowKey(item)]}
+	<li class={[mark ?? item.state, mark && 'marked', item.calendar === data.workCalendar && 'work', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence} data-calendar={item.calendar}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
-			<input type="hidden" name="uid" value={item.uid} />
+			<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}"><span class="sq">{item.state === 'done' ? '✓' : ''}</span></button>
 		</form>
@@ -282,19 +287,19 @@
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
-			<input type="hidden" name="uid" value={item.uid} />
+			<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 			<button class="act" name="state" value="dropped" aria-label="{item.state === 'dropped' ? 'Restore' : 'Drop'} {item.title}">✕</button>
 		</form>
 		{#if item.kind === 'task' && date}
 			<form method="POST" action="?page={data.start}&/move" use:enhance={reportProblems} class="inline">
-				<input type="hidden" name="uid" value={item.uid} />
+				<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
 				<button class="act" name="to" value={addDays(date, 1)} aria-label="Move {item.title} to the next day">→</button>
 			</form>
 			{#if !item.recurrence}
 				<form method="POST" action="?page={data.start}&/unschedule" use:enhance={reportProblems} class="inline">
-					<input type="hidden" name="uid" value={item.uid} />
+					<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
 					<button class="act" aria-label="Put {item.title} back on Future tasks" title="Back to Future tasks">↩</button>
 				</form>
 			{/if}
@@ -304,7 +309,7 @@
 
 {#snippet pullButtons(item: Item)}
 	<form method="POST" action="?page={data.start}&/move" use:enhance={reportProblems} class="inline">
-		<input type="hidden" name="uid" value={item.uid} />
+		<input type="hidden" name="uid" value={item.uid} /><input type="hidden" name="keptIn" value={item.calendar} />
 		<button class="pull" name="to" value={data.today} aria-label="Put {item.title} on today">Today</button>
 		<button class="pull" name="to" value={data.saturday} aria-label="Put {item.title} on Saturday">Sat</button>
 	</form>
@@ -370,7 +375,7 @@
 					<div class="col">
 						<h2>Events</h2>
 						<ul class="lines">
-							{#each day.events as item (item.uid)}
+							{#each day.events as item (rowKey(item))}
 								{@render itemRow(item, day.date)}
 							{/each}
 							{@render blankLine('event', day.date)}
@@ -379,7 +384,7 @@
 					<div class="col">
 						<h2>Tasks</h2>
 						<ul class="lines">
-							{#each day.tasks as item (item.uid)}
+							{#each day.tasks as item (rowKey(item))}
 								{@render itemRow(item, day.date)}
 							{/each}
 							{@render blankLine('task', day.date)}
@@ -397,8 +402,8 @@
 		{#if showUnscheduled}
 			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
 			<ul class="lines">
-				{#each data.unscheduled as item (item.uid)}
-					<li class={[marking[markKey(item.uid)] ?? item.state, marking[markKey(item.uid)] && 'marked', dragging === item.uid && 'dragging']} data-uid={item.uid}>
+				{#each data.unscheduled as item (rowKey(item))}
+					<li class={[marking[rowKey(item)] ?? item.state, marking[rowKey(item)] && 'marked', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-calendar={item.calendar}>
 						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 						{@render pullButtons(item)}
@@ -412,9 +417,10 @@
 
 <dialog bind:this={sheet} class="sheet" aria-label="Details" onclose={() => (editing = null)}>
 	{#if editing}
-		{#key editing.uid}
+		{#key rowKey(editing)}
 			<form method="POST" action="?page={data.start}&/save" use:enhance={closeOnSuccess}>
 				<input type="hidden" name="uid" value={editing.uid} />
+				<input type="hidden" name="keptIn" value={editing.calendar} />
 				{#if editing.occurrence}<input type="hidden" name="occurrence" value={editing.occurrence} />{/if}
 				<h2 class="sheet-title">Details</h2>
 				<label class="field">Title <input name="title" id="f-title" value={editing.title} required /></label>
