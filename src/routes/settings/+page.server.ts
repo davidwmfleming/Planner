@@ -1,6 +1,8 @@
-import { error, fail } from '@sveltejs/kit';
-import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
-import { RefusedError } from '$lib/server/calendar-store';
+import { error, fail, type ActionFailure } from '@sveltejs/kit';
+import { shortTitle } from '$lib/format';
+import { byName, calendarAtPath, checkCalendarName, menuLabels, type Settings } from '$lib/settings';
+import { RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
+import { icsToItems } from '$lib/server/ical';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -122,5 +124,159 @@ export const actions: Actions = {
 			return fail(502, { action: 'choose', message: "The calendar server didn't save the choices. Try again in a moment." });
 		}
 		return { action: 'choose', saved: true };
+	},
+
+	/** Before deleting a calendar: how many items it holds, and its version, so the delete takes exactly what was counted. */
+	check: async ({ request }) => {
+		const path = String((await request.formData()).get('path') ?? '');
+		const found = await deletable(path);
+		if ('refusal' in found) return found.refusal;
+		const { store, calendar } = found;
+		const held = await contents(store, calendar);
+		if ('refusal' in held) return held.refusal;
+		return { action: 'check', path, count: held.documents.length, version: held.version };
+	},
+
+	/** Deletes an event calendar, after moving its items to another calendar or with them (`mode` move or delete).
+	 * Moving copies each item, then removes the old copy; the calendar itself goes only once it is empty, so a move
+	 * that stops halfway loses nothing and finishes when run again. Just before it goes, Work and new events stop pointing at it. */
+	delete: async ({ request }) => {
+		const form = await request.formData();
+		const path = String(form.get('path') ?? '');
+		const mode = String(form.get('mode') ?? '');
+		const found = await deletable(path);
+		if ('refusal' in found) return found.refusal;
+		const { store, calendar } = found;
+		const name = shortTitle(calendar.name);
+		const held = await contents(store, calendar);
+		if ('refusal' in held) return held.refusal;
+
+		if (mode === 'delete') {
+			const version = String(form.get('version') ?? '');
+			// Something changed (on a phone, say) since David saw the count: he agreed to delete what he saw, not this.
+			if (!version || version !== held.version) {
+				return fail(409, { action: 'delete', path, count: held.documents.length, version: held.version, message: `${name} changed since you looked, so nothing was deleted. It now holds ${items(held.documents.length)}.` });
+			}
+			return finish(store, calendar, version, { action: 'delete' as const, deleted: calendar.name, count: held.documents.length });
+		}
+		if (mode !== 'move') return refuse(400, 'Choose whether to move the items or delete them too');
+
+		const to = calendarAtPath(eventCalendars(store), String(form.get('to') ?? ''));
+		if (!to) return refuse(400, 'Choose a calendar to move the items to; if it was deleted elsewhere, reload the page');
+		if (to.url === calendar.url) return refuse(400, `Choose a calendar other than ${name} to move the items to`);
+		const toName = shortTitle(to.name);
+		const needs = new Set(held.documents.flatMap((d) => icsToItems(d.ics).map((i) => i.kind)));
+		if (needs.has('task') && !to.accepts.includes('task')) {
+			return refuse(400, `${name} holds tasks, and ${toName} only takes events. Choose another calendar, or delete them too.`);
+		}
+
+		const tally: Record<MoveOutcome, number> = { moved: 0, kept: 0, both: 0, unsure: 0 };
+		for (const doc of held.documents) {
+			const outcome = await store.moveDocument(doc, to.url);
+			tally[outcome]++;
+			// The server has stopped answering: don't press on, and don't guess what it did.
+			if (outcome === 'unsure') break;
+		}
+		const total = held.documents.length;
+		if (tally.moved < total) {
+			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, tally);
+			return refuse(502, unfinished(name, toName, total, tally));
+		}
+		// Read again, so the delete can't take an item that arrived (on a phone) while the others were moved.
+		const left = await contents(store, calendar);
+		if ('refusal' in left) return left.refusal;
+		if (left.documents.length > 0) {
+			return refuse(409, `Moved ${items(total)} to ${toName}, but ${left.documents.length} more arrived in ${name} meanwhile, so it is still there. Reload the page and delete it again to move those too.`);
+		}
+		return finish(store, calendar, left.version, { action: 'delete' as const, deleted: calendar.name, count: total, movedTo: to.name });
 	}
 };
+
+/** Why a calendar can't be deleted (or not yet), as shown next to it. */
+type Refusal = ActionFailure<{ action: 'delete'; message: string }>;
+const refuse = (status: number, message: string): Refusal => fail(status, { action: 'delete' as const, message });
+/** A calendar deleted, with how many items went with it or were moved first. */
+type Deleted = { action: 'delete'; deleted: string; count: number; movedTo?: string };
+
+const items = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
+const eventCalendars = (store: CalendarStore) => store.calendars().filter((c) => c.accepts.includes('event') && c.url !== tasksUrl(store));
+
+/** The event calendar at this path, read fresh, if it may be deleted; otherwise the refusal to show. */
+async function deletable(path: string): Promise<{ store: CalendarStore; calendar: Calendar } | { refusal: Refusal }> {
+	const store = await connect();
+	if (!store) return { refusal: refuse(503, NOT_ANSWERING) };
+	try {
+		// A fresh list, so the last-calendar check counts calendars added or deleted on another device.
+		await store.refreshCalendars();
+	} catch (e) {
+		console.error('Settings: could not read the calendars before a delete', e);
+		return { refusal: refuse(503, NOT_ANSWERING) };
+	}
+	const calendar = calendarAtPath(store.calendars(), path);
+	if (!calendar) return { refusal: refuse(404, CALENDAR_GONE) };
+	const name = shortTitle(calendar.name);
+	if (calendar.url === tasksUrl(store)) return { refusal: refuse(400, `${name} holds every task and the settings, so it can't be deleted`) };
+	if (!calendar.accepts.includes('event')) return { refusal: refuse(400, `${name} holds tasks, so it can't be deleted here`) };
+	if (eventCalendars(store).length < 2) {
+		return { refusal: refuse(400, `${name} is the only event calendar, and new events need somewhere to go. Add another calendar before deleting this one.`) };
+	}
+	return { store, calendar };
+}
+
+/** What a calendar holds now, and its version; or the refusal to show if that can't be read. */
+async function contents(store: CalendarStore, calendar: Calendar): Promise<{ version: string | undefined; documents: StoredDocument[] } | { refusal: Refusal }> {
+	try {
+		return await store.documents(calendar.url);
+	} catch (e) {
+		console.error(`Settings: could not read what "${calendar.name}" holds`, e);
+		if (e instanceof RefusedError && GONE.includes(e.status)) return { refusal: refuse(404, CALENDAR_GONE) };
+		return { refusal: refuse(502, `The calendar server didn't say what's in ${shortTitle(calendar.name)}. Try again in a moment.`) };
+	}
+}
+
+/** Why a move stopped before every item was moved. Nothing is deleted then: the calendar stays with what is left. */
+function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, number>): string {
+	const parts = [`Moved ${tally.moved} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`];
+	if (tally.kept) parts.push(`${tally.kept} stayed in ${name}, because the calendar server wouldn't put ${tally.kept === 1 ? 'it' : 'them'} in ${toName}.`);
+	if (tally.both) parts.push(`${tally.both} ${tally.both === 1 ? 'is' : 'are'} now in both calendars, because ${tally.both === 1 ? 'it was' : 'they were'} changed on another device meanwhile; delete the copy you don't want.`);
+	// Running it again finishes the job: a copy already in place and the same only needs the old one removed.
+	if (tally.unsure) parts.push(`The calendar server stopped answering, so ${tally.unsure} may now be in both calendars. Wait a minute, then reload the page and delete ${name} again to finish.`);
+	else parts.push('Reload the page to see.');
+	return parts.join(' ');
+}
+
+/** Points Work and new events away from the calendar, then deletes it, only at the version given. */
+async function finish(store: CalendarStore, calendar: Calendar, version: string | undefined, done: Deleted): Promise<Deleted | Refusal> {
+	const name = shortTitle(calendar.name);
+	if (!version) return refuse(502, `The calendar server didn't say which version of ${name} it holds, so nothing was deleted. Try again in a moment.`);
+	const tasks = tasksUrl(store);
+	const path = pathOf(calendar.url);
+	let before: Settings | undefined;
+	try {
+		const settings = await getSettings(store);
+		if (settings.workCalendar === path || settings.defaultEventCalendar === path) {
+			if (!tasks) throw new Error('There is no Tasks list to keep the settings on');
+			// None for Work; new events go to the first calendar left by name, as when the chosen one is missing.
+			await store.writeSettings(tasks, { ...settings, workCalendar: settings.workCalendar === path ? null : settings.workCalendar, defaultEventCalendar: settings.defaultEventCalendar === path ? null : settings.defaultEventCalendar });
+			before = settings;
+		}
+	} catch (e) {
+		console.error(`Settings: could not change the choices before deleting "${calendar.name}"`, e);
+		return refuse(502, "The calendar server didn't change the Work and new-event choices, so nothing was deleted. Try again in a moment.");
+	}
+	try {
+		await store.deleteCalendar(calendar.url, version);
+	} catch (e) {
+		if (e instanceof RefusedError && GONE.includes(e.status)) return done; // deleted elsewhere meanwhile
+		console.error(`Settings: could not delete "${calendar.name}"`, e);
+		// A late answer is not a refusal: the server may still delete it.
+		if (unanswered(e) || (e instanceof RefusedError && e.status >= 500)) {
+			return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);
+		}
+		// Surely not deleted: put the choices back as they were.
+		if (before && tasks) await store.writeSettings(tasks, before).catch((e) => console.error('Settings: could not put the choices back', e));
+		if (e instanceof RefusedError && e.status === 412) return refuse(409, `${name} changed just now, on another device perhaps, so it wasn't deleted. Reload the page and try again.`);
+		return refuse(502, `The calendar server didn't delete ${name}. Try again in a moment.`);
+	}
+	return done;
+}
