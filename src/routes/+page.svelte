@@ -45,16 +45,27 @@
 		await tick();
 		saveButton?.focus();
 	}
-	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
-		sheetMessage = problemOf(result);
-		if (sheetMessage) {
-			// The message sits in the sheet's Save bar, which a phone keeps on screen; make sure it is in view anyway.
-			await tick();
-			sheetTrouble?.scrollIntoView({ block: 'nearest' });
-			return;
-		}
-		await update();
-		sheet?.close();
+	// A second tap on Save (or Delete) while the sheet is still saving is ignored, like a double tap on a tick:
+	// it would send the change twice, and a move between calendars could make two copies.
+	let sheetSaving = false;
+	const closeOnSuccess: SubmitFunction = ({ cancel }) => {
+		if (sheetSaving) return cancel();
+		sheetSaving = true;
+		return async ({ result, update }) => {
+			try {
+				sheetMessage = problemOf(result);
+				if (sheetMessage) {
+					// The message sits in the sheet's Save bar, which a phone keeps on screen; make sure it is in view anyway.
+					await tick();
+					sheetTrouble?.scrollIntoView({ block: 'nearest' });
+					return;
+				}
+				await update();
+				sheet?.close();
+			} finally {
+				sheetSaving = false;
+			}
+		};
 	};
 	// Tick, ✕, → and the other taps on a row: a problem is said under the page's header, like a line that didn't save.
 	// The same tap again while it is still saving (a double tap, a slow connection) is ignored: it would undo the first.
