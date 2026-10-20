@@ -42,9 +42,15 @@ test('another calendar app finds the calendars, and events flow both ways', asyn
 	const fromPlanner = unique('Haircut from planner', info);
 	await page.locator(`#add-event-${tue}`).fill(`5pm ${fromPlanner}`);
 	await page.locator(`#add-event-${tue}`).press('Enter');
-	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner })).toBeVisible();
-	const everywhere = (await Promise.all(calendars.map((c) => client.fetchCalendarObjects({ calendar: c })))).flat();
-	expect(everywhere.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
+	const line = page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner });
+	await expect(line).toBeVisible();
+	// Only the calendar it was saved in is read: other tests running alongside add and delete calendars of their own,
+	// so one listed a moment ago may be gone by the time it is read.
+	const savedIn = await line.getAttribute('data-calendar');
+	const calendar = calendars.find((c) => new URL(c.url).pathname === `/dav${savedIn}`);
+	expect(calendar, `the planner's calendar ${savedIn} is offered to other apps`).toBeTruthy();
+	const objects = await client.fetchCalendarObjects({ calendar: calendar! });
+	expect(objects.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
 });
 
 test('calendar apps need the calendar password, and the usual address leads them in', async ({ request, baseURL }) => {
