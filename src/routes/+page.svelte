@@ -37,6 +37,8 @@
 				: '';
 	/** Messages that ask for a reload get a Reload button: the installed app has no browser controls. */
 	const saysReload = (message: string) => /\breload\b/i.test(message);
+	/** The calendar server didn't answer in time: the change may be made after all, so sending it again could make two. */
+	const mayBeDone = (message: string) => /\bmay or may not\b/i.test(message);
 	let sheetTrouble = $state<HTMLElement>();
 	let saveButton = $state<HTMLButtonElement>();
 	/** Closing the sheet's message leaves focus on Save, ready to try again, not at the top of the page. */
@@ -256,11 +258,15 @@
 	const saving = new Set<HTMLFormElement>();
 	const left = new Set<HTMLFormElement>();
 	const tappedTo = new Map<HTMLFormElement, HTMLElement>();
+	// Lines that may or may not have been saved (no answer in time) keep their words, but are only sent again on Enter:
+	// sending them when the cursor leaves, or the page turns, could make a second copy.
+	const unsure = new Set<HTMLFormElement>();
 	const lineOf = (form: HTMLFormElement) => form.querySelector<HTMLInputElement>('input[name="text"]')!;
 	const keepWriting: SubmitFunction = ({ formElement, formData }) => {
 		const line = lineOf(formElement);
 		const written = String(formData.get('text') ?? '');
 		saving.add(formElement);
+		unsure.delete(formElement);
 		line.value = '';
 		return async ({ result, update }) => {
 			if (result.type === 'success' || result.type === 'redirect') {
@@ -271,12 +277,13 @@
 				troubleAbout = line;
 				gestureMessage =
 					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${shortTitle(written)}"; try again`) : `Couldn't save "${shortTitle(written)}". Check the connection, then tap the line and try again.`;
+				if (result.type === 'failure' && mayBeDone(gestureMessage)) unsure.add(formElement);
 			}
 			saving.delete(formElement);
 			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
 			if (next?.isConnected && (document.activeElement === document.body || document.activeElement === null)) next.focus();
 			// Words written while the last line was saving, then left: save those too (and keep the cursor where it went).
-			if (result.type !== 'error' && line.value.trim() && document.activeElement !== line) {
+			if (result.type !== 'error' && !unsure.has(formElement) && line.value.trim() && document.activeElement !== line) {
 				left.add(formElement);
 				formElement.requestSubmit();
 				return;
@@ -298,6 +305,7 @@
 			// The whole page lost focus (another app or the keyboard): decide when it comes back.
 			if (!document.hasFocus()) return void addEventListener('focus', () => setTimeout(decide, LEAVE_DELAY), { once: true });
 			if (!saving.has(form) && !input.value.trim()) return;
+			if (unsure.has(form)) return;
 			if (tapped) tappedTo.set(form, tapped);
 			if (saving.has(form)) return;
 			left.add(form);
@@ -307,7 +315,7 @@
 	}
 
 	// Turning the page or leaving it right after writing: save the words now rather than after the pause.
-	const unsaved = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].filter((i) => i.form && i.value.trim() && !saving.has(i.form));
+	const unsaved = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].filter((i) => i.form && i.value.trim() && !saving.has(i.form) && !unsure.has(i.form));
 	function sendLine(input: HTMLInputElement, keepalive = false) {
 		const body = new FormData(input.form!);
 		input.value = '';
@@ -383,6 +391,10 @@
 				class="entry"
 				onfocus={(e) => e.currentTarget.classList.add('writing')}
 				onblur={saveOnLeave}
+				oninput={(e) => {
+					// Emptied: whatever is written next is a new line, saved as usual.
+					if (!e.currentTarget.value.trim()) unsure.delete(e.currentTarget.form!);
+				}}
 				name="text"
 				id="add-{kind}-{date || 'unscheduled'}"
 				autocomplete="off"
