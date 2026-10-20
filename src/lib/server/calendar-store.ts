@@ -193,7 +193,7 @@ export class CalendarStore {
 	/** Renames the calendar at this address, so two calendars with the same name can't be mixed up. */
 	async renameCalendarAt(url: string, to: string): Promise<void> {
 		const status = await this.proppatch(url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
-		if (status >= 300) throw new Error(`The calendar server refused to rename ${url} (${status})`);
+		if (status >= 300) throw new RefusedError(`The calendar server refused to rename ${url} (${status})`, status);
 		await this.refreshCalendars();
 	}
 

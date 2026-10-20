@@ -154,3 +154,20 @@ test('two calendars with the same name from another device are kept apart', asyn
 		await deleteCalendar(request, second);
 	}
 });
+
+test('choosing a calendar deleted on another device since Settings opened says to reload, not Saved', async ({ page, request }, info) => {
+	const name = unique('Gone choice', info);
+	const path = await makeCalendar(request, name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name);
+	try {
+		await page.goto('/settings');
+		const calendars = page.getByRole('region', { name: 'Event calendars' });
+		await calendars.getByLabel('New events go in').selectOption({ label: name });
+	} finally {
+		await deleteCalendar(request, path);
+	}
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByRole('button', { name: 'Save choices' }).click();
+	await expect(calendars.getByRole('alert')).toContainText('reload the page');
+	await expect(calendars.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
+	await expect(calendars.getByRole('status').filter({ hasText: 'Saved' })).toHaveCount(0);
+});
