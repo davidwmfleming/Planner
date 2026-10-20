@@ -1,6 +1,6 @@
 // The planner page's server side with a pretend calendar server, for the cases a shared test server can't stage.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Calendar, StoredItem } from '$lib/server/calendar-store';
+import { RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
@@ -274,7 +274,7 @@ describe('moving an item to another calendar from the details sheet', () => {
 
 	it('takes the new copy back out when the old one cannot be deleted, so there is still only one', async () => {
 		fake.remove = async (stored: StoredItem) => {
-			if (stored.calendarUrl === me.url) throw new Error('Deleting "Dentist" failed (403)');
+			if (stored.calendarUrl === me.url) throw new RefusedError('Deleting "Dentist" failed (403)', 403);
 			removed.push(stored.url);
 		};
 		expect(await act('save', toFamily)).toMatchObject({
@@ -299,6 +299,40 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(removed).toEqual([]);
 	});
 
+	it('keeps the new copy when the old one\'s delete timed out, even if the old one is still there when read again', async () => {
+		// The delete is still waiting on the calendar server (another request holds its storage lock), so a read
+		// straight after the time limit still finds the old copy, and the delete is done a few seconds later.
+		// Taking the new copy out on a timeout would then leave "Dentist" in no calendar at all.
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) {
+				setTimeout(() => (fake.items = fake.items.filter((i) => i.calendarUrl !== me.url)), 50);
+				throw new Error('The calendar server did not answer in time (deleting "Dentist")');
+			}
+			removed.push(stored.url);
+		};
+		const result = await act('save', toFamily);
+		await new Promise((r) => setTimeout(r, 100));
+		expect(removed).toEqual([]);
+		expect(result).toMatchObject({ status: 502, data: { message: expect.stringContaining('may now be in two calendars') } });
+	});
+
+	it('keeps the new copy when the connection drops during the old one\'s delete', async () => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new TypeError('fetch failed');
+			removed.push(stored.url);
+		};
+		expect(await act('save', toFamily)).toMatchObject({ status: 502, data: { message: expect.stringContaining('may now be in two calendars') } });
+		expect(removed).toEqual([]);
+	});
+
+	it('removes nothing when the new copy was saved at the old one\'s address', async () => {
+		const deleted: string[] = [];
+		fake.create = async () => dentist(me);
+		fake.remove = async (stored: StoredItem) => void deleted.push(stored.url);
+		expect(await act('save', toFamily)).toBeUndefined();
+		expect(deleted).toEqual([]);
+	});
+
 	it('keeps the new copy when it cannot tell whether the old one is still there', async () => {
 		fake.remove = async (stored: StoredItem) => {
 			if (stored.calendarUrl === me.url) throw new Error('The calendar server did not answer in time (deleting "Dentist")');
@@ -313,14 +347,14 @@ describe('moving an item to another calendar from the details sheet', () => {
 		};
 		expect(await act('save', toFamily)).toMatchObject({
 			status: 502,
-			data: { message: '"Dentist" may now be in two calendars, because the calendar server didn\'t say whether the old one was removed. Reload the page and delete the one you don\'t want.' }
+			data: { message: '"Dentist" may now be in two calendars, because the calendar server didn\'t confirm it removed the old one. Reload the page and delete the one you don\'t want.' }
 		});
 		expect(removed).toEqual([]);
 	});
 
 	it('says plainly when the item is left in both calendars', async () => {
 		fake.remove = async () => {
-			throw new Error('Deleting "Dentist" failed (403)');
+			throw new RefusedError('Deleting "Dentist" failed (403)', 403);
 		};
 		expect(await act('save', toFamily)).toMatchObject({
 			status: 502,

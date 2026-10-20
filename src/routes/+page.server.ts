@@ -7,7 +7,7 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
-import type { StoredItem } from '$lib/server/calendar-store';
+import { RefusedError, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
@@ -289,28 +289,38 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
 	}
 }
 
-/** The second half of moving an item to another calendar: remove the old copy. If the calendar server won't,
- * take the new copy back out, so the item isn't left in two calendars, and say what happened either way.
- * A delete that timed out may still have been done, so the new copy only goes if the old one is surely still there. */
+/** The second half of moving an item to another calendar: remove the old copy, and say what happened.
+ * Only a delete the calendar server answered with a refusal surely wasn't done; then the new copy is taken back out,
+ * so the item isn't left in two calendars. A delete that got no answer may still be done later (the server can queue
+ * it), so then the new copy always stays: taking it out could leave the item in no calendar at all. Reading the
+ * calendars again only tells whether the move is surely done (the old copy is gone) or says it may be in two. */
 async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
+	// The "copy" took the old one's place (same address): there is nothing to remove, and removing would lose it.
+	if (copy.url === old.url) return;
+	const title = shortTitle(old.title);
+	const maybeTwice = `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Reload the page and delete the one you don't want.`;
 	try {
 		await store.remove(old);
 		return;
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
-	}
-	try {
-		if (!(await store.listItems()).some((i) => i.url === old.url)) return;
-	} catch (e) {
-		// Never take the new copy out without knowing the old one is there: that could leave the item nowhere.
-		console.error(`Planner: could not check whether the old copy of "${old.title}" is still there`, e);
-		return fail(502, { message: `"${shortTitle(old.title)}" may now be in two calendars, because the calendar server didn't say whether the old one was removed. Reload the page and delete the one you don't want.` });
+		if (!(e instanceof RefusedError)) return (await elsewhere(store, old, copy)) === 0 ? undefined : fail(502, { message: maybeTwice });
 	}
 	try {
 		await store.remove(copy);
-		return fail(502, { message: `The calendar server didn't move "${shortTitle(old.title)}" to another calendar, so it stays where it was. Reload the page and try again.` });
+		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was. Reload the page and try again.` });
 	} catch (e) {
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
-		return fail(502, { message: `"${shortTitle(old.title)}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
+		return fail(502, { message: `"${title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
+	}
+}
+
+/** How many copies of the item are now kept anywhere but the new copy's address, or undefined if that can't be read. */
+async function elsewhere(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
+	try {
+		return (await store.listItems()).filter((i) => i.uid === old.uid && i.url !== copy.url).length;
+	} catch (e) {
+		console.error(`Planner: could not check where "${old.title}" is kept now`, e);
+		return undefined;
 	}
 }

@@ -46,6 +46,17 @@ function davText(value: unknown): string | undefined {
 	return typeof inner === 'string' ? inner : undefined;
 }
 
+/** The calendar server answered and said no (an HTTP error status), so the change surely wasn't made.
+ * Any other failure (no answer in time, a dropped connection) leaves it unknown: the server may still do it. */
+export class RefusedError extends Error {
+	constructor(
+		message: string,
+		readonly status: number
+	) {
+		super(message);
+	}
+}
+
 export class CalendarStore {
 	private client: DAVClient;
 	private davCalendars: DAVCalendar[] = [];
@@ -287,7 +298,7 @@ export class CalendarStore {
 		const filename = `${item.uid}.ics`;
 		const ics = itemToICS(item, previous);
 		const res = await this.timed(this.client.createCalendarObject({ calendar, filename, iCalString: ics }), `saving "${item.title}"`);
-		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status})`);
+		if (!res.ok) throw new RefusedError(`Saving "${item.title}" failed (${res.status})`, res.status);
 		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
 	}
 
@@ -309,7 +320,7 @@ export class CalendarStore {
 
 	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
 		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving "${stored.title}"`);
-		if (!res.ok) throw new Error(`Saving "${stored.title}" failed (${res.status}); reload and try again`);
+		if (!res.ok) throw new RefusedError(`Saving "${stored.title}" failed (${res.status}); reload and try again`, res.status);
 		return res.headers.get('etag') ?? undefined;
 	}
 
@@ -322,7 +333,7 @@ export class CalendarStore {
 
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
-		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
+		if (!res.ok) throw new RefusedError(`Deleting "${stored.title}" failed (${res.status})`, res.status);
 	}
 
 	private authorization(): string {
