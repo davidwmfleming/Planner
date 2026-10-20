@@ -119,7 +119,8 @@ export class CalendarStore {
 				return { url: new URL(r.href!, home), displayName: davText(r.props?.displayname), components };
 			})
 			.filter((c) => inHome(c.url))
-			.map((c) => ({ ...c, url: c.url.href }));
+			// As folders, ending in '/', so an item's address can be checked to lie inside its calendar.
+			.map((c) => ({ ...c, url: c.url.href.endsWith('/') ? c.url.href : `${c.url.href}/` }));
 	}
 
 	calendars(): Calendar[] {
