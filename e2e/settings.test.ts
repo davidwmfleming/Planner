@@ -189,3 +189,21 @@ test('a name of only invisible characters is refused', async ({ page }) => {
 	await calendars.getByRole('button', { name: 'Add calendar' }).click();
 	await expect(calendars.getByRole('alert')).toHaveText('Give the calendar a name');
 });
+
+test('two calendars with the same name are told apart in the list, Rename buttons included', async ({ page, request }, info) => {
+	const name = unique('Twin', info);
+	const tag = Math.random().toString(36).slice(2, 6);
+	const paths = [await makeCalendar(request, `twin-${tag}-a`, name), await makeCalendar(request, `twin-${tag}-b`, name)];
+	try {
+		await page.goto('/settings');
+		const calendars = page.getByRole('region', { name: 'Event calendars' });
+		await expect(calendars.getByRole('listitem').filter({ hasText: `${name} (twin-${tag}-a)` })).toBeVisible();
+		await expect(calendars.getByRole('listitem').filter({ hasText: `${name} (twin-${tag}-b)` })).toBeVisible();
+		await expect(calendars.getByRole('button', { name: `Rename ${name} (twin-${tag}-a)`, exact: true })).toBeVisible();
+		await calendars.getByRole('button', { name: `Rename ${name} (twin-${tag}-b)`, exact: true }).click();
+		// The name field holds the plain name, which is what gets changed.
+		await expect(calendars.getByRole('textbox', { name: `New name for ${name} (twin-${tag}-b)` })).toHaveValue(name);
+	} finally {
+		for (const path of paths) await deleteCalendar(request, path);
+	}
+});

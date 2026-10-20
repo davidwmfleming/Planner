@@ -134,16 +134,17 @@
 						{#if renaming === calendar.path}
 							<form method="POST" action="?/rename" use:enhance={renamed} class="edit">
 								<input type="hidden" name="path" value={calendar.path} />
-								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.name}" autocomplete="off" onkeydown={renameKeys} />
+								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.label}" autocomplete="off" onkeydown={renameKeys} />
 								<button class="btn primary">Save name</button>
 								<button type="button" class="btn" onclick={stopRename}>Cancel</button>
 								{#if renameError}<p class="error" role="alert">{renameError}</p>{/if}
 							</form>
 						{:else}
-							<span class="name">{calendar.name}</span>
+							<!-- Two calendars can share a name (one made on a phone, say); the label adds the end of the address. -->
+							<span class="name">{calendar.label}</span>
 							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
 							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
-							<button type="button" class="btn small" aria-label="Rename {calendar.name}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
+							<button type="button" class="btn small" aria-label="Rename {calendar.label}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
 						{/if}
 					</li>
 				{/each}
