@@ -225,12 +225,22 @@ export class CalendarStore {
 		return inner.find((status) => status >= 300) ?? response.status;
 	}
 
-	/** A whole calendar as one .ics file, time zones included, exactly as the server hands it out. */
-	async calendarFile(url: string): Promise<string> {
+	/** A whole calendar as one .ics file, time zones included, exactly as the server hands it out.
+	 * Undefined if the calendar has been deleted (on a phone) since the list was read. */
+	async calendarFile(url: string): Promise<string | undefined> {
 		const calendar = this.calendarAt(url);
-		const response = await fetch(calendar.url, { headers: { Authorization: this.authorization(), Accept: 'text/calendar' } });
-		if (!response.ok) throw new Error(`The calendar server would not hand out "${calendar.displayName ?? url}" (${response.status})`);
-		return response.text();
+		const name = calendar.displayName ?? url;
+		// The time limit covers the whole file, so a server that stops halfway can't hang the export either.
+		const signal = AbortSignal.timeout(this.timeoutMs);
+		try {
+			const response = await fetch(calendar.url, { headers: { Authorization: this.authorization(), Accept: 'text/calendar' }, signal });
+			if (response.status === 404) return undefined;
+			if (!response.ok) throw new Error(`The calendar server would not hand out "${name}" (${response.status})`);
+			return await response.text();
+		} catch (e) {
+			if (signal.aborted) throw new Error(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
+			throw e;
+		}
 	}
 
 	async listItems(): Promise<StoredItem[]> {

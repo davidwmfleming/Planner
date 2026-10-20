@@ -1,6 +1,8 @@
 // Runs against a real Radicale server started in a temporary folder. Skipped if Radicale isn't installed.
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type RequestListener } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -69,6 +71,41 @@ describe('CalendarStore without a server', () => {
 		const store = storeWith({ propfind: () => new Promise(() => {}), login: () => new Promise(() => {}) }, 50);
 		await expect(store.refreshCalendars()).rejects.toThrow(/did not answer/);
 		await expect(store.connect()).rejects.toThrow(/did not answer/);
+	});
+
+	/** A calendar called Slow whose address is a small local server answering with `respond`. */
+	async function calendarServedBy(respond: RequestListener, timeoutMs?: number) {
+		const server = createServer(respond);
+		await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/david/slow/`;
+		const store = storeWith({}, timeoutMs);
+		(store as unknown as { davCalendars: unknown }).davCalendars = [{ url, displayName: 'Slow' }];
+		return {
+			store,
+			url,
+			close: () => {
+				server.closeAllConnections();
+				return new Promise((resolve) => server.close(resolve));
+			}
+		};
+	}
+
+	it('gives up on a calendar file the server never finishes sending, naming the calendar', async () => {
+		const { store, url, close } = await calendarServedBy((_, res) => res.writeHead(200, { 'Content-Type': 'text/calendar' }).write('BEGIN:VCALENDAR\r\n'), 100);
+		try {
+			await expect(store.calendarFile(url)).rejects.toThrow(/"Slow".*in time|in time.*"Slow"/);
+		} finally {
+			await close();
+		}
+	});
+
+	it('reports a calendar deleted since the list was read as gone, rather than failing', async () => {
+		const { store, url, close } = await calendarServedBy((_, res) => res.writeHead(404).end());
+		try {
+			expect(await store.calendarFile(url)).toBeUndefined();
+		} finally {
+			await close();
+		}
 	});
 });
 
