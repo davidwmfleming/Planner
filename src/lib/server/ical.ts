@@ -78,7 +78,7 @@ function itemComponent(item: Item): ICAL.Component {
 		}
 		const status = { open: 'NEEDS-ACTION', done: 'COMPLETED', dropped: 'CANCELLED' }[item.state];
 		comp.addPropertyWithValue('status', status);
-		if (item.state === 'done') comp.addPropertyWithValue('completed', ICAL.Time.now());
+		if (item.state === 'done') comp.addPropertyWithValue('completed', ICAL.Time.fromJSDate(new Date(), true));
 		if (item.date && item.time && item.state === 'open') {
 			const alarm = new ICAL.Component('valarm');
 			alarm.addPropertyWithValue('action', 'DISPLAY');
