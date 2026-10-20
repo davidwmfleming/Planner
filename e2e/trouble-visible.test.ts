@@ -277,3 +277,31 @@ test('closing a message puts focus back on what it was about, not the top of the
 	await sheet.getByRole('button', { name: 'Close the message' }).click();
 	await expect(sheet.getByRole('button', { name: 'Save' })).toBeFocused();
 });
+
+// The calendar tag on a doubled item must not squeeze the title into a column of single letters on a small phone
+// (320 wide: iPhone SE with Display Zoom). At e90755a the title gets about 30px and the row is about 400px tall.
+test('an item in two calendars keeps a readable title at 320 wide', async ({ page, request }, info) => {
+	test.skip(info.project.name !== 'phone', 'a phone size, set here');
+	const { wed } = futureWeek();
+	await page.setViewportSize({ width: 320, height: 568 });
+	const name = unique('Dentist appointment', info);
+	const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+	const uid = `qa-tag-${slug}`;
+	const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20260101T000000Z',
+		`DTSTART:${wed.replaceAll('-', '')}T090000`, `SUMMARY:${name}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+	const calendars = [await makeCalendar(request, `${slug}-a`, 'Kids activities'), await makeCalendar(request, `${slug}-b`, 'Family')];
+	try {
+		for (const path of calendars) await putEntry(request, path, `${uid}.ics`, ics);
+		await page.goto(`/?page=${wed}`);
+		const copies = page.locator('li[data-uid]', { hasText: name });
+		await expect(copies).toHaveCount(2);
+		for (const copy of await copies.all()) {
+			const title = (await copy.getByRole('button', { name: `Details for ${name}` }).boundingBox())!;
+			const row = (await copy.boundingBox())!;
+			expect(title.width, 'title column width').toBeGreaterThan(row.width * 0.35);
+			expect(row.height, 'row height').toBeLessThan(140);
+		}
+	} finally {
+		for (const path of calendars) await deleteCalendar(request, path);
+	}
+});

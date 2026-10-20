@@ -358,10 +358,9 @@
 			<button class="box" name="state" value="done" aria-label="{item.state === 'done' ? 'Untick' : 'Tick'} {item.title}"><span class="sq">{item.state === 'done' ? '✓' : ''}</span></button>
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
-		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+		{@render titleOf(item, date)}
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
-		{@render copyTag(item, date)}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
@@ -385,10 +384,17 @@
 	</li>
 {/snippet}
 
-{#snippet copyTag(item: Item, date: string)}
+<!-- An item's title, which opens its details. A copy of an item shown twice says which calendar it is in, under
+     the title when the row is narrow, so the title keeps most of the row. -->
+{#snippet titleOf(item: Item, date: string)}
 	{#if twice.has(`${date} ${item.uid}`) && item.calendar}
 		{@const name = data.calendarLabels[item.calendar] ?? item.calendar}
-		<span class="tag cal-tag" title="In {name}">{name}</span>
+		<span class="titled">
+			<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+			<span class="tag cal-tag" title="In {name}">{name}</span>
+		</span>
+	{:else}
+		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 	{/if}
 {/snippet}
 
@@ -502,9 +508,8 @@
 			<ul class="lines">
 				{#each data.unscheduled as item (rowKey(item))}
 					<li class={[marking[rowKey(item)] ?? item.state, marking[rowKey(item)] && 'marked', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-calendar={item.calendar}>
-						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
+						{@render titleOf(item, '')}
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
-						{@render copyTag(item, '')}
 						{@render pullButtons(item)}
 					</li>
 				{/each}
@@ -767,8 +772,12 @@
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
-	/* A long calendar name wraps rather than pushing the row off a phone screen; all of it shows, so the copies can be told apart. */
-	.cal-tag { max-width: 6rem; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; }
+	/* The title and its calendar tag share the title's place. The title wants 8rem; when the tag doesn't fit beside it,
+	   the tag goes on the line below. A long name wraps rather than widening the row; all of it shows, so the copies
+	   can be told apart. */
+	.titled { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.45rem; }
+	.titled .title { flex: 1 1 8rem; }
+	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
