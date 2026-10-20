@@ -21,6 +21,7 @@ export const load: PageServerLoad = async () => {
 	let store, settings;
 	try {
 		store = await getStore();
+		await store.refreshCalendars(); // show calendars added or deleted on a phone since the planner started
 		settings = await getSettings(store);
 	} catch (e) {
 		console.error('Settings: could not read the calendars or settings', e);
