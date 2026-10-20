@@ -1,0 +1,17 @@
+# Copies the planner's calendars into /srv/backups/planner (see scripts/backup.sh).
+# Installed by scripts/server-setup.sh. Run it now with:  sudo systemctl start planner-backup
+[Unit]
+Description=Back up the planner's calendars
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/planner-backup
+# The copy takes seconds; if it hangs, stop it (the script then resumes the calendar server).
+TimeoutStartSec=30min
+# Limits that still let the docker command talk to Docker: its own /tmp, no access to /home
+# (so BACKUP_DIR can't be under /home), and no gaining privileges through setuid programs.
+PrivateTmp=yes
+ProtectHome=yes
+NoNewPrivileges=yes

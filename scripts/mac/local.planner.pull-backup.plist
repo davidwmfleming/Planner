@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Runs pull-backup.sh every day at 07:00, and each time you log in. If the Mac is asleep at
+  07:00, launchd runs it when the Mac wakes. Install it as described in the README
+  ("Copy on the Mac"); the install step replaces /Users/YOURNAME with your home folder.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>local.planner.pull-backup</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/Users/YOURNAME/bin/planner-pull-backup.sh</string>
+	</array>
+	<key>StartCalendarInterval</key>
+	<dict>
+		<key>Hour</key>
+		<integer>7</integer>
+		<key>Minute</key>
+		<integer>0</integer>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardOutPath</key>
+	<string>/Users/YOURNAME/Library/Logs/planner-pull-backup.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/YOURNAME/Library/Logs/planner-pull-backup.log</string>
+</dict>
+</plist>

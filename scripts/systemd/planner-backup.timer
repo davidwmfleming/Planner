@@ -1,0 +1,11 @@
+# Runs planner-backup.service every night at 02:30. If the server was off at 02:30,
+# Persistent=true makes the backup run soon after it starts again.
+[Unit]
+Description=Nightly backup of the planner's calendars
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

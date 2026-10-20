@@ -1,0 +1,12 @@
+# Settings for ~/bin/planner-pull-backup.sh. Copy this file to ~/.config/planner-backup.conf
+# and fill it in; updating the script never touches it.
+
+# The server's Tailscale name (as in `tailscale status`), and your account on it.
+SERVER=homebase
+SERVER_USER=david
+# Proton Drive's synced folder on this Mac. Find its name with:  ls ~/Library/CloudStorage
+PROTON_DRIVE="$HOME/Library/CloudStorage/ProtonDrive-you@pm.me-folder"
+
+# Optional (these are the defaults):
+# KEEP_DAYS=30    days of nightly copies kept on the Mac; at least as many as the server keeps
+# STALE_DAYS=2    notify when the newest copy on the Mac is older than this

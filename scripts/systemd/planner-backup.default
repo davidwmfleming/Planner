@@ -1,0 +1,17 @@
+# Settings for the planner's nightly backup (scripts/backup.sh and scripts/restore.sh).
+# server-setup.sh copies this to /etc/default/planner-backup once and never overwrites your edits.
+
+# Where the archives go: a full path of letters, digits and . _ - / (not under /home, and every
+# folder above it must belong to root). And how many days of nightly copies to keep (1 or more).
+BACKUP_DIR=/srv/backups/planner
+KEEP_DAYS=30
+# The account whose group may read the archives (root owns them); the Mac signs in as this
+# account to fetch them. server-setup.sh fills this in with the account that ran it.
+BACKUP_OWNER=
+# The planner's Docker volume and its folder (with compose.yaml); restore.sh stops and starts it.
+VOLUME=planner_data
+PLANNER_DIR=/srv/planner
+# Once the Mac's key is added, the ssh server only lets BACKUP_OWNER sign in, only from Tailscale
+# addresses. Other accounts that need ssh: list them here, separated by spaces, as NAME or
+# NAME@ADDRESS (for example: SSH_ALLOW_USERS="alice bob@192.168.1.*"), then run server-setup.sh again.
+SSH_ALLOW_USERS=
