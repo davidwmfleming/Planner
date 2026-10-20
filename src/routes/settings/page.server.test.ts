@@ -313,6 +313,18 @@ describe('moving the items, then deleting the calendar', () => {
 		);
 	});
 
+	it('logs how many items moved, never their titles (shared calendars hold other people\'s events)', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: ['Secret dentist', 'Private party'].map((u) => doc(family, u)) });
+		fake.outcomes = ['kept', 'unsure'];
+		const logged: unknown[][] = [];
+		console.error = (...args: unknown[]) => logged.push(args);
+		await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' });
+		expect(logged.length).toBeGreaterThan(0);
+		const text = JSON.stringify(logged);
+		expect(text).not.toMatch(/Secret|Private/);
+		expect(text).toMatch(/kept.*1/);
+	});
+
 	it('keeps the calendar if an item arrives while the others are moved', async () => {
 		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a')] });
 		const move = fake.moveDocument.bind(fake);

@@ -177,7 +177,9 @@ export const actions: Actions = {
 		}
 		const total = held.documents.length;
 		if (tally.moved.length < total) {
-			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, tally);
+			// Counts only: the titles are event names, other people's too in a shared calendar, and logs are kept.
+			const counts = Object.fromEntries(Object.entries(tally).map(([outcome, titles]) => [outcome, titles.length]));
+			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, counts);
 			// Gone by now: another run of this delete (a second tab, or a tap after a refresh) finished it.
 			if (await isGone(store, calendar)) return refuse(502, unfinished(name, toName, total, tally, true));
 			return recounted(store, calendar, refuse(502, unfinished(name, toName, total, tally)));
