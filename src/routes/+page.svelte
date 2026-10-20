@@ -2,9 +2,9 @@
 	import { deserialize, enhance } from '$app/forms';
 	import { beforeNavigate, goto, invalidateAll, preloadData } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
-	import { addDays } from '$lib/dates';
+	import { addDays, toISODate } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
+	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
@@ -352,6 +352,9 @@
 	// The server's clock may be behind this one, or it can't be reached yet: ask again (see retryAfter), and don't
 	// let every wake or focus ask meanwhile (see mayAsk).
 	let lastAsked = 0;
+	// Said under the header while a line holds the page on the old day, so it isn't a mystery.
+	let dayNote = $state('');
+	const lineWritten = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].some((i) => i.value.trim());
 	let seen: { today: string; todayPage: string; start: string } | undefined;
 	let dayTimer: ReturnType<typeof setTimeout> | undefined;
 	let checking = false;
@@ -359,8 +362,7 @@
 	let gone = false;
 	const shown = () => ({ today: data.today, todayPage: data.todayPage, start: data.start });
 	const busy = () =>
-		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 ||
-		[...document.querySelectorAll<HTMLInputElement>('input.entry')].some((i) => i.value.trim());
+		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 || lineWritten();
 	/** Whether this page's data can be read now. A refresh that fails would swap the planner for the error screen
 	 * (no Wi-Fi yet on waking, the calendar server down), so the page only refreshes once a try has worked. */
 	async function answers() {
@@ -408,6 +410,8 @@
 			} else if (!to) seen = shown();
 			const behind = dayBegun(new Date(), data.today);
 			tries = (behind || failed) && !held ? tries + 1 : 0;
+			const turns = to || (behind && seen.start === seen.todayPage);
+			dayNote = held && turns && lineWritten() ? `It's now ${dayName(to ? data.today : toISODate(new Date()))}. The page turns once this line is saved or cleared.` : '';
 			wait = held && (to || behind) ? WHILE_WRITING : behind || failed ? retryAfter(tries) : untilMidnight(new Date());
 		} catch {
 			wait = retryAfter(++tries);
@@ -544,6 +548,7 @@
 			</svg>
 		</a>
 		<!-- In the header, which stays at the top of the screen, so a message is seen however far down the page is scrolled. -->
+		{#if dayNote}<p class="notice day-note" role="status">{dayNote}</p>{/if}
 		{#if gestureMessage}
 			<div class="trouble">
 				<span class="trouble-buttons">
@@ -850,6 +855,7 @@
 	button.btn { cursor: pointer; }
 	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem 0 0; }
 	.notice a { color: var(--ink); font-weight: 700; }
+	.day-note { flex: 1 0 100%; order: 3; margin: 0; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	/* A whole row of its own, under the header's buttons or above the sheet's. */
 	.trouble { flex: 1 0 100%; order: 2; display: flex; gap: 0.5rem; align-items: center; }

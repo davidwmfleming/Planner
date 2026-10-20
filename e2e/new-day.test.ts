@@ -72,12 +72,15 @@ test('a line half written at midnight is not lost: the page waits until it is sa
 	await page.clock.runFor('01:10');
 	await expect(line).toHaveValue(title);
 	await expect(todayTag(page, WED)).toBeVisible();
+	const note = page.getByRole('status');
+	await expect(note).toHaveText("It's now Thursday. The page turns once this line is saved or cleared.");
 
 	await line.press('Enter');
 	await expect(page.locator(`section.day[data-date="${WED}"]`).getByText(title)).toBeVisible();
 	await page.clock.runFor('00:15');
 	await expect(todayTag(page, THU)).toBeVisible();
 	await expect(page).toHaveURL(new RegExp(`\\?page=${THU}$`));
+	await expect(note).toHaveCount(0);
 
 	await page.goto(`/?page=${MON}`);
 	await expect(page.locator(`section.day[data-date="${WED}"]`).getByText(title)).toBeVisible();
