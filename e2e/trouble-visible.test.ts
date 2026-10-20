@@ -225,3 +225,22 @@ for (const [width, height, most] of [[375, 667, 0.36], [320, 568, 0.5]] as const
 		await expect(sheet.getByRole('button', { name: 'Save' })).toBeInViewport();
 	});
 }
+
+test('closing a message puts focus back on what it was about, not the top of the page', async ({ page }, info) => {
+	const name = unique('Focus back', info);
+	const row = await addTask(page, name);
+	await page.route('**/*&/mark', (r) => r.fulfill(refused('No')));
+	const tickButton = row.getByRole('button', { name: `Tick ${name}` });
+	await tickButton.click();
+	await expect(page.getByRole('alert')).toHaveText('No');
+	await page.getByRole('button', { name: 'Close the message' }).click();
+	await expect(tickButton).toBeFocused();
+
+	await row.getByRole('button', { name: `Details for ${name}` }).click();
+	const sheet = page.getByRole('dialog', { name: 'Details' });
+	await page.route('**/*&/save', (r) => r.fulfill(refused('No')));
+	await sheet.getByRole('button', { name: 'Save' }).click();
+	await expect(sheet.getByRole('alert')).toHaveText('No');
+	await sheet.getByRole('button', { name: 'Close the message' }).click();
+	await expect(sheet.getByRole('button', { name: 'Save' })).toBeFocused();
+});
