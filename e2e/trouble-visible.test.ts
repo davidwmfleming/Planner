@@ -289,7 +289,8 @@ test('an item in two calendars keeps a readable title at 320 wide', async ({ pag
 	const uid = `qa-tag-${slug}`;
 	const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${uid}`, 'DTSTAMP:20260101T000000Z',
 		`DTSTART:${wed.replaceAll('-', '')}T090000`, `SUMMARY:${name}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
-	const calendars = [await makeCalendar(request, `${slug}-a`, 'Kids activities'), await makeCalendar(request, `${slug}-b`, 'Family')];
+	// Names no other calendar has: a second plain "Family" would relabel the real one in every menu while this runs.
+	const calendars = [await makeCalendar(request, `${slug}-a`, unique('Kids activities', info)), await makeCalendar(request, `${slug}-b`, unique('Family', info))];
 	try {
 		for (const path of calendars) await putEntry(request, path, `${uid}.ics`, ics);
 		await page.goto(`/?page=${wed}`);
