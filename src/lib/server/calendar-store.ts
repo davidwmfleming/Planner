@@ -21,6 +21,22 @@ export interface StoredItem extends Item {
 	ics: string;
 }
 
+/** One stored document (an event or task with all its one-off changes) exactly as the server holds it. */
+export interface StoredDocument {
+	calendarUrl: string;
+	url: string;
+	etag?: string;
+	ics: string;
+}
+
+/** What became of a document asked to move to another calendar:
+ * moved (only in the new calendar), kept (surely only in the old one), both (surely in both: the old copy changed
+ * since it was read, so it wasn't removed), or unsure (the server didn't answer: it may be in both). */
+export type MoveOutcome = 'moved' | 'kept' | 'both' | 'unsure';
+
+/** What the calendar server says about something that isn't there (any more). */
+const GONE = [404, 410];
+
 export interface Calendar {
 	url: string;
 	name: string;
@@ -268,34 +284,102 @@ export class CalendarStore {
 		await this.refreshCalendars();
 		const all: StoredItem[] = [];
 		for (const calendar of this.davCalendars) {
-			// One query that returns everything, rather than a list followed by a fetch: an item added or
-			// deleted between the two (on a phone, or by another page load) would make the fetch fail.
-			const responses = await this.timed(
-				this.client.calendarQuery({
-					url: calendar.url,
-					props: { 'd:getetag': {}, 'c:calendar-data': {} },
-					filters: ALL_COMPONENTS,
-					depth: '1'
-				}),
-				`reading ${calendar.displayName ?? calendar.url}`
-			).catch(async (e) => {
-					// Deleted elsewhere since the list was read: skip it. Any other failure is real.
-					await this.refreshCalendars();
-					if (this.davCalendars.some((c) => c.url === calendar.url)) throw e;
-					return [];
-				});
-			for (const res of responses) {
-				const data = davText(res.props?.calendarData);
-				if (!res.href || !data?.trim()) continue;
-				const url = new URL(res.href, calendar.url).href;
-				// Saving or deleting an item sends the password to its address, so it must be inside its calendar.
-				if (!url.startsWith(calendar.url)) continue;
-				for (const item of icsToItems(data)) {
-					all.push({ ...item, calendarUrl: calendar.url, url, etag: davText(res.props?.getetag), ics: data });
-				}
+			const documents = await this.query(calendar).catch(async (e) => {
+				// Deleted elsewhere since the list was read: skip it. Any other failure is real.
+				await this.refreshCalendars();
+				if (this.davCalendars.some((c) => c.url === calendar.url)) throw e;
+				return [];
+			});
+			for (const doc of documents) {
+				for (const item of icsToItems(doc.ics)) all.push({ ...item, ...doc });
 			}
 		}
 		return all;
+	}
+
+	/** Every document in one calendar, and the calendar's version (its ETag) read just before them.
+	 * Deleting the calendar with that version fails if anything in it changed since, so nothing unseen is lost. */
+	async documents(calendarUrl: string): Promise<{ version: string | undefined; documents: StoredDocument[] }> {
+		const calendar = this.calendarAt(calendarUrl);
+		const [about] = await this.timed(this.client.propfind({ url: calendar.url, props: { 'd:getetag': {} }, depth: '0' }), `reading ${calendar.displayName ?? calendar.url}`);
+		if (!about?.ok) throw new RefusedError(`Reading ${calendar.url} failed (${about?.status ?? 'no answer'})`, about?.status ?? 502);
+		return { version: davText(about.props?.getetag), documents: await this.query(calendar) };
+	}
+
+	/** All documents in a calendar, in one query that returns everything, rather than a list followed by a fetch:
+	 * an item added or deleted between the two (on a phone, or by another page load) would make the fetch fail. */
+	private async query(calendar: DAVCalendar): Promise<StoredDocument[]> {
+		const responses = await this.timed(
+			this.client.calendarQuery({
+				url: calendar.url,
+				props: { 'd:getetag': {}, 'c:calendar-data': {} },
+				filters: ALL_COMPONENTS,
+				depth: '1'
+			}),
+			`reading ${calendar.displayName ?? calendar.url}`
+		);
+		const documents: StoredDocument[] = [];
+		for (const res of responses) {
+			const ics = davText(res.props?.calendarData);
+			if (!res.href || !ics?.trim()) continue;
+			const url = new URL(res.href, calendar.url).href;
+			// Saving or deleting an item sends the password to its address, so it must be inside its calendar.
+			if (!url.startsWith(calendar.url)) continue;
+			documents.push({ calendarUrl: calendar.url, url, etag: davText(res.props?.getetag), ics });
+		}
+		return documents;
+	}
+
+	/** Moves a document to another calendar unchanged, under the same file name, so repeats, one-off changes and alerts
+	 * all go with it. The copy is made first; the old one is removed only once the copy is surely there, and only as it
+	 * was read (a phone's change since then stops it). A copy already there and the same is a move that was cut short
+	 * before: removing the old one finishes it. Never throws: every way it can end is an outcome. */
+	async moveDocument(doc: StoredDocument, toCalendarUrl: string): Promise<MoveOutcome> {
+		const to = this.calendarAt(toCalendarUrl);
+		const filename = doc.url.startsWith(doc.calendarUrl) ? doc.url.slice(doc.calendarUrl.length) : '';
+		if (!filename || filename.includes('/') || to.url === doc.calendarUrl) return 'kept';
+		const target = new URL(filename, to.url).href;
+		let copied: Response;
+		try {
+			copied = await this.send('PUT', target, { 'Content-Type': 'text/calendar; charset=utf-8', 'If-None-Match': '*' }, doc.ics);
+		} catch {
+			return 'unsure'; // the copy may or may not have been made
+		}
+		if (copied.status >= 500) return 'unsure';
+		if (copied.status === 412) {
+			if (!(await this.holds(target, doc.ics))) return 'kept'; // something else has that name there
+		} else if (!copied.ok) return 'kept';
+		// Without a version, a change made on a phone since it was read could be deleted unseen.
+		if (!doc.etag) return 'both';
+		let removed: Response;
+		try {
+			removed = await this.send('DELETE', doc.url, { 'If-Match': doc.etag });
+		} catch {
+			return 'unsure'; // the server may still remove it
+		}
+		if (removed.ok || GONE.includes(removed.status)) return 'moved';
+		return removed.status >= 500 ? 'unsure' : 'both';
+	}
+
+	/** Whether the document at this address is exactly this one. Anything but a clear yes is a no. */
+	private async holds(url: string, ics: string): Promise<boolean> {
+		try {
+			const response = await this.send('GET', url, { Accept: 'text/calendar' });
+			const same = (text: string) => text.replace(/\r\n/g, '\n').trim();
+			return response.ok && same(await response.text()) === same(ics);
+		} catch {
+			return false;
+		}
+	}
+
+	/** Deletes a whole calendar, only if it is still at the version given (from `documents`). The server refuses
+	 * (412) if anything in it changed since, so an item added on a phone meanwhile is never deleted unseen. */
+	async deleteCalendar(calendarUrl: string, version: string): Promise<void> {
+		// Only a calendar from the listing: inside this user's home folder, and never the home folder itself.
+		const calendar = this.calendarAt(calendarUrl);
+		const res = await this.send('DELETE', calendar.url, { 'If-Match': version });
+		if (!res.ok) throw new RefusedError(`The calendar server refused to delete ${calendar.url} (${res.status})`, res.status);
+		this.davCalendars = this.davCalendars.filter((c) => c.url !== calendar.url);
 	}
 
 	/** Saves a new item. Given the document of an item it replaces elsewhere, keeps that one's one-off changes. */
@@ -340,6 +424,17 @@ export class CalendarStore {
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
 		if (!res.ok) throw new RefusedError(`Deleting "${stored.title}" failed (${res.status})`, res.status);
+	}
+
+	/** A plain request with the planner's sign-in and the time limit. No answer in time becomes a NoAnswerError. */
+	private async send(method: string, url: string, headers: Record<string, string>, body?: string): Promise<Response> {
+		const signal = AbortSignal.timeout(this.timeoutMs);
+		try {
+			return await fetch(url, { method, headers: { Authorization: this.authorization(), ...headers }, body, signal });
+		} catch (e) {
+			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (${method} ${url})`, { cause: e });
+			throw e;
+		}
 	}
 
 	private authorization(): string {
