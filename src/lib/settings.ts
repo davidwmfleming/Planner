@@ -1,3 +1,5 @@
+import { letters } from './format';
+
 /** David's choices from the settings page, stored as one JSON value on the Tasks collection. */
 export interface Settings {
 	/** Task categories, in the order the Future tasks panel and the List menu show them. */
@@ -53,9 +55,6 @@ export function calendarAtPath<T extends { url: string }>(calendars: T[], path: 
 
 /** Orders calendars by name as a person would (capitals and accents aside, "Me 9" before "Me 10"). */
 export const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
-
-/** What a person sees as letters: an emoji family or a letter with a separately typed accent counts as one. */
-const letters = (text: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
 
 /** Longest address ending shown in a menu; a phone's own addresses are long, and their ends tell them apart. */
 const HINT_LENGTH = 12;

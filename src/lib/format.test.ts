@@ -16,4 +16,14 @@ describe('titles quoted in messages', () => {
 	it('never cuts an emoji in half', () => {
 		expect(shortTitle(`${'a'.repeat(38)}🎉🎉🎉`)).toBe(`${'a'.repeat(38)}🎉…`);
 	});
+
+	it('counts and cuts what a person sees as one character, such as a family emoji or a flag', () => {
+		const family = '👨‍👩‍👧‍👦';
+		const flag = '🇬🇧';
+		expect(shortTitle(family.repeat(40))).toBe(family.repeat(40));
+		expect(shortTitle(family.repeat(41))).toBe(`${family.repeat(39)}…`);
+		// Flags are pairs of letters: cutting between them would show the wrong flag, or two stray letters.
+		expect(shortTitle(`${'a'.repeat(38)}${flag.repeat(3)}`)).toBe(`${'a'.repeat(38)}${flag}…`);
+		expect(shortTitle(`${'a'.repeat(37)}${flag.repeat(4)}`)).toBe(`${'a'.repeat(37)}${flag.repeat(2)}…`);
+	});
 });
