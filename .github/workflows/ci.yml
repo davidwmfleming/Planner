@@ -23,9 +23,11 @@ jobs:
       - run: npm run test:e2e
   scripts:
     # The backup and setup shell scripts: style checks, then backup and restore against a throwaway Docker volume.
+    # The root-only checks (folder ownership, a full disk) use the runner's passwordless sudo.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck rsync
+      # openssh-server: the ssh settings test checks them with the real sshd -t.
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck rsync openssh-server
       - run: shellcheck scripts/*.sh scripts/mac/*.sh scripts/tests/*.sh
       - run: bash scripts/tests/run.sh

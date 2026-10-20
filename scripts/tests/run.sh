@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs every backup script test (scripts/tests/*.test.sh). Needs Docker and rsync.
+# Runs every backup script test (scripts/tests/*.test.sh). Needs Docker, rsync and openssh-server.
 set -uo pipefail
 status=0
 for t in "$(dirname "$0")"/*.test.sh; do

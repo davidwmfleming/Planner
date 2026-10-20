@@ -14,7 +14,7 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | Browser tests at tablet and phone sizes (Playwright) |
 | `npm run lint` | Type and Svelte checks |
-| `npm run test:scripts` | Backup script tests against a throwaway Docker volume (needs Docker and rsync) |
+| `npm run test:scripts` | Backup script tests against a throwaway Docker volume (needs Docker, rsync and openssh-server; some checks need root or passwordless sudo) |
 | `npm run calendar` | Start a local Radicale calendar server (needs `python3 -m pip install radicale`) |
 | `npm run seed` | Fill it with sample entries from the paper page |
 
