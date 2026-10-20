@@ -11,6 +11,9 @@ SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 ME=$(id -un)
 export HOME="$WORK/home"
 mkdir -p "$HOME" "$WORK/bin" "$WORK/sshd_config.d"
+# sshd -t needs /run/sshd, which exists only once sshd has run. Make it with the real sudo (CI runs as a
+# normal account with passwordless sudo) before sudo is replaced by a stand-in below.
+[ -d /run/sshd ] || sudo install -d -m 755 /run/sshd
 printf '#!/bin/sh\nexec "$@"\n' >"$WORK/bin/sudo"
 printf '#!/bin/sh\necho "$*" >>"%s/systemctl.log"\n' "$WORK" >"$WORK/bin/systemctl"
 printf '#!/bin/sh\necho "$*" >>"%s/apt.log"\n' "$WORK" >"$WORK/bin/apt-get"
