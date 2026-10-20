@@ -350,7 +350,13 @@ const tasksPath = (store: Awaited<ReturnType<typeof getStore>>) => {
 
 /** Each calendar's path and its name, trimmed. A calendar with no name (the store then gives its address) or a blank
  * one has the name "" here, which tags and labels show as Cal and Unnamed calendar. */
-const named = (calendars: { url: string; name: string }[]) => calendars.map((c) => ({ path: pathOf(c.url), name: c.name === c.url ? '' : c.name.trim() }));
+const named = (calendars: { url: string; name: string }[]) =>
+	calendars.map((c) => {
+		const path = pathOf(c.url);
+		// Radicale fills in a missing name with the calendar's path without its slashes ("david/blank").
+		const unnamed = c.name === c.url || c.name === path.replace(/^\/|\/$/g, '');
+		return { path, name: unnamed ? '' : c.name.trim() };
+	});
 
 /** Each calendar's name by path, told apart as the menus do when two share a name. */
 const calendarLabels = (calendars: { url: string; name: string }[]) =>

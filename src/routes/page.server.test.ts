@@ -299,10 +299,10 @@ describe('calendar tags on the page', () => {
 		expect(data.calendarTags).toEqual({ '/david/job/': 'Work', '/david/workouts/': 'Worko', '/david/tasks/': 'Task' });
 	});
 
-	it('names a calendar with a blank name, or none, Unnamed calendar, tagged Cal; other names lose spaces at the ends', async () => {
-		fake = fakeStore([{ url: `${HOME}blank/`, name: '  ', accepts: ['event'] }, { url: `${HOME}none/`, name: `${HOME}none/`, accepts: ['event'] }, cal('gym', '  Gym  ')]);
+	it('names a calendar with a blank name, or none (Radicale stands in its path), Unnamed calendar, tagged Cal; other names lose spaces at the ends', async () => {
+		fake = fakeStore([{ url: `${HOME}blank/`, name: '  ', accepts: ['event'] }, { url: `${HOME}none/`, name: `${HOME}none/`, accepts: ['event'] }, { url: `${HOME}path/`, name: 'david/path', accepts: ['event'] }, cal('gym', '  Gym  ')]);
 		const data = await run('http://localhost/?page=2026-10-21');
-		expect(data.calendarTags).toEqual({ '/david/blank/': 'Cal 1', '/david/none/': 'Cal 2', '/david/gym/': 'Gym' });
+		expect(data.calendarTags).toEqual({ '/david/blank/': 'Cal 1', '/david/none/': 'Cal 2', '/david/path/': 'Cal 3', '/david/gym/': 'Gym' });
 		expect(data.calendarLabels).toMatchObject({ '/david/gym/': 'Gym' });
 		expect((data.calendarLabels as Record<string, string>)['/david/blank/']).toMatch(/^Unnamed calendar/);
 	});

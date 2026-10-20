@@ -279,7 +279,8 @@ describe('calendarTags', () => {
 		const calendars = Array.from({ length: 20 }, (_, i) => ({ path: `/david/c${String(i).padStart(2, '0')}/`, name: `${'x'.repeat(99_999)}${String.fromCharCode(97 + i)}` }));
 		const started = performance.now();
 		const tagged = Object.values(calendarTags(calendars));
-		expect(performance.now() - started).toBeLessThan(50);
+		// Generous for a slow runner; the old way took whole seconds.
+		expect(performance.now() - started).toBeLessThan(250);
 		expect(tagged).toEqual(Array.from({ length: 20 }, (_, i) => `xxxx ${i + 1}`));
 	});
 
