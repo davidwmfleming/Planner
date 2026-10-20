@@ -1,5 +1,9 @@
 import { defineConfig } from '@playwright/test';
 
+const tablet = { viewport: { width: 1000, height: 1400 }, isMobile: true, hasTouch: true };
+const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
+const CHANGES_EVERY_PAGE = /settings-choices\.test\.ts/;
+
 export default defineConfig({
 	testDir: 'e2e',
 	use: { baseURL: 'http://localhost:4173' },
@@ -19,7 +23,11 @@ export default defineConfig({
 		}
 	],
 	projects: [
-		{ name: 'tablet', use: { viewport: { width: 1000, height: 1400 }, isMobile: true, hasTouch: true } },
-		{ name: 'phone', use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } }
+		{ name: 'tablet', testIgnore: CHANGES_EVERY_PAGE, use: tablet },
+		{ name: 'phone', testIgnore: CHANGES_EVERY_PAGE, use: phone },
+		// Changing which calendar is Work, or where new events go, would upset tests running alongside,
+		// so those tests run alone, once everything else has finished: tablet first, then phone.
+		{ name: 'tablet-settings', testMatch: CHANGES_EVERY_PAGE, dependencies: ['tablet', 'phone'], use: tablet },
+		{ name: 'phone-settings', testMatch: CHANGES_EVERY_PAGE, dependencies: ['tablet-settings'], use: phone }
 	]
 });

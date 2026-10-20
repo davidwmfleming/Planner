@@ -2,39 +2,49 @@ import { describe, expect, it } from 'vitest';
 import type { ItemKind } from '$lib/item';
 import type { Settings } from '$lib/settings';
 import type { Calendar } from './calendar-store';
-import { prepareStore, type StartOptions } from './startup';
+import { prepareStore, tasksCalendarUrl, type StartOptions } from './startup';
 
 const HOME = 'http://127.0.0.1:5232/david/';
 
+const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
 /** Just enough of a calendar server to watch what the planner does when it starts. */
 class FakeStore {
+	/** What a listing of the calendars returns; a hiccup can make it come back empty. */
 	list: Calendar[] = [];
+	/** What the server really holds, listed or not. */
+	onServer = new Set<string>();
 	stored = new Map<string, string>();
 	made: string[] = [];
 
 	constructor(names: [string, ItemKind[]][] = []) {
 		for (const [name, accepts] of names) this.add(name, accepts);
 	}
-	private add(name: string, accepts: ItemKind[]) {
-		const calendar = { url: `${HOME}${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/`, name, accepts };
+	add(name: string, accepts: ItemKind[], url = this.addressFor(name)) {
+		const calendar = { url, name, accepts };
 		this.list.push(calendar);
+		this.onServer.add(url);
 		return calendar;
+	}
+	addressFor(name: string) {
+		return `${HOME}${slug(name)}/`;
 	}
 	calendars() {
 		return this.list;
 	}
-	async ensureCalendar(name: string, accepts: ItemKind[]) {
-		const existing = this.list.find((c) => c.name === name);
+	async ensureCalendar(name: string, accepts: ItemKind[], url?: string) {
+		const existing = this.list.find((c) => (url ? c.url === url : c.name === name));
 		if (existing) return existing;
+		if (this.onServer.has(url ?? this.addressFor(name))) throw new Error('MKCALENDAR refused: already there');
 		this.made.push(name);
-		return this.add(name, accepts);
+		return this.add(name, accepts, url);
 	}
 	async renameCalendar(from: string, to: string) {
 		const calendar = this.list.find((c) => c.name === from);
 		if (calendar) calendar.name = to;
 	}
-	async storedSettings(url: string) {
-		return this.stored.get(url);
+	async settingsAt(url: string) {
+		return { found: this.onServer.has(url), stored: this.stored.get(url) };
 	}
 	async writeSettings(url: string, settings: Settings) {
 		this.stored.set(url, JSON.stringify(settings));
@@ -106,7 +116,7 @@ describe('starting the planner', () => {
 
 	it('neither writes settings nor makes calendars when reading the settings fails', async () => {
 		const store = new FakeStore([['Tasks', ['task']]]);
-		store.storedSettings = async () => {
+		store.settingsAt = async () => {
 			throw new Error('500');
 		};
 		let wrote = false;
@@ -136,5 +146,46 @@ describe('starting the planner', () => {
 		} finally {
 			console.error = logged;
 		}
+	});
+
+	it('does not rename a calendar David called "Personal" back to "Me" once settings are stored', async () => {
+		const store = new FakeStore([['Tasks', ['task']]]);
+		store.add('Personal', ['event'], `${HOME}me/`); // Me, renamed to Personal on the settings page
+		await store.writeSettings(store.addressFor('Tasks'), { categories: ['Waiting'], workCalendar: null, defaultEventCalendar: '/david/me/' });
+		await prepareStore(store, options);
+		expect(store.list.map((c) => c.name)).toContain('Personal');
+	});
+
+	it('does not recreate deleted starting calendars when the listing comes back empty', async () => {
+		const store = new FakeStore([['Tasks', ['task']]]);
+		await store.writeSettings(store.addressFor('Tasks'), { categories: ['Waiting'], workCalendar: null, defaultEventCalendar: null });
+		store.list = []; // a successful listing with nothing in it; Tasks and its settings are still on the server
+		await prepareStore(store, options);
+		expect(store.made).toEqual([]);
+	});
+
+	it('makes nothing when Tasks is there but not listed, even before settings are stored', async () => {
+		const store = new FakeStore([['Tasks', ['task']]]);
+		store.list = [];
+		await prepareStore(store, options);
+		expect(store.made).toEqual([]);
+		expect(store.stored.size).toBe(0); // the choices are filled in on a start that can see the calendars
+	});
+
+	it('keeps using the Tasks list by its address when it is renamed on a phone and another task list exists', async () => {
+		const store = new FakeStore([['Phone Reminders', ['task']]]);
+		const tasks = store.add('Chores', ['task'], store.addressFor('Tasks')); // Tasks renamed in the iPhone Reminders app
+		await store.writeSettings(tasks.url, { categories: ['Waiting'], workCalendar: null, defaultEventCalendar: null });
+		await prepareStore(store, options);
+		expect(tasksCalendarUrl(store, 'Tasks')).toBe(tasks.url);
+		expect([...store.stored.keys()]).toEqual([tasks.url]);
+	});
+
+	it('makes Tasks at its own address, not reusing a phone list that happens to be called Tasks', async () => {
+		const store = new FakeStore([['Me', ['event']]]);
+		store.add('Tasks', ['task'], `${HOME}0f3c9a-phone/`);
+		await prepareStore(store, options);
+		expect(tasksCalendarUrl(store, 'Tasks')).toBe(`${HOME}tasks/`);
+		expect([...store.stored.keys()]).toEqual([`${HOME}tasks/`]);
 	});
 });

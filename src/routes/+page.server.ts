@@ -6,13 +6,26 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
-import { calendarAtPath } from '$lib/settings';
+import { byName, calendarAtPath } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 const NEW_CALENDAR = '+new';
+const NOT_ANSWERING = "The calendar server isn't answering. Check that it is running, then reload.";
+
+/** Calendars are passed to the page by path, which stays the same through a rename and tells two of one name apart. */
+const pathOf = (url: string) => new URL(url).pathname;
+
+/** Where a new item goes, or undefined if no calendar takes that kind (every event calendar deleted, say). */
+function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event' | 'task', settings: Awaited<ReturnType<typeof getSettings>>) {
+	try {
+		return defaultCalendarUrl(store, kind, settings);
+	} catch {
+		return undefined;
+	}
+}
 
 /** Only plain item data goes to the browser, not where it lives on the server. */
 const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }): Item => item;
@@ -30,18 +43,20 @@ export const load: PageServerLoad = async ({ url }) => {
 		items = await store.listItems();
 		settings = await getSettings(store);
 	} catch (e) {
-		error(503, `The calendar server isn't answering. Check that it is running, then reload. (${(e as Error).message})`);
+		// The details go to the server's log; the page gets a plain message.
+		console.error('Planner: could not read the calendars or settings', e);
+		error(503, NOT_ANSWERING);
 	}
 
 	const calendars = store.calendars();
-	const calendarName = (url: string) => calendars.find((c) => c.url === url)?.name;
-	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).map((c) => c.name);
+	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).sort(byName);
+	const newEvents = newItemsGoIn(store, 'event', settings);
 
 	return {
 		today,
-		eventCalendars,
-		defaultEventCalendar: calendarName(defaultCalendarUrl(store, 'event', settings)),
-		workCalendar: calendarAtPath(calendars, settings.workCalendar)?.name,
+		eventCalendars: eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name })),
+		defaultEventCalendar: newEvents && pathOf(newEvents),
+		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -55,7 +70,7 @@ export const load: PageServerLoad = async ({ url }) => {
 		days: buildDays(
 			dates,
 			items.flatMap((i) =>
-				(i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]).map((shown) => ({ ...shown, calendar: calendarName(i.calendarUrl) }))
+				(i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]).map((shown) => ({ ...shown, calendar: pathOf(i.calendarUrl) }))
 			)
 		).map((d) => ({
 			...d,
@@ -77,14 +92,30 @@ export const actions: Actions = {
 		const { title, time } = parseLine(text);
 		if (!title) return fail(400, { message: 'Write something on the line first' });
 
-		const store = await getStore();
-		await store.create(defaultCalendarUrl(store, kind, await getSettings(store)), {
-			uid: crypto.randomUUID(),
-			kind,
-			title,
-			state: 'open',
-			...(date ? { date, time } : {})
-		});
+		let store, settings;
+		try {
+			store = await getStore();
+			// A fresh list, so a calendar deleted on another device since the page loaded isn't used.
+			await store.refreshCalendars();
+			settings = await getSettings(store);
+		} catch (e) {
+			console.error('Planner: could not reach the calendar server to add a line', e);
+			return fail(503, { message: NOT_ANSWERING });
+		}
+		const calendar = newItemsGoIn(store, kind, settings);
+		if (!calendar) return fail(409, { message: kind === 'event' ? 'There is no calendar for events yet. Add one in Settings.' : 'There is no Tasks list on the calendar server; reload the page.' });
+		try {
+			await store.create(calendar, {
+				uid: crypto.randomUUID(),
+				kind,
+				title,
+				state: 'open',
+				...(date ? { date, time } : {})
+			});
+		} catch (e) {
+			console.error(`Planner: could not save "${title}"`, e);
+			return fail(502, { message: `The calendar server didn't save "${title}". Try again in a moment.` });
+		}
 		return { added: title };
 	},
 
@@ -153,7 +184,7 @@ export const actions: Actions = {
 			}
 			wanted = store.calendars().find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? (await store.ensureCalendar(name, ['event']));
 		} else if (result.item.kind === 'event') {
-			wanted = store.calendars().find((c) => c.name === field('calendar') && c.accepts.includes('event'));
+			wanted = calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'));
 		}
 		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, await getSettings(store)));
 		if (result.item.kind === item.kind && target === item.calendarUrl) {

@@ -1,7 +1,68 @@
 <script lang="ts">
+	import { enhance } from '$app/forms';
+	import type { SubmitFunction } from '@sveltejs/kit';
+	import { tick } from 'svelte';
 	import type { PageProps } from './$types';
 
-	let { data }: PageProps = $props();
+	let { data, form }: PageProps = $props();
+
+	// What went wrong with the last add or rename, shown next to it. Cleared when David starts again.
+	let addError = $derived(form?.action === 'add' ? form.message : undefined);
+	let renameError = $derived(form?.action === 'rename' ? form.message : undefined);
+
+	/** The calendar whose name is being changed (by path, which a rename doesn't change). */
+	let renaming = $state<string | undefined>();
+
+	async function startRename(path: string) {
+		renaming = path;
+		renameError = undefined;
+		await tick();
+		document.querySelector<HTMLInputElement>('#rename-field')?.select();
+	}
+
+	/** Closes the name field and puts the keyboard back on that calendar's Rename button. */
+	async function stopRename() {
+		const path = renaming;
+		renaming = undefined;
+		await tick();
+		document.querySelector<HTMLButtonElement>(`button[data-rename="${CSS.escape(path ?? '')}"]`)?.focus();
+	}
+
+	// Added and renamed calendars are read out by screen readers; the page itself shows the change in the list.
+	let announcement = $state('');
+
+	// "Saved" shows after the choices are stored, until one is changed again.
+	let saved = $state(false);
+	const chose: SubmitFunction = ({ submitter }) => async ({ result, update }) => {
+		await update({ reset: false });
+		saved = result.type === 'success';
+		if (submitter instanceof HTMLElement && submitter.isConnected) submitter.focus();
+	};
+
+	/** After adding, the field is ready for another name (or to fix the one refused). */
+	const added: SubmitFunction = () => async ({ result, update }) => {
+		await update();
+		if (result.type === 'success') announcement = `Added ${result.data?.added}`;
+		document.querySelector<HTMLInputElement>('#new-calendar')?.focus();
+	};
+
+	/** A rename that worked closes its field; one that didn't keeps it open with the reason. */
+	const renamed: SubmitFunction = ({ formData }) => {
+		const from = data.eventCalendars.find((c) => c.path === formData.get('path'))?.name;
+		return async ({ result, update }) => {
+			await update({ reset: false });
+			if (result.type !== 'success') return;
+			announcement = `Renamed ${from} to ${result.data?.renamed}`;
+			await stopRename();
+		};
+	};
+
+	function renameKeys(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			stopRename();
+		}
+	}
 </script>
 
 <svelte:head>
@@ -14,29 +75,69 @@
 		<a class="btn" href="/" aria-label="Back to the planner">‹ Planner</a>
 		<h1>Settings</h1>
 	</header>
+	<p class="announce" role="status">{announcement}</p>
 
 	<main>
 		<section aria-labelledby="h-calendars">
 			<h2 id="h-calendars">Event calendars</h2>
 			<ul class="lines">
-				{#each data.eventCalendars as calendar (calendar.name)}
+				{#each data.eventCalendars as calendar (calendar.path)}
 					<li class:work={calendar.work}>
-						<span class="name">{calendar.name}</span>
-						{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
-						{#if calendar.newEvents}<span class="tag">New events</span>{/if}
+						{#if renaming === calendar.path}
+							<form method="POST" action="?/rename" use:enhance={renamed} class="edit">
+								<input type="hidden" name="path" value={calendar.path} />
+								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.name}" autocomplete="off" onkeydown={renameKeys} />
+								<button class="btn primary">Save name</button>
+								<button type="button" class="btn" onclick={stopRename}>Cancel</button>
+								{#if renameError}<p class="error" role="alert">{renameError}</p>{/if}
+							</form>
+						{:else}
+							<span class="name">{calendar.name}</span>
+							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
+							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
+							<button type="button" class="btn small" aria-label="Rename {calendar.name}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
+						{/if}
 					</li>
 				{/each}
 			</ul>
-			<dl class="choices">
-				<div><dt>Show as work (light red)</dt><dd>{data.workCalendar ?? 'None'}</dd></div>
-				<div><dt>New events go in</dt><dd>{data.defaultEventCalendar ?? 'No event calendar yet'}</dd></div>
-			</dl>
+			<form method="POST" action="?/add" use:enhance={added} class="add">
+				<label for="new-calendar">New calendar</label>
+				<div class="edit">
+					<input id="new-calendar" class="text" name="name" value={form?.action === 'add' ? form.name : ''} placeholder="Name, up to 40 letters" autocomplete="off" />
+					<button class="btn" aria-label="Add calendar">Add</button>
+				</div>
+				{#if addError}<p class="error" role="alert">{addError}</p>{/if}
+			</form>
+			{#if data.eventCalendars.length}
+				<form method="POST" action="?/choose" use:enhance={chose} class="choices">
+					<div class="field">
+						<label for="work-calendar">Show as work (light red)</label>
+						<select id="work-calendar" name="work" value={data.workPath ?? ''} onchange={() => (saved = false)}>
+							<option value="">None</option>
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+						</select>
+					</div>
+					<div class="field">
+						<label for="new-events-calendar">New events go in</label>
+						<select id="new-events-calendar" name="newEvents" value={data.defaultEventPath} onchange={() => (saved = false)}>
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+						</select>
+					</div>
+					<div class="edit">
+						<button class="btn primary">Save choices</button>
+						<span role="status">{saved ? 'Saved' : ''}</span>
+					</div>
+					{#if form?.action === 'choose' && form.message}<p class="error" role="alert">{form.message}</p>{/if}
+				</form>
+			{:else}
+				<p class="hint">Add a calendar first; new events need somewhere to go.</p>
+			{/if}
 		</section>
 
 		<section aria-labelledby="h-tasks">
 			<h2 id="h-tasks">Task list</h2>
 			<ul class="lines">
-				{#each data.taskLists as list (list.name)}
+				{#each data.taskLists as list (list.path)}
 					<li><span class="name">{list.name}</span></li>
 				{/each}
 			</ul>
@@ -98,10 +199,45 @@
 	/* Work: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
-	.choices { margin: 0.7rem 0 0; display: grid; gap: 0.4rem; }
-	.choices div { display: flex; flex-wrap: wrap; gap: 0 0.5rem; }
-	.choices dt { color: var(--muted); }
-	.choices dt::after { content: ':'; }
-	.choices dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+	/* A long calendar name must not widen the choices past a narrow phone screen. */
+	.choices { margin: 1rem 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+	.field { min-width: 0; display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+	.field select {
+		font: inherit;
+		font-size: 1rem;
+		font-weight: 400;
+		letter-spacing: 0;
+		color: var(--ink);
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 6px;
+		min-height: 44px;
+		width: 100%;
+		min-width: 0;
+		padding: 0.2rem 0.5rem;
+	}
+	[role='status'] { font-weight: 700; }
+	/* Read out, not shown: the list already shows what changed. */
+	.announce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
+	button.btn { cursor: pointer; }
+	.btn.primary { background: var(--ink); color: var(--paper); }
+	.btn.small { font-size: 0.85rem; padding: 0 0.6rem; }
+	.lines li .btn { margin-block: 0.15rem; }
+	/* A name field and its buttons on one line; the reason for a refusal wraps underneath. */
+	.edit { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; padding-block: 0.3rem; }
+	.text {
+		flex: 1 1 10rem;
+		min-width: 0;
+		font: inherit;
+		color: var(--ink);
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 6px;
+		min-height: 44px;
+		padding: 0.2rem 0.5rem;
+	}
+	.add { margin-top: 0.7rem; }
+	.add label { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+	.error { flex-basis: 100%; color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 </style>

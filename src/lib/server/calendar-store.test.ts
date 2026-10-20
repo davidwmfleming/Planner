@@ -10,6 +10,68 @@ import { occurrencesBetween } from './ical';
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
 const PORT = 5299;
 
+/** A store whose calendar server is played by the test: each DAV call it makes goes to `client`. */
+function storeWith(client: Record<string, unknown>, timeoutMs?: number) {
+	const store = new CalendarStore({ serverUrl: 'http://127.0.0.1:5232/', username: 'david', password: 'dev', timeoutMs });
+	(store as unknown as { client: unknown }).client = { account: { homeUrl: 'http://127.0.0.1:5232/david/' }, ...client };
+	return store;
+}
+const listing = (href: string, name: string, comps = ['VEVENT']) => ({
+	ok: true,
+	href,
+	props: { displayname: name, resourcetype: { calendar: {} }, supportedCalendarComponentSet: { comp: comps.map((c) => ({ _attributes: { name: c } })) } }
+});
+
+describe('CalendarStore without a server', () => {
+	it('lists only calendars inside the home folder on the same server', async () => {
+		const store = storeWith({
+			propfind: async () => [
+				listing('/david/', 'Home itself'),
+				listing('/david/me/', 'Me'),
+				listing('http://evil.example/david/x/', 'Elsewhere'),
+				listing('http://127.0.0.1:9999/david/y/', 'Other port'),
+				listing('/someone-else/z/', 'Not mine'),
+				listing('/david/../admin/', 'Climbing out'),
+				listing('/david-two/w/', 'Lookalike')
+			]
+		});
+		await store.refreshCalendars();
+		expect(store.calendars().map((c) => c.name)).toEqual(['Me']);
+	});
+
+	it('skips items whose address is outside their calendar', async () => {
+		const ics = (uid: string) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:20261019T120000Z\r\nDTSTART;VALUE=DATE:20261020\r\nSUMMARY:${uid}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+		const store = storeWith({
+			propfind: async () => [listing('/david/me/', 'Me')],
+			calendarQuery: async () => [
+				{ href: '/david/me/a.ics', props: { calendarData: ics('Mine') } },
+				{ href: 'http://evil.example/david/me/b.ics', props: { calendarData: ics('Foreign') } },
+				{ href: '/david/work/c.ics', props: { calendarData: ics('Next door') } }
+			]
+		});
+		expect((await store.listItems()).map((i) => i.title)).toEqual(['Mine']);
+	});
+
+	it('treats a journal-only calendar as neither events nor tasks', async () => {
+		const store = storeWith({ propfind: async () => [listing('/david/notes/', 'Notes', ['VJOURNAL']), listing('/david/any/', 'Any', [])] });
+		await store.refreshCalendars();
+		expect(store.calendars().map((c) => [c.name, c.accepts])).toEqual([
+			['Notes', []],
+			['Any', ['event', 'task']]
+		]);
+	});
+
+	it('gives the address a calendar gets from its name', () => {
+		expect(storeWith({}).addressFor('Tasks')).toBe('http://127.0.0.1:5232/david/tasks/');
+	});
+
+	it('turns a calendar server that never answers into an error', async () => {
+		const store = storeWith({ propfind: () => new Promise(() => {}), login: () => new Promise(() => {}) }, 50);
+		await expect(store.refreshCalendars()).rejects.toThrow(/did not answer/);
+		await expect(store.connect()).rejects.toThrow(/did not answer/);
+	});
+});
+
 describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 	let server: ChildProcess;
 	let dir: string;
@@ -66,6 +128,19 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		expect(store.calendars().some((c) => c.name === 'Old name')).toBe(false);
 		expect((await store.listItems()).find((i) => i.uid === 'rn-1')?.calendarUrl).toBe(old.url);
 		await store.renameCalendar('Not there', 'Anything'); // quietly does nothing
+	});
+
+	it('makes a calendar whose name a renamed calendar once had, or that has no plain letters', async () => {
+		const first = await store.ensureCalendar('Piano', ['event']);
+		await store.renameCalendarAt(first.url, 'Music');
+		const again = await store.ensureCalendar('Piano', ['event']);
+		expect(again.url).not.toBe(first.url);
+		expect(store.calendars().find((c) => c.url === first.url)?.name).toBe('Music');
+
+		const greek = await store.ensureCalendar('Μουσική', ['event']);
+		const japanese = await store.ensureCalendar('音楽', ['event']);
+		expect(new Set([greek.url, japanese.url]).size).toBe(2);
+		expect(greek.accepts).toEqual(['event']);
 	});
 
 	it('saves, reads back, updates and deletes events and tasks', async () => {
@@ -135,6 +210,19 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 			workCalendar: new URL(work.url).pathname,
 			defaultEventCalendar: new URL(me.url).pathname
 		});
+	});
+
+	it('tells a missing collection apart from one with no settings stored', async () => {
+		const blank = await store.ensureCalendar('Empty list', ['task']);
+		expect(await store.settingsAt(blank.url)).toEqual({ found: true, stored: undefined });
+		expect(await store.settingsAt(store.addressFor('Never made'))).toEqual({ found: false, stored: undefined });
+	});
+
+	it('makes a calendar at a chosen address, even when another one has its name', async () => {
+		const phone = await store.ensureCalendar('Reminders', ['task']);
+		const made = await store.ensureCalendar('Reminders', ['task'], store.addressFor('Reminders kept'));
+		expect(made.url).toBe(store.addressFor('Reminders kept'));
+		expect(made.url).not.toBe(phone.url);
 	});
 
 	it('uses the defaults if the Tasks collection is gone, and says so when settings cannot be saved', async () => {

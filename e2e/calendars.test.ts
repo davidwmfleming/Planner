@@ -25,5 +25,5 @@ test('the starting calendars are offered, and a new one can be made from the det
 	await expect(sheet).toBeHidden();
 
 	await row.getByRole('button', { name: `Details for ${name}` }).click();
-	await expect(sheet.locator('#f-calendar')).toHaveValue(calendar);
+	await expect(sheet.locator('#f-calendar option:checked')).toHaveText(calendar);
 });

@@ -12,7 +12,7 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 | --- | --- |
 | `npm run dev` | Run the app locally |
 | `npm test` | Unit tests (Vitest) |
-| `npm run test:e2e` | Browser tests at tablet and phone sizes (Playwright) |
+| `npm run test:e2e` | Browser tests at tablet and phone sizes (Playwright); tests that change the Work or new-event choice run last, on their own |
 | `npm run lint` | Type and Svelte checks |
 | `npm run calendar` | Start a local Radicale calendar server (needs `python3 -m pip install radicale`) |
 | `npm run seed` | Fill it with sample entries from the paper page |
@@ -23,13 +23,13 @@ Open the planner's address in the browser, then add it to the home screen: in Ch
 
 ## Work events
 
-Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Which calendar counts as Work, and which one new events go in (**Me** at first), are kept in the planner's settings on the calendar server, so they still apply after a calendar is renamed. `WORK_CALENDAR` and `EVENTS_CALENDAR` in `.env` only fill these in the first time the planner starts.
+Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Which calendar counts as Work, and which one new events go in (**Me** at first), are chosen on the Settings page and kept in the planner's settings on the calendar server, so they still apply after a calendar is renamed. `WORK_CALENDAR` and `EVENTS_CALENDAR` in `.env` only fill these in the first time the planner starts.
 
-The starting calendars (Me, Family, Workouts, Morgan Meals, Work and the Tasks list) are made only on a first run, when the calendar server has no event calendars yet, so a calendar deleted on a phone stays deleted.
+The starting calendars (Me, Family, Workouts, Morgan Meals, Work and the Tasks list) are made only on a first run: when the calendar server says there is no Tasks list at its usual address (`tasks/`) and there are no event calendars. So a calendar deleted on a phone stays deleted, even if the calendar server briefly lists nothing. The planner finds the Tasks list by that address, so renaming it in Reminders doesn't confuse it.
 
 ## Settings
 
-The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. For now it only shows them; changing them from this page comes in later versions. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
+The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. **Add** makes a new event calendar, and **Rename** changes a calendar's name; phones that sync it pick up the new name on their next sync. A name can be up to 40 letters and can't match another calendar or list (capitals don't count); invisible and control characters are removed. Calendars are listed by name. After **Add** the cursor stays in the name box for the next one; after **Rename**, **Cancel** or Escape it goes back to that calendar's Rename button, and screen readers announce what changed. If every event calendar is deleted, the planner still opens and points to Settings. The Tasks list can't be renamed, since every task and the settings live there. Below the calendars, **Show as work (light red)** picks the calendar shaded as Work (or None), and **New events go in** picks where a line written in the events column is saved; **Save choices** stores both. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
 
 ## Running it on the server (or a test VM)
 

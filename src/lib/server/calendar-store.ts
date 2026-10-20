@@ -8,6 +8,8 @@ export interface StoreConfig {
 	serverUrl: string;
 	username: string;
 	password: string;
+	/** How long to wait for the calendar server before giving up (10 seconds unless a test says otherwise). */
+	timeoutMs?: number;
 }
 
 /** An item plus where it lives on the server, needed to update or delete it. */
@@ -30,6 +32,9 @@ export interface Calendar {
 const PLANNER_NS = 'urn:planner:ns';
 
 const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+/** A calendar's address from its name, e.g. "Morgan Meals" → morgan-meals/. */
+const slugOf = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'calendar';
 
 const ALL_COMPONENTS = { 'comp-filter': { _attributes: { name: 'VCALENDAR' } } };
 
@@ -55,22 +60,52 @@ export class CalendarStore {
 	}
 
 	async connect(): Promise<void> {
-		await this.client.login();
+		await this.timed(this.client.login(), 'signing in');
 		await this.refreshCalendars();
+	}
+
+	private get timeoutMs() {
+		return this.config.timeoutMs ?? 10_000;
+	}
+
+	/** Waits for the calendar server, but not forever: a server that hangs becomes an error the page can show. */
+	private timed<T>(work: Promise<T>, what: string): Promise<T> {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
+		});
+		return Promise.race([work, late]).finally(() => clearTimeout(timer));
+	}
+
+	private home(): string {
+		const home = this.client.account?.homeUrl;
+		if (!home) throw new Error('The calendar server did not report a home folder for this user');
+		return home;
+	}
+
+	/** The address a calendar with this name is first made at. Tasks is found by it, since a phone can rename it. */
+	addressFor(name: string): string {
+		return new URL(`${slugOf(name)}/`, this.home()).href;
 	}
 
 	/** Reads the calendar list again, so ones added or deleted elsewhere (on a phone) are noticed. */
 	async refreshCalendars(): Promise<void> {
 		// One request for just the names and kinds. The library's fetchCalendars also asks for each calendar's
 		// change tag, which Radicale works out by reading every item, and sends one more request per calendar.
-		const home = this.client.account?.homeUrl;
-		if (!home) throw new Error('The calendar server did not report a home folder for this user');
-		const responses = await this.client.propfind({
-			url: home,
-			props: { 'd:displayname': {}, 'd:resourcetype': {}, 'c:supported-calendar-component-set': {} },
-			depth: '1'
-		});
+		const home = this.home();
+		const responses = await this.timed(
+			this.client.propfind({
+				url: home,
+				props: { 'd:displayname': {}, 'd:resourcetype': {}, 'c:supported-calendar-component-set': {} },
+				depth: '1'
+			}),
+			'listing the calendars'
+		);
 		if (!responses.some((r) => r.ok)) throw new Error(`Listing the calendars failed (${responses[0]?.status ?? 'no answer'})`);
+		// Only calendars inside this user's home folder on the same server are kept, so a bad or hostile answer
+		// can't send the planner's password (or David's events) anywhere else.
+		const base = new URL(home);
+		const inHome = (url: URL) => url.origin === base.origin && url.pathname.startsWith(base.pathname) && url.pathname !== base.pathname;
 		this.davCalendars = responses
 			.filter((r) => r.ok && r.href && 'calendar' in (r.props?.resourcetype ?? {}))
 			.map((r) => {
@@ -78,8 +113,10 @@ export class CalendarStore {
 				const components = (Array.isArray(comp) ? comp : comp ? [comp] : [])
 					.map((x: { _attributes?: { name?: unknown } }) => x?._attributes?.name)
 					.filter((n): n is string => typeof n === 'string');
-				return { url: new URL(r.href!, home).href, displayName: davText(r.props?.displayname), components };
-			});
+				return { url: new URL(r.href!, home), displayName: davText(r.props?.displayname), components };
+			})
+			.filter((c) => inHome(c.url))
+			.map((c) => ({ ...c, url: c.url.href }));
 	}
 
 	calendars(): Calendar[] {
@@ -92,15 +129,14 @@ export class CalendarStore {
 		});
 	}
 
-	/** Creates a calendar if one with this name doesn't exist yet. Used for setup and seeding. */
-	async ensureCalendar(name: string, accepts: ItemKind[]): Promise<Calendar> {
-		const existing = this.calendars().find((c) => c.name === name);
+	/** Creates a calendar if one with this name doesn't exist yet. Used for setup and seeding.
+	 * Given an address, it is the calendar at that address that must exist (Tasks, whatever it is called). */
+	async ensureCalendar(name: string, accepts: ItemKind[], url?: string): Promise<Calendar> {
+		const find = () => this.calendars().find((c) => (url ? c.url === url : c.name === name));
+		const existing = find();
 		if (existing) return existing;
-		const home = this.client.account?.homeUrl;
-		if (!home) throw new Error('The calendar server did not report a home folder for this user');
-		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 		const made = this.client.makeCalendar({
-			url: new URL(`${slug}/`, home).href,
+			url: url ?? this.freeAddress(name, this.home()),
 			props: {
 				displayname: name,
 				'c:supported-calendar-component-set': {
@@ -109,19 +145,34 @@ export class CalendarStore {
 			}
 		});
 		// Another program (or another copy of the planner) may create it at the same moment; that's fine.
-		await made.catch(() => undefined);
+		await this.timed(made, `making ${name}`).catch(() => undefined);
 		await this.refreshCalendars();
-		const created = this.calendars().find((c) => c.name === name);
+		const created = find();
 		if (!created) throw new Error(`Could not create the calendar "${name}"`);
 		return created;
+	}
+
+	/** An address for a new calendar, from its name, that no calendar uses yet. A renamed calendar keeps
+	 * its old address, so "Work" renamed to "Office" still sits at work/ and a new "Work" gets work-2/. */
+	private freeAddress(name: string, home: string): string {
+		const slug = slugOf(name);
+		const used = new Set(this.calendars().map((c) => new URL(c.url).pathname));
+		for (let n = 1; ; n++) {
+			const url = new URL(`${n === 1 ? slug : `${slug}-${n}`}/`, home);
+			if (!used.has(url.pathname)) return url.href;
+		}
 	}
 
 	/** Changes a calendar's display name; its address and contents stay the same. Does nothing if it isn't there. */
 	async renameCalendar(from: string, to: string): Promise<void> {
 		const calendar = this.calendars().find((c) => c.name === from);
-		if (!calendar) return;
-		const status = await this.proppatch(calendar.url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
-		if (status >= 300) throw new Error(`The calendar server refused to rename "${from}" (${status})`);
+		if (calendar) await this.renameCalendarAt(calendar.url, to);
+	}
+
+	/** Renames the calendar at this address, so two calendars with the same name can't be mixed up. */
+	async renameCalendarAt(url: string, to: string): Promise<void> {
+		const status = await this.proppatch(url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
+		if (status >= 300) throw new Error(`The calendar server refused to rename ${url} (${status})`);
 		await this.refreshCalendars();
 	}
 
@@ -133,14 +184,22 @@ export class CalendarStore {
 	/** The settings exactly as stored, or undefined if nothing is stored there yet. Throws if the server
 	 * couldn't say, so a hiccup is never mistaken for "no settings" and the stored ones overwritten. */
 	async storedSettings(calendarUrl: string): Promise<string | undefined> {
-		const [response] = await this.client.propfind({
-			url: calendarUrl,
-			props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
-			depth: '0'
-		});
-		if (response?.ok) return davText(response.props?.plannerSettings);
-		// A missing property (or collection) comes back as 404; that just means nothing is stored yet.
-		if (response?.status === 404) return undefined;
+		return (await this.settingsAt(calendarUrl)).stored;
+	}
+
+	/** Whether there is a collection at this address, and the settings stored on it. Throws if the server couldn't say. */
+	async settingsAt(calendarUrl: string): Promise<{ found: boolean; stored: string | undefined }> {
+		const [response] = await this.timed(
+			this.client.propfind({
+				url: calendarUrl,
+				props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
+				depth: '0'
+			}),
+			'reading the settings'
+		);
+		if (response?.ok) return { found: true, stored: davText(response.props?.plannerSettings) };
+		// A missing property comes back as 404 inside an answer about the collection; a missing collection, as a plain 404.
+		if (response?.status === 404) return { found: (response.propStats?.length ?? 0) > 0, stored: undefined };
 		throw new Error(`The calendar server could not read the settings (${response?.status ?? 'no answer'})`);
 	}
 
@@ -158,7 +217,8 @@ export class CalendarStore {
 				Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
 				'Content-Type': 'application/xml; charset=utf-8'
 			},
-			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>${prop}</d:prop></d:set></d:propertyupdate>`
+			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>${prop}</d:prop></d:set></d:propertyupdate>`,
+			signal: AbortSignal.timeout(this.timeoutMs)
 		});
 		if (!response.ok) return response.status;
 		const inner = [...(await response.text()).matchAll(/<(?:\w+:)?status>HTTP\/[\d.]+ (\d{3})/g)].map((m) => Number(m[1]));
@@ -171,14 +231,15 @@ export class CalendarStore {
 		for (const calendar of this.davCalendars) {
 			// One query that returns everything, rather than a list followed by a fetch: an item added or
 			// deleted between the two (on a phone, or by another page load) would make the fetch fail.
-			const responses = await this.client
-				.calendarQuery({
+			const responses = await this.timed(
+				this.client.calendarQuery({
 					url: calendar.url,
 					props: { 'd:getetag': {}, 'c:calendar-data': {} },
 					filters: ALL_COMPONENTS,
 					depth: '1'
-				})
-				.catch(async (e) => {
+				}),
+				`reading ${calendar.displayName ?? calendar.url}`
+			).catch(async (e) => {
 					// Deleted elsewhere since the list was read: skip it. Any other failure is real.
 					await this.refreshCalendars();
 					if (this.davCalendars.some((c) => c.url === calendar.url)) throw e;
@@ -188,6 +249,8 @@ export class CalendarStore {
 				const data = davText(res.props?.calendarData);
 				if (!res.href || !data?.trim()) continue;
 				const url = new URL(res.href, calendar.url).href;
+				// Saving or deleting an item sends the password to its address, so it must be inside its calendar.
+				if (!url.startsWith(calendar.url)) continue;
 				for (const item of icsToItems(data)) {
 					all.push({ ...item, calendarUrl: calendar.url, url, etag: davText(res.props?.getetag), ics: data });
 				}
@@ -201,7 +264,7 @@ export class CalendarStore {
 		const calendar = this.calendarAt(calendarUrl);
 		const filename = `${item.uid}.ics`;
 		const ics = itemToICS(item, previous);
-		const res = await this.client.createCalendarObject({ calendar, filename, iCalString: ics });
+		const res = await this.timed(this.client.createCalendarObject({ calendar, filename, iCalString: ics }), `saving "${item.title}"`);
 		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status})`);
 		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
 	}
@@ -223,7 +286,7 @@ export class CalendarStore {
 	}
 
 	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
-		const res = await this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } });
+		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving "${stored.title}"`);
 		if (!res.ok) throw new Error(`Saving "${stored.title}" failed (${res.status}); reload and try again`);
 		return res.headers.get('etag') ?? undefined;
 	}
@@ -236,7 +299,7 @@ export class CalendarStore {
 	}
 
 	async remove(stored: StoredItem): Promise<void> {
-		const res = await this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } });
+		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
 		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
 	}
 
