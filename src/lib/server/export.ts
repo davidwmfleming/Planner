@@ -1,14 +1,14 @@
 // "Download everything": a zip holding one .ics file per calendar, so each one can be imported into
 // its own calendar elsewhere (Apple Calendar and Google Calendar import a file into one chosen calendar).
 import { strToU8, Zip, ZipDeflate } from 'fflate';
-import type { CalendarStore } from './calendar-store';
+import type { Calendar, CalendarStore } from './calendar-store';
 
 export const exportZipName = (date: string) => `planner-export-${date}.zip`;
 
 // Characters that some computer can't have in a file name, plus control characters.
 const UNSAFE = /[\\/:*?"<>|\u0000-\u001f\u007f]/g;
-// Names Windows keeps for devices, with or without an extension.
-const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)$/i;
+// Names Windows keeps for devices, with or without an extension (NUL.txt is as bad as NUL).
+const RESERVED = /^(con|prn|aux|nul|com\d|lpt\d)(\.|$)/i;
 
 /** A calendar name made safe to unzip anywhere: no folders, no characters Windows or a Mac refuses. */
 export function safeFileName(name: string): string {
@@ -18,17 +18,24 @@ export function safeFileName(name: string): string {
 	return RESERVED.test(short) ? `_${short}` : short;
 }
 
-/** One .ics file name per calendar, in the same order; a clash (names differing only in case or odd characters) gets a number. */
-export function exportFileNames(names: string[]): string[] {
+/** One .ics file name per calendar. A clash (names differing only in case or odd characters) gets a number;
+ * calendars are put in order of name, then address, first, so which one gets the plain name doesn't depend
+ * on the order the server happens to list them in. */
+export function exportFileNames(calendars: Calendar[]): { calendar: Calendar; file: string }[] {
+	const compare = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+	const sorted = [...calendars].sort((a, b) => compare(a.name, b.name) || compare(a.url, b.url));
 	const taken = new Set<string>();
-	return names.map((name) => {
-		const base = safeFileName(name);
+	return sorted.map((calendar) => {
+		const base = safeFileName(calendar.name);
 		let file = `${base}.ics`;
 		for (let n = 2; taken.has(file.toLowerCase()); n++) file = `${base} (${n}).ics`;
 		taken.add(file.toLowerCase());
-		return file;
+		return { calendar, file };
 	});
 }
+
+/** An export that failed for a reason worth telling David, such as which calendar the server wouldn't hand out. */
+export class ExportError extends Error {}
 
 /**
  * Fetches the calendars one at a time and compresses each as it arrives, so only one calendar's text
@@ -36,17 +43,24 @@ export function exportFileNames(names: string[]): string[] {
  * the server won't hand out gives a clear error rather than a half-downloaded file.
  */
 export async function exportZip(store: CalendarStore): Promise<Uint8Array> {
-	const calendars = store.calendars();
-	const files = exportFileNames(calendars.map((c) => c.name));
+	// Read the list afresh: calendars may have been added or deleted on a phone since the planner started.
+	await store.refreshCalendars();
+	const files = exportFileNames(store.calendars());
 	const chunks: Uint8Array[] = [];
 	let failure: Error | null = null;
 	const zip = new Zip((error, chunk) => {
 		if (error) failure = error;
 		else chunks.push(chunk);
 	});
-	for (const [i, calendar] of calendars.entries()) {
-		const ics = await store.calendarFile(calendar.url);
-		const file = new ZipDeflate(files[i], { level: 6 });
+	for (const { calendar, file: name } of files) {
+		let ics: string | undefined;
+		try {
+			ics = await store.calendarFile(calendar.url);
+		} catch (e) {
+			throw new ExportError(`The calendar server did not hand out "${calendar.name}", so nothing was downloaded. Try again in a moment.`, { cause: e });
+		}
+		if (ics === undefined) continue; // deleted (on a phone) since the list was read
+		const file = new ZipDeflate(name, { level: 6 });
 		zip.add(file);
 		file.push(strToU8(ics), true);
 	}
