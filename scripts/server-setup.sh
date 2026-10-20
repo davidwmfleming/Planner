@@ -104,29 +104,9 @@ systemctl list-timers planner-backup.timer --no-pager
 
 say "Copy on the Mac"
 # The Mac fetches the copies over ssh with its own key, which may only read the backup folder.
-BACKUP_DIR=$(sed -n 's/^BACKUP_DIR=//p' /etc/default/planner-backup | tail -n 1)
-KEY_OPTIONS="restrict,command=\"rrsync -ro ${BACKUP_DIR:-/srv/backups/planner}\""
-if [ -n "${MAC_BACKUP_KEY:-}" ]; then
-	# One public key on one line, nothing else (a second line would be a key without the limit).
-	KEY_PATTERN='^(ssh-ed25519|ecdsa-sha2-nistp(256|384|521)|ssh-rsa) [A-Za-z0-9+/]+=*( [A-Za-z0-9@._-]+)?$'
-	[[ $MAC_BACKUP_KEY =~ $KEY_PATTERN ]] || { echo "MAC_BACKUP_KEY should be the one line in the Mac's ~/.ssh/planner-backup.pub"; exit 1; }
-	install -d -m 700 ~/.ssh
-	touch ~/.ssh/authorized_keys
-	chmod 600 ~/.ssh/authorized_keys
-	if grep -qF "$(echo "$MAC_BACKUP_KEY" | cut -d' ' -f2)" ~/.ssh/authorized_keys; then
-		echo "The Mac's key is already in ~/.ssh/authorized_keys"
-	else
-		echo "$KEY_OPTIONS $MAC_BACKUP_KEY" >>~/.ssh/authorized_keys
-		echo "Added the Mac's key to ~/.ssh/authorized_keys (it can only read the backups)"
-	fi
-else
-	echo "To let the Mac fetch the copies, run this script again with the Mac's key (see the README):"
-	echo "  MAC_BACKUP_KEY='<contents of planner-backup.pub from the Mac>' bash server-setup.sh"
-	echo "or add this line to ~/.ssh/authorized_keys yourself:"
-	echo "  $KEY_OPTIONS <the line in the Mac's ~/.ssh/planner-backup.pub>"
-fi
-command -v rrsync >/dev/null || echo "Warning: rrsync is missing, so the Mac's key won't work. It comes with rsync 3.2.4 or later."
-systemctl is-active --quiet ssh.socket || systemctl is-active --quiet ssh || echo "Warning: the ssh server isn't running, so the Mac can't fetch the copies. Install it with: sudo apt-get install openssh-server"
+# This also tightens the ssh server (keys only, Tailscale only); see the README.
+MAC_BACKUP_KEY="${MAC_BACKUP_KEY:-}" bash scripts/backup-access.sh ||
+	echo "Warning: the Mac's access wasn't set up; the message above says why. Fix that and run this again."
 
 say "https address"
 # If HTTPS certificates are off for your tailnet, this prints a link to turn them on; then run the script again.

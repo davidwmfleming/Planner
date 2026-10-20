@@ -11,3 +11,7 @@ BACKUP_OWNER=
 # The planner's Docker volume and its folder (with compose.yaml); restore.sh stops and starts it.
 VOLUME=planner_data
 PLANNER_DIR=/srv/planner
+# Once the Mac's key is added, the ssh server only lets BACKUP_OWNER sign in, only from Tailscale
+# addresses. Other accounts that need ssh: list them here, separated by spaces, as NAME or
+# NAME@ADDRESS (for example: SSH_ALLOW_USERS="alice bob@192.168.1.*"), then run server-setup.sh again.
+SSH_ALLOW_USERS=

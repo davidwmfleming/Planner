@@ -54,13 +54,15 @@ The copies don't include `.env`; `server-setup.sh` makes a new one with a new ca
 
 ### Copy on the Mac (and so in Proton Drive)
 
-Each morning at 07:00 the Mac fetches any new copies from the server over Tailscale into a folder inside Proton Drive, which uploads them. If the Mac is asleep at 07:00 it fetches when it wakes, and it also fetches each time you log in. It only ever adds copies (an empty or broken server can't wipe the Mac's), and it removes its own copies older than 30 days. If the newest copy on the Mac is more than 2 days old, a notification says so. The Mac uses its own ssh key, which the server only lets read the backup folder. This uses the server's normal ssh server (`openssh-server`), not Tailscale SSH.
+Each morning at 07:00 the Mac fetches any new copies from the server over Tailscale into a folder inside Proton Drive, which uploads them. If the Mac is asleep at 07:00 it fetches when it wakes, and it also fetches each time you log in. It only ever adds copies (an empty or broken server can't wipe the Mac's), and it removes its own copies older than 30 days. If the newest copy on the Mac is more than 2 days old, a notification says so. The Mac uses its own ssh key, which the server only lets read the backup folder. This uses the server's normal ssh server (`openssh-server`, installed if missing), not Tailscale SSH: Tailscale SSH ignores the key's limit, so keep it off (`server-setup.sh` warns if it is on).
+
+Adding the Mac's key also tightens the server's ssh server with `/etc/ssh/sshd_config.d/00-planner-backup.conf`: keys only (no passwords), no signing in as root, and only your account, only over Tailscale. **Any other account that signs in to the server by ssh, or signing in from the home network rather than Tailscale, stops working.** To keep one, add it to `SSH_ALLOW_USERS` in `/etc/default/planner-backup` (for example `SSH_ALLOW_USERS="alice"`) and run `server-setup.sh` again. The ssh server checks the new settings first and the old ones are put back if it rejects them. The firewall isn't touched (Home Assistant needs its ports on the home network). The first time, keep a Tailscale or console session to the server open until you have checked, from a new Terminal window, that you can still sign in.
 
 Setting it up, once, in Terminal on the Mac (from a copy of this repository):
 
 1. Install Homebrew's rsync (the one built into recent macOS doesn't work as well with the server): `brew install rsync`
-2. Make the key: `ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C "planner backup"`, then show it with `cat ~/.ssh/planner-backup.pub`.
-3. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line it showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups.
+2. Make the key: `ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C planner-backup`, then show it with `cat ~/.ssh/planner-backup.pub`.
+3. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line it showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups (or fixes the line if the key is already there), and tightens the ssh server as described above.
 4. Copy the script: `mkdir -p ~/bin && cp scripts/mac/pull-backup.sh ~/bin/planner-pull-backup.sh`, then open `~/bin/planner-pull-backup.sh` and fill in the settings at the top: `SERVER` (the server's Tailscale name, for example `homebase`), `SERVER_USER` (your account on it) and `PROTON_DRIVE` (Proton Drive's folder; `ls ~/Library/CloudStorage` shows its name).
 5. Try it: `bash ~/bin/planner-pull-backup.sh`. The copies should appear in Proton Drive under `Backups/planner`.
 6. Schedule it:
