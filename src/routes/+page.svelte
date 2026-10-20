@@ -723,7 +723,9 @@
 		padding: 1rem;
 	}
 	.sheet::backdrop { background: rgba(0, 0, 0, 0.35); }
-	.sheet form { display: grid; gap: 0.7rem; }
+	/* One column no wider than the sheet: a long title, or a long calendar name in a menu, must not widen it,
+	   or the sheet scrolls sideways on a narrow phone (and slides when a message is brought into view). */
+	.sheet form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.7rem; }
 	.sheet-title { font-size: 1.2rem; margin: 0; }
 	.field { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); border: 0; padding: 0; margin: 0; }
 	.field input, .field select, .field textarea {
@@ -737,8 +739,11 @@
 		border-radius: 6px;
 		min-height: 44px;
 		padding: 0.2rem 0.5rem;
+		min-width: 0;
+		max-width: 100%;
+		text-overflow: ellipsis;
 	}
-	.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+	.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.6rem; }
 	.seg { display: flex; gap: 0.4rem; }
 	.seg label { display: flex; gap: 0.3rem; align-items: center; border: 2px solid var(--ink); border-radius: 6px; padding: 0 0.7rem; min-height: 44px; color: var(--ink); font-size: 1rem; font-weight: 400; }
 	/* Save stays in reach on a phone while the rest of the sheet scrolls. */
@@ -767,7 +772,7 @@
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
-		.row2 { grid-template-columns: 1fr; }
+		.row2 { grid-template-columns: minmax(0, 1fr); }
 		/* Title, month and the gear on one line, the four page controls on the next: no third row eating the page. */
 		h1 { flex: 1; }
 		nav { flex-wrap: nowrap; width: 100%; order: 1; }

@@ -231,6 +231,34 @@ for (const [width, height, most] of [[375, 667, 0.42], [320, 568, 0.6]] as const
 	});
 }
 
+// QA (save-safety): at 320x568 the sheet was wider than its box, so showing a message slid it sideways.
+for (const [width, height] of [[320, 568], [375, 667]] as const) {
+	test(`the details sheet fits a ${width}x${height} screen, long calendar names and a message included`, async ({ page, request }, info) => {
+		test.skip(info.project.name !== 'phone', 'a phone size, set here');
+		await page.setViewportSize({ width, height });
+		const name = unique('Reg dentist appointment with a long title', info);
+		const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+		const calendar = await makeCalendar(request, slug, `Holiday trip to the coast ${slug}`.slice(0, 40));
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//test//EN', 'BEGIN:VEVENT', `UID:${slug}`, 'DTSTAMP:20260101T000000Z',
+			`DTSTART;VALUE=DATE:${day.replaceAll('-', '')}`, `SUMMARY:${name}`, 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
+		try {
+			await putEntry(request, calendar, `${slug}.ics`, ics);
+			await page.goto(`/?page=${day}`);
+			await page.getByRole('button', { name: `Details for ${name}` }).click();
+			const sheet = page.getByRole('dialog', { name: 'Details' });
+			const sideways = () => sheet.evaluate((el) => el.scrollWidth - el.clientWidth);
+			expect(await sideways()).toBeLessThanOrEqual(0);
+			await page.route('**/*&/save', (r) => r.fulfill(refused(`"${name.slice(0, 39)}…" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Wait a minute before reloading the page; then, if it's still in two, delete the one in Holiday trip to the coast.`)));
+			await sheet.getByRole('button', { name: 'Save' }).click();
+			await expect(sheet.getByRole('alert')).toBeVisible();
+			expect(await sideways()).toBeLessThanOrEqual(0);
+			expect(await sheet.evaluate((el) => el.scrollLeft)).toBe(0);
+		} finally {
+			await deleteCalendar(request, calendar);
+		}
+	});
+}
+
 test('closing a message puts focus back on what it was about, not the top of the page', async ({ page }, info) => {
 	const name = unique('Focus back', info);
 	const row = await addTask(page, name);
