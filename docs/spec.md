@@ -18,8 +18,8 @@
 - **Future tasks list** (first called "Not scheduled"): this month's to-dos, someday items and a "waiting on" list (wills, tax credit, French training). Hidden behind a button at the bottom of the page; each item has one-tap **Today** and **Sat** buttons to pull it onto today or the coming Saturday. (Moved up to day one after prototype feedback.)
 - School-meal emails turned into entries on the school calendar automatically.
 - Work Outlook meetings shown as read-only events, if his employer allows a calendar feed.
-- **Settings page:** add, rename and delete calendars (events) and the task categories (This month, Waiting, Someday and new ones).
-- **Export and backup:** download everything as standard .ics files that Apple Calendar, Google Calendar or any CalDAV app can import, so moving to another platform stays possible. Plus a nightly backup of the data volume on the server.
+- **Settings page:** add, rename and delete calendars (events) and the task categories (This month, Waiting, Someday and new ones). Before deleting a calendar or category that holds items, the page says how many and asks where they go. It also chooses which calendar is shown as Work and where new events go. The Tasks list can't be deleted.
+- **Export and backup:** download everything as standard .ics files (a zip with one file per calendar or list) that Apple Calendar, Google Calendar or any CalDAV app can import, so moving to another platform stays possible. Plus a nightly backup of the data volume on the server (kept 30 days), which David's Mac copies into his Proton Drive.
 - **Visual polish:** a design pass so the pages look good on e-ink, the phone and the Mac, keeping the paper-planner feel.
 
 ## Non-goals
@@ -37,7 +37,7 @@
 - Later: Proton Bridge (school-meal emails), a work calendar feed.
 
 ## Data kept
-- David's and the family's calendars and tasks, on the home server only, backed up nightly.
+- David's and the family's calendars and tasks, on the home server, backed up nightly there and copied to David's Proton Drive through his Mac.
 
 ## Success test
 After two weeks, David hasn't opened the paper planner, and nothing he wrote in the planner was missed or lost.
