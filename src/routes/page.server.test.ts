@@ -131,6 +131,13 @@ describe('adding a line', () => {
 		expect(fake.created).toEqual([`${HOME}family/`]);
 	});
 
+	it('falls back to the first event calendar by name, as the menus list them, not in server order', async () => {
+		fake = fakeStore([cal('zoo', 'Zoo trips'), cal('tasks', 'Tasks', ['task']), cal('family', 'family'), cal('me', 'Me')], { categories: [], workCalendar: null, defaultEventCalendar: '/david/gone/' });
+		expect((await run()).defaultEventCalendar).toBe('/david/family/');
+		expect(await add({ kind: 'event', date: '2026-10-21', text: 'Dentist' })).toEqual({ added: 'Dentist' });
+		expect(fake.created).toEqual([`${HOME}family/`]);
+	});
+
 	it('says plainly that there is no calendar for events, rather than failing', async () => {
 		fake = fakeStore([cal('tasks', 'Tasks', ['task'])]);
 		expect(await add({ kind: 'event', date: '2026-10-21', text: 'Dentist' })).toMatchObject({

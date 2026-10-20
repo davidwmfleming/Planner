@@ -1,7 +1,7 @@
 // One shared connection to the calendar server, configured from the environment.
 import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
-import { calendarAtPath, type Settings } from '$lib/settings';
+import { byName, calendarAtPath, type Settings } from '$lib/settings';
 import { CalendarStore } from './calendar-store';
 import { prepareStore, tasksCalendarUrl } from './startup';
 
@@ -46,9 +46,10 @@ export async function getSettings(store: CalendarStore): Promise<Settings> {
 	return store.readSettings(store.addressFor(tasksCalendarName()), { workCalendar, defaultEventCalendar: eventsCalendar });
 }
 
-/** Where new items go: events to the calendar chosen in the settings, tasks to Tasks; else the first that accepts the kind. */
+/** Where new items go: events to the calendar chosen in the settings, tasks to Tasks. If the chosen calendar is gone,
+ * events go to the first event calendar by name, the one at the top of the menus. */
 export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind, settings: Settings): string {
-	const events = store.calendars().filter((c) => c.accepts.includes('event'));
+	const events = store.calendars().filter((c) => c.accepts.includes('event')).sort(byName);
 	const url = kind === 'event' ? (calendarAtPath(events, settings.defaultEventCalendar) ?? events[0])?.url : tasksCalendarUrl(store, tasksCalendarName());
 	if (!url) throw new Error(`No calendar on the server accepts ${kind}s yet`);
 	return url;
