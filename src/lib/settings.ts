@@ -57,13 +57,25 @@ export const byName = (a: { name: string }, b: { name: string }) => a.name.local
 /** Longest calendar name the settings page accepts. */
 export const MAX_NAME = 40;
 
+/** Joiners between two emoji (a family, the rainbow flag) and the tag letters of a flag such as Scotland's are part of the emoji. */
+const EMOJI_JOINER = /(?<=[\p{Extended_Pictographic}\p{Emoji_Modifier}\ufe0f])\u200d(?=\p{Extended_Pictographic})/gu;
+const FLAG_TAGS = /\u{1f3f4}[\u{e0020}-\u{e007e}]+\u{e007f}/gu;
+
+/** Drops invisible format characters (Unicode Cf) that aren't part of an emoji. */
+function withoutFormatCharacters(text: string): string {
+	const kept = new Set<number>();
+	for (const m of text.matchAll(EMOJI_JOINER)) kept.add(m.index);
+	for (const m of text.matchAll(FLAG_TAGS)) for (let i = m.index + 2; i < m.index + m[0].length; i++) kept.add(i);
+	return text.replace(/\p{Cf}/gu, (c, at: number) => (kept.has(at) ? c : ''));
+}
+
 /** Checks a name for a new or renamed calendar: 1 to 40 letters, not used by any other collection (case ignored).
  * `current` is the URL of the calendar being renamed, which may keep its own name. */
 export function checkCalendarName(raw: string, calendars: { url: string; name: string }[], current?: string): { name: string } | { error: string } {
-	// Line breaks and tabs become spaces; other control characters are dropped. A name that is only
-	// invisible characters (zero-width spaces and the like) counts as empty.
-	const name = raw.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '').replace(/ {2,}/g, ' ').trim();
-	if (!name.replace(/\p{Cf}/gu, '').trim()) return { error: 'Give the calendar a name' };
+	// Line breaks and tabs become spaces; other control characters and invisible format characters
+	// (zero-width spaces, right-to-left overrides) are dropped, except those that spell an emoji.
+	const name = withoutFormatCharacters(raw.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '')).replace(/ {2,}/g, ' ').trim();
+	if (!name) return { error: 'Give the calendar a name' };
 	if ([...name].length > MAX_NAME) return { error: `Keep the name to ${MAX_NAME} letters or fewer` };
 	const taken = calendars.find((c) => c.url !== current && c.name.toLowerCase() === name.toLowerCase());
 	if (taken) return { error: `There is already a calendar called "${taken.name}"` };

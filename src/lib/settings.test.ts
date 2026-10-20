@@ -76,6 +76,22 @@ describe('checkCalendarName', () => {
 		expect(checkCalendarName('👨\u200d👩\u200d👧 Home', all)).toEqual({ name: '👨\u200d👩\u200d👧 Home' });
 	});
 
+	it('removes invisible format characters, keeping the ones inside an emoji', () => {
+		expect(checkCalendarName('Sch\u200bool\ufeff', all)).toEqual({ name: 'School' });
+		// A right-to-left override would make the name read backwards on the page.
+		expect(checkCalendarName('\u202eKrow\u202c', all)).toEqual({ name: 'Krow' });
+		expect(checkCalendarName('Ho\u200dme\u2060', all)).toEqual({ name: 'Home' });
+		expect(checkCalendarName('\u200d\u{1f469}\u200d', all)).toEqual({ name: '\u{1f469}' });
+		expect(checkCalendarName('\u{1f3f3}\ufe0f\u200d\u{1f308} Club', all)).toEqual({ name: '\u{1f3f3}\ufe0f\u200d\u{1f308} Club' });
+		expect(checkCalendarName('\u{1f469}\u{1f3fd}\u200d\u{1f4bb} Desk', all)).toEqual({ name: '\u{1f469}\u{1f3fd}\u200d\u{1f4bb} Desk' });
+		// A flag like Scotland's is spelled with invisible tag letters after the black flag.
+		const scotland = '\u{1f3f4}\u{e0067}\u{e0062}\u{e0073}\u{e0063}\u{e0074}\u{e007f}';
+		expect(checkCalendarName(`${scotland} Trip`, all)).toEqual({ name: `${scotland} Trip` });
+		expect(checkCalendarName('Trip\u{e0067}\u{e007f}', all)).toEqual({ name: 'Trip' });
+		// The duplicate check sees the cleaned name.
+		expect(checkCalendarName('Fam\u200bily', all)).toEqual({ error: 'There is already a calendar called "Family"' });
+	});
+
 	it('allows 40 letters but not 41, counting an emoji as one', () => {
 		expect(checkCalendarName('a'.repeat(40), all)).toEqual({ name: 'a'.repeat(40) });
 		expect(checkCalendarName('a'.repeat(41), all)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
