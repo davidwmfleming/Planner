@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Calendar server for browser tests: a fresh Radicale on port 5233, seeded with sample data.
 set -euo pipefail
-export DEV_CALENDAR_DIR="$(mktemp -d)" DEV_CALENDAR_PORT=5233
+DEV_CALENDAR_DIR="$(mktemp -d)"
+export DEV_CALENDAR_DIR DEV_CALENDAR_PORT=5233
 bash scripts/dev-calendar.sh &
 SERVER=$!
 trap 'kill $SERVER; rm -rf "$DEV_CALENDAR_DIR"' EXIT

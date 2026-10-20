@@ -12,6 +12,7 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"test": "vitest run",
 		"test:e2e": "playwright test",
+		"test:scripts": "bash scripts/tests/run.sh",
 		"lint": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
 		"calendar": "bash scripts/dev-calendar.sh",
 		"seed": "vite-node scripts/seed-dev.ts"

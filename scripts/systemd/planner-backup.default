@@ -1,0 +1,12 @@
+# Settings for the planner's nightly backup (scripts/backup.sh and scripts/restore.sh).
+# server-setup.sh copies this to /etc/default/planner-backup once and never overwrites your edits.
+
+# Where the archives go, and how many days of them to keep.
+BACKUP_DIR=/srv/backups/planner
+KEEP_DAYS=30
+# The account that owns the archives; the Mac signs in as this account to fetch them.
+# server-setup.sh fills this in with the account that ran it.
+BACKUP_OWNER=
+# The planner's Docker volume and its folder (with compose.yaml); restore.sh stops and starts it.
+VOLUME=planner_data
+PLANNER_DIR=/srv/planner

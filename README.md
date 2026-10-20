@@ -14,6 +14,7 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | Browser tests at tablet and phone sizes (Playwright) |
 | `npm run lint` | Type and Svelte checks |
+| `npm run test:scripts` | Backup script tests against a throwaway Docker volume (needs Docker and rsync) |
 | `npm run calendar` | Start a local Radicale calendar server (needs `python3 -m pip install radicale`) |
 | `npm run seed` | Fill it with sample entries from the paper page |
 
@@ -35,6 +36,17 @@ bash server-setup.sh            # add --sample on a test machine for the sample 
 ```
 
 The script installs Docker and Tailscale if needed (Tailscale prints a sign-in link the first time), puts the code in `/srv/planner`, writes `/srv/planner/.env` with a random calendar password, starts everything, and prints the planner's address and the calendar-app details. Run it again to update. In the Tailscale admin console, MagicDNS and HTTPS certificates must be on. Set `HTTPS_PORT` (for example `HTTPS_PORT=8443 bash server-setup.sh`) if another service already uses 443.
+
+## Backups
+
+Every night at 02:30 the server copies all the calendars, the planner's settings and the (hashed) calendar password into one file, `/srv/backups/planner/planner-YYYY-MM-DD.tar.gz`, and deletes copies older than 30 days. If the server was off at 02:30, the copy is made soon after it starts. The calendar server pauses for the second or two the copy takes, so no calendar is caught half-saved. `server-setup.sh` sets this up and makes the first copy straight away. Only your account (and root) can read the copies.
+
+- See when it last ran and when it runs next: `systemctl list-timers planner-backup.timer`
+- Make a copy now: `sudo systemctl start planner-backup`, then `ls -l /srv/backups/planner`
+- If it went wrong: `journalctl -u planner-backup`
+- Settings (folder, days kept): `/etc/default/planner-backup`. `server-setup.sh` never overwrites your edits.
+
+The copies don't include `.env`; `server-setup.sh` makes a new one with a new calendar password on a new machine.
 
 ## Syncing with other calendar apps
 

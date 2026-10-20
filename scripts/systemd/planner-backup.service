@@ -1,0 +1,10 @@
+# Copies the planner's calendars into /srv/backups/planner (see scripts/backup.sh).
+# Installed by scripts/server-setup.sh. Run it now with:  sudo systemctl start planner-backup
+[Unit]
+Description=Back up the planner's calendars
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/planner-backup

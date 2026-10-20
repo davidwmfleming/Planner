@@ -20,7 +20,7 @@ say() { printf '\n== %s\n' "$1"; }
 
 say "Basic tools"
 sudo apt-get update -qq
-sudo apt-get install -y -qq ca-certificates curl git openssl python3 >/dev/null
+sudo apt-get install -y -qq ca-certificates curl git openssl python3 rsync >/dev/null
 
 say "Docker"
 if ! command -v docker >/dev/null; then
@@ -28,6 +28,7 @@ if ! command -v docker >/dev/null; then
 	sudo install -m 0755 -d /etc/apt/keyrings
 	sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 	sudo chmod a+r /etc/apt/keyrings/docker.asc
+	# shellcheck disable=SC1091
 	echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" |
 		sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
 	sudo apt-get update -qq
@@ -85,6 +86,21 @@ if [ "$SAMPLE" = yes ] && [ ! -f .sample-added ]; then
 	sudo docker compose --profile sample run --rm seed
 	touch .sample-added
 fi
+
+say "Nightly backup"
+# backup.sh is copied (not run from $DIR) so the root-run job can't be changed by editing the checkout.
+sudo install -m 0755 scripts/backup.sh /usr/local/sbin/planner-backup
+if [ ! -f /etc/default/planner-backup ]; then
+	sed -e "s|^BACKUP_OWNER=.*|BACKUP_OWNER=$(id -un)|" -e "s|^PLANNER_DIR=.*|PLANNER_DIR=$DIR|" \
+		scripts/systemd/planner-backup.default | sudo tee /etc/default/planner-backup >/dev/null
+fi
+sudo install -m 0644 scripts/systemd/planner-backup.service scripts/systemd/planner-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now planner-backup.timer
+# One backup now, to check it works (and fetch the small helper image it uses).
+sudo systemctl start planner-backup
+sudo journalctl -u planner-backup -n 3 --no-pager -o cat
+systemctl list-timers planner-backup.timer --no-pager
 
 say "https address"
 # If HTTPS certificates are off for your tailnet, this prints a link to turn them on; then run the script again.
