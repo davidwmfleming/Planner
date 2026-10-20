@@ -74,6 +74,9 @@ PROBE=$(mktemp "$DEST/.planner-write-check.XXXXXX" 2>/dev/null) ||
 	fail "Can't save files in $DEST (if the log says 'Operation not permitted', see the README)."
 rm -f "$PROBE"
 mkdir -p "$TEMP_DIR" || fail "Can't make $TEMP_DIR."
+PROBE=$(mktemp "$TEMP_DIR/.planner-write-check.XXXXXX" 2>/dev/null) ||
+	fail "Can't save files in $TEMP_DIR (where unfinished downloads wait). Is the disk full?"
+rm -f "$PROBE"
 
 # ---- Fetch -----------------------------------------------------------------------------------
 # --ignore-existing: a copy the Mac already has is never replaced (say, by a same-named copy
@@ -83,7 +86,7 @@ PROBLEM="" # something that won't fix itself by waiting: always notified
 attempt=1
 while :; do
 	"$RSYNC" -rt --ignore-existing --temp-dir="$TEMP_DIR" --include='*.tar.gz' --exclude='*' \
-		-e "$SSH -i $SSH_KEY -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" \
+		-e "$SSH -i '$SSH_KEY' -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=20" \
 		"$SERVER_USER@$SERVER:" "$DEST/"
 	code=$?
 	case $code in
@@ -98,7 +101,10 @@ while :; do
 	23) PROBLEM="some copies couldn't be fetched (rsync code 23; the log says which)"; break ;;
 	*) PROBLEM="the fetch from $SERVER failed (rsync code $code; see the log)"; break ;;
 	esac
-	[ "$attempt" -lt "$ATTEMPTS" ] || break
+	if [ "$attempt" -ge "$ATTEMPTS" ]; then
+		log "Fetch failed (rsync code $code); gave up after $ATTEMPTS tries."
+		break
+	fi
 	log "Fetch failed (attempt $attempt of $ATTEMPTS, rsync code $code); trying again in $RETRY_WAIT seconds."
 	attempt=$((attempt + 1))
 	sleep "$RETRY_WAIT"

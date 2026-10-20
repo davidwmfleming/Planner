@@ -15,6 +15,7 @@ mkdir -p "$SERVER_DIR" "$PROTON" "$WORK/bin"
 # ssh stand-in: drop ssh's own arguments and the host, then run what authorized_keys would run.
 cat >"$WORK/bin/fake-ssh" <<EOF
 #!/usr/bin/env bash
+printf '%s\n' "\$@" >"$WORK/ssh-args"
 [ -e "$WORK/server-down" ] && { echo "ssh: connect to host homebase port 22: Operation timed out" >&2; exit 255; }
 while [ \$# -gt 0 ] && [ "\$1" != rsync ]; do shift; done
 SSH_ORIGINAL_COMMAND="\$*" exec rrsync -ro "$SERVER_DIR"
@@ -118,6 +119,21 @@ else
 	echo "skip (a folder the Mac can't write to: needs a non-root account)"
 fi
 
+echo "== A temporary folder the Mac can't write to is reported as this Mac's problem"
+CACHE="$HOME/Library/Caches/planner-pull-backup"
+mv "$CACHE" "$WORK/cache-saved"
+ln -s /proc "$CACHE" # a folder nobody (not even root) can save files in
+if pull; then bad "it is a problem"; else ok "it is a problem"; fi
+check "it says so, rather than blaming the server" notified "Can't save files in $CACHE"
+rm "$CACHE"
+mv "$WORK/cache-saved" "$CACHE"
+
+echo "== A key file whose path has a space in it works"
+echo "SSH_KEY=\"$HOME/My Keys/planner-backup\"" >>"$CONF"
+pull || { cat "$WORK/out"; bad "pull-backup.sh exits cleanly"; }
+check "ssh is given the whole path" grep -qxF "$HOME/My Keys/planner-backup" "$WORK/ssh-args"
+cp "$WORK/conf-good" "$CONF"
+
 echo "== An emptied server never empties the Mac"
 rm -f "$SERVER_DIR"/*
 pull || { cat "$WORK/out"; bad "pull-backup.sh exits cleanly"; }
@@ -136,6 +152,7 @@ touch -d '31 days ago' "$DEST/planner-2000-01-01.tar.gz"
 touch "$WORK/server-down"
 if pull; then bad "pull-backup.sh reports a problem"; else ok "pull-backup.sh reports a problem"; fi
 check "it tried twice" test "$(grep -c 'timed out' "$WORK/out")" = 2
+check "the log says it gave up" grep -q "gave up after 2 tries" "$WORK/out"
 check "a notification says the server couldn't be reached" notified "couldn't reach homebase"
 check "old copies are kept when the pull failed" test -e "$DEST/planner-2000-01-01.tar.gz"
 touch "$DEST/$TODAY"
