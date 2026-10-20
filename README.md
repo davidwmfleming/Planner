@@ -48,6 +48,27 @@ Every night at 02:30 the server copies all the calendars, the planner's settings
 
 The copies don't include `.env`; `server-setup.sh` makes a new one with a new calendar password on a new machine.
 
+### Copy on the Mac (and so in Proton Drive)
+
+Each morning at 07:00 the Mac fetches any new copies from the server over Tailscale into a folder inside Proton Drive, which uploads them. If the Mac is asleep at 07:00 it fetches when it wakes, and it also fetches each time you log in. It only ever adds copies (an empty or broken server can't wipe the Mac's), and it removes its own copies older than 30 days. If the newest copy on the Mac is more than 2 days old, a notification says so. The Mac uses its own ssh key, which the server only lets read the backup folder. This uses the server's normal ssh server (`openssh-server`), not Tailscale SSH.
+
+Setting it up, once, in Terminal on the Mac (from a copy of this repository):
+
+1. Install Homebrew's rsync (the one built into recent macOS doesn't work as well with the server): `brew install rsync`
+2. Make the key: `ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C "planner backup"`, then show it with `cat ~/.ssh/planner-backup.pub`.
+3. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line it showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups.
+4. Copy the script: `mkdir -p ~/bin && cp scripts/mac/pull-backup.sh ~/bin/planner-pull-backup.sh`, then open `~/bin/planner-pull-backup.sh` and fill in the settings at the top: `SERVER` (the server's Tailscale name, for example `homebase`), `SERVER_USER` (your account on it) and `PROTON_DRIVE` (Proton Drive's folder; `ls ~/Library/CloudStorage` shows its name).
+5. Try it: `bash ~/bin/planner-pull-backup.sh`. The copies should appear in Proton Drive under `Backups/planner`.
+6. Schedule it:
+   ```
+   sed "s|/Users/YOURNAME|$HOME|g" scripts/mac/local.planner.pull-backup.plist > ~/Library/LaunchAgents/local.planner.pull-backup.plist
+   plutil -lint ~/Library/LaunchAgents/local.planner.pull-backup.plist
+   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.planner.pull-backup.plist
+   ```
+   It runs once straight away; check `~/Library/Logs/planner-pull-backup.log`. If the log says "Operation not permitted", macOS is blocking the job from Proton Drive's folder: in System Settings → Privacy & Security → Full Disk Access, add `/bin/bash` and `/opt/homebrew/bin/rsync`, then run `launchctl kickstart -k gui/$(id -u)/local.planner.pull-backup`.
+
+To stop it: `launchctl bootout gui/$(id -u)/local.planner.pull-backup`.
+
 ### Putting a copy back
 
 Pick the copy from the day you want (`ls /srv/backups/planner`), then:
