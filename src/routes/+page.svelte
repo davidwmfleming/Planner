@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { deserialize, enhance } from '$app/forms';
-	import { beforeNavigate, goto, invalidateAll, preloadData } from '$app/navigation';
+	import { beforeNavigate, goto, invalidateAll, preloadData, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays, toISODate } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
-	import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, turnedToNewDay, untilMidnight } from '$lib/new-day';
+	import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
@@ -363,24 +364,27 @@
 	const shown = () => ({ today: data.today, todayPage: data.todayPage, start: data.start });
 	const busy = () =>
 		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 || lineWritten();
-	/** Whether this page's data can be read now. A refresh that fails would swap the planner for the error screen
-	 * (no Wi-Fi yet on waking, the calendar server down), so the page only refreshes once a try has worked. */
-	async function answers() {
-		try {
-			const response = await fetch(dataAddress(location.pathname, location.search), { cache: 'no-store' });
-			return dataAnswered(response.status, await response.text());
-		} catch {
-			return false;
-		}
-	}
-	/** The same for another page; a page read this way is then shown without reading it again. */
-	async function preloaded(address: string) {
+	// Reads go to addresses of their own (see freshAddress), numbered.
+	let reads = 0;
+	// When the server first didn't have the new day (or couldn't be reached), for retryAfter.
+	let troubleSince = 0;
+	/** Reads a page's data ahead, without showing it. A refresh or turn that failed would swap the planner for the error
+	 * screen (no Wi-Fi yet on waking, the calendar server down), so a page is only shown once read this way; showing
+	 * it then uses what was read, so it is read once and nothing can fail in between. */
+	async function readAhead(start: string) {
+		const address = freshAddress(start, ++reads);
 		try {
 			const result = await preloadData(address);
-			return result.type === 'loaded' && result.status === 200;
+			if (result.type === 'loaded' && result.status === 200) return { address, data: result.data as { today: string; todayPage: string; start: string } };
 		} catch {
-			return false;
+			// no connection: as if not answered
 		}
+		return undefined;
+	}
+	/** Shows a page read ahead, then puts its plain address back in the address bar. */
+	async function showRead(address: string, hadPage: boolean) {
+		await goto(address, { replaceState: true, noScroll: true, keepFocus: true });
+		replaceState(shownAddress(hadPage, shown()) || location.pathname, page.state);
 	}
 	/** The timer's own checks always ask; a wake, focus or new data may be held back by mayAsk. */
 	async function newDay(timed = false) {
@@ -394,30 +398,40 @@
 		clearTimeout(dayTimer);
 		let wait;
 		const before = seen;
+		const hadPage = new URL(location.href).searchParams.has('page');
 		try {
 			let failed = false;
 			if (!waiting && begun) {
 				lastAsked = Date.now();
-				if (await answers()) await invalidateAll();
-				else failed = true;
+				const now = shown();
+				let read = await readAhead(pageToRead(now, new Date()));
+				// The server's new today is on another page than this device's (the clocks differ): read that one instead.
+				if (read && read.data.today !== now.today && now.start === now.todayPage && read.data.start !== read.data.todayPage)
+					read = await readAhead(read.data.todayPage);
+				if (!read) failed = true;
+				else if (read.data.today !== now.today && !busy()) await showRead(read.address, hadPage);
 			}
 			const to = pageForNewDay(seen, shown());
 			const held = waiting || busy();
 			if (to && !held) {
-				if (await preloaded(pageUrl(to))) {
-					await goto(pageUrl(to), { replaceState: true });
+				const read = await readAhead(to);
+				if (read) {
+					await showRead(read.address, hadPage);
 					seen = shown();
 				} else failed = true;
 			} else if (!to) seen = shown();
 			const behind = dayBegun(new Date(), data.today);
-			tries = (behind || failed) && !held ? tries + 1 : 0;
+			const trouble = (behind || failed) && !held;
+			if (trouble && !tries) troubleSince = Date.now();
+			tries = trouble ? tries + 1 : 0;
 			// A phone keeps where it was scrolled to, which could leave the new today off screen.
 			if (turnedToNewDay(before, shown())) scrollTo(0, 0);
 			const turns = to || (behind && seen.start === seen.todayPage);
 			dayNote = held && turns && lineWritten() ? `It's now ${dayName(to ? data.today : toISODate(new Date()))}. The page turns once this line is saved or cleared.` : '';
-			wait = held && (to || behind) ? WHILE_WRITING : behind || failed ? retryAfter(tries) : untilMidnight(new Date());
+			wait = held && (to || behind) ? WHILE_WRITING : trouble ? retryAfter(tries, Date.now() - troubleSince, new Date()) : untilMidnight(new Date());
 		} catch {
-			wait = retryAfter(++tries);
+			if (!tries) troubleSince = Date.now();
+			wait = retryAfter(++tries, Date.now() - troubleSince, new Date());
 		} finally {
 			checking = false;
 		}

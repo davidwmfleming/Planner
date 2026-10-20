@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, turnedToNewDay, untilMidnight } from './new-day';
+import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from './new-day';
 
 // Wednesday 21 October 2026 is on the Mon–Wed page (from the 19th); Thursday starts the Thu–Sun page.
 const wed = { today: '2026-10-21', todayPage: '2026-10-19', start: '2026-10-19' };
@@ -45,33 +45,15 @@ describe('pageForNewDay', () => {
 	});
 });
 
-describe('dataAddress', () => {
-	it('asks for the page’s data at its own path and query', () => {
-		expect(dataAddress('/', '')).toBe('/__data.json');
-		expect(dataAddress('/', '?page=2026-10-19')).toBe('/__data.json?page=2026-10-19');
-	});
-});
-
-describe('dataAnswered', () => {
-	const ok = JSON.stringify({ type: 'data', nodes: [{ type: 'skip' }, { type: 'data', data: [{}], uses: {} }] });
-	it('is true only for page data that came back whole', () => {
-		expect(dataAnswered(200, ok)).toBe(true);
-		expect(dataAnswered(200, `${ok}\n{"type":"chunk"}`)).toBe(true);
-	});
-	it('is false when the calendar server is down (an error inside a 200)', () => {
-		const down = { type: 'data', nodes: [{ type: 'skip' }, { type: 'error', error: { message: 'down' }, status: 503 }] };
-		expect(dataAnswered(200, JSON.stringify(down))).toBe(false);
-	});
-	it('is false for a failed answer, a redirect or something that is not page data', () => {
-		expect(dataAnswered(502, ok)).toBe(false);
-		expect(dataAnswered(200, JSON.stringify({ type: 'redirect', location: '/' }))).toBe(false);
-		expect(dataAnswered(200, '<html>Bad gateway</html>')).toBe(false);
-	});
-});
-
 describe('retryAfter', () => {
+	const now = new Date(2026, 9, 22, 3, 0);
 	it('asks again a minute later for the first five tries, then every ten minutes', () => {
-		expect([1, 5, 6, 40].map(retryAfter)).toEqual([60_000, 60_000, 600_000, 600_000]);
+		expect([1, 5, 6, 40].map((tries) => retryAfter(tries, 0, now))).toEqual([60_000, 60_000, 600_000, 600_000]);
+	});
+	it('after three hours of the server still on the old day, waits for the next midnight here', () => {
+		expect(retryAfter(20, 3 * 3600_000 - 1, now)).toBe(600_000);
+		expect(retryAfter(20, 3 * 3600_000, now)).toBe(untilMidnight(now));
+		expect(retryAfter(20, 3 * 3600_000, now)).toBeGreaterThan(20 * 3600_000);
 	});
 });
 
@@ -94,5 +76,31 @@ describe('turnedToNewDay', () => {
 		expect(turnedToNewDay(wed, { ...thu, start: wed.start })).toBe(false);
 		expect(turnedToNewDay({ ...wed, start: '2026-10-15' }, { ...thu, start: '2026-10-15' })).toBe(false);
 		expect(turnedToNewDay(wed, { ...wed, start: '2026-10-22' })).toBe(false);
+	});
+});
+
+describe('pageToRead', () => {
+	it('reads the page holding this device’s new today for a page showing today', () => {
+		expect(pageToRead(wed, new Date(2026, 9, 22, 0, 0, 5))).toBe('2026-10-22');
+	});
+	it('reads the page on screen for a page flipped to', () => {
+		expect(pageToRead({ ...wed, start: '2026-10-15' }, new Date(2026, 9, 22, 0, 0, 5))).toBe('2026-10-15');
+	});
+});
+
+describe('freshAddress', () => {
+	it('gives each read its own address', () => {
+		expect(freshAddress('2026-10-22', 3)).toBe('?page=2026-10-22&fresh=3');
+		expect(freshAddress('2026-10-22', 4)).not.toBe(freshAddress('2026-10-22', 3));
+	});
+});
+
+describe('shownAddress', () => {
+	it('keeps the planner’s own address for a page opened without one, now on the new today’s page', () => {
+		expect(shownAddress(false, { ...thu, start: thu.todayPage })).toBe('');
+	});
+	it('otherwise names the page', () => {
+		expect(shownAddress(true, { ...thu, start: thu.todayPage })).toBe('?page=2026-10-22');
+		expect(shownAddress(false, { ...thu, start: '2026-10-15' })).toBe('?page=2026-10-15');
 	});
 });

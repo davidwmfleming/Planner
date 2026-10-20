@@ -146,10 +146,10 @@ test('a server clock well behind: the page keeps asking every ten minutes, and w
 	await serverDay(page, WED);
 	await page.clock.install({ time: at(23, 59) });
 	await page.goto('/');
-	// The planner's own checks (a refresh that follows one asks with x-sveltekit-invalidated), and when each was.
+	// The planner's checks (one read each), and when each was.
 	const asked: number[] = [];
 	page.on('request', async (r) => {
-		if (r.url().includes('__data.json') && !r.url().includes('x-sveltekit-invalidated')) asked.push(await page.evaluate(() => Date.now()));
+		if (r.url().includes('__data.json')) asked.push(await page.evaluate(() => Date.now()));
 	});
 	// Past midnight here, but the server still says Wednesday: it asks, then five more times a minute apart
 	// (a little more here, as the clock runs on in steps while a check waits on the network; well short of ten minutes).
@@ -169,3 +169,24 @@ test('a server clock well behind: the page keeps asking every ten minutes, and w
 	expect(asked).toHaveLength(7);
 	expect(asked[6] - asked[5]).toBeGreaterThanOrEqual(600_000);
 });
+
+for (const [address, moves] of [['/', true], [`/?page=${MON}`, true], [`/?page=${LAST_THU}`, false]] as const) {
+	test(`a check that works reads the page once, so losing the connection straight after changes nothing (${address})`, async ({ page }) => {
+		await serverDay(page, WED);
+		await page.clock.install({ time: at(23, 59) });
+		await page.goto(address);
+		// The first read after midnight gets through; any after it would find the connection gone.
+		let reads = 0;
+		await page.route('**/__data.json**', (r) => (++reads === 1 ? r.continue() : r.abort('internetdisconnected')));
+		await serverDay(page, THU);
+		await page.clock.runFor('01:10');
+		await expect(page.getByRole('link', { name: 'Today', exact: true })).toHaveAttribute('href', `?page=${THU}`);
+		if (moves) await expect(todayTag(page, THU)).toBeVisible();
+		else await expect(page.locator(`section.day[data-date="${LAST_THU}"]`)).toBeAttached();
+		await page.clock.runFor('01:05');
+		await expect(page).not.toHaveTitle(/Trouble/);
+		expect(reads).toBe(1);
+		// The address bar shows the page, not the address it was read at.
+		await expect(page).toHaveURL(moves && address === '/' ? /\/$/ : new RegExp(`\\?page=${moves ? THU : LAST_THU}$`));
+	});
+}

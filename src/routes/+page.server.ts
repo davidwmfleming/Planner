@@ -43,6 +43,9 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	const now = new Date();
 	const today = pageToday(now, env, testClockOn(env) ? cookies.get(TEST_TODAY_COOKIE) : undefined);
 	const asked = url.searchParams.get('page');
+	// Read only so that a new number here makes the browser read the page again: the new-day check reads the page on
+	// screen at an address of its own, which would otherwise be answered with what it already has (see freshAddress).
+	url.searchParams.get('fresh');
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
 
