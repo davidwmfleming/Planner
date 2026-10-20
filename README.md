@@ -48,6 +48,22 @@ Every night at 02:30 the server copies all the calendars, the planner's settings
 
 The copies don't include `.env`; `server-setup.sh` makes a new one with a new calendar password on a new machine.
 
+### Putting a copy back
+
+Pick the copy from the day you want (`ls /srv/backups/planner`), then:
+
+```
+cd /srv/planner
+sudo bash scripts/restore.sh /srv/backups/planner/planner-2026-10-19.tar.gz
+```
+
+It shows what it will do and waits for you to type `yes`. Then it stops the planner, saves everything as it is right now in `/srv/backups/planner/before-restore-<date-time>.tar.gz`, replaces all calendars, tasks and settings with the copy, and starts the planner again. Anything added after that copy was made is gone from the planner but kept in the safety copy, so if you picked the wrong day, restore the safety copy the same way. Safety copies are never deleted automatically; remove them by hand when you no longer need them.
+
+Phones and computers catch up on their next sync. If one still shows old items, remove the calendar account on it and add it again.
+
+- **Copy kept on the Mac:** copy it back first, for example `scp planner-2026-10-19.tar.gz homebase:/tmp/`, then restore `/tmp/planner-2026-10-19.tar.gz`.
+- **New machine:** run `server-setup.sh` first, then the restore. The calendar password is the new one in the new `.env`, so re-enter it on each phone.
+
 ## Syncing with other calendar apps
 
 The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to Android with DAVx⁵, as a CalDAV account. Events and tasks added on either side show on the other. The planner passes everything under `/dav/` to the calendar server, which asks for its own user name (`CALDAV_USER`, usually `david`) and password (`CALDAV_PASSWORD` in `.env`).

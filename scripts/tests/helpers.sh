@@ -23,6 +23,7 @@ check() { # check "description" command...
 	shift
 	if "$@"; then ok "$what"; else bad "$what"; fi
 }
+not() { ! "$@"; }
 finish() {
 	[ "$FAILED" = 0 ] || { echo "Some checks failed."; exit 1; }
 	echo "All checks passed."
@@ -32,6 +33,9 @@ finish() {
 make_volume() {
 	docker volume rm -f "$TEST_VOLUME" >/dev/null 2>&1 || true
 	docker volume create "$TEST_VOLUME" >/dev/null
+	fill_volume
+}
+fill_volume() {
 	docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" sh -c '
 		mkdir -p /data/collections/collection-root/david/me
 		printf "BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n" > /data/collections/collection-root/david/me/dentist.ics
@@ -39,10 +43,32 @@ make_volume() {
 		chown -R 5232:5232 /data'
 }
 
+# A stand-in for the planner's compose.yaml: one long-running service on the test volume.
+start_compose() {
+	mkdir -p "$WORK/compose"
+	cat >"$WORK/compose/compose.yaml" <<EOF
+name: plannertest
+services:
+  radicale:
+    image: $IMAGE
+    command: sleep infinity
+    init: true
+    volumes:
+      - data:/data
+volumes:
+  data:
+EOF
+	docker compose -f "$WORK/compose/compose.yaml" up -d --quiet-pull >/dev/null 2>&1
+}
+compose_running() {
+	[ "$(docker compose -f "$WORK/compose/compose.yaml" ps -q --status running | wc -l)" = 1 ]
+}
+
 # Lists what is in the test volume, one path per line, with owners.
 volume_files() {
 	docker run --rm -v "$TEST_VOLUME:/data:ro" "$IMAGE" sh -c 'cd /data && find . -type f -printf "%u %p\n" | sort'
 }
+volume_has() { volume_files | grep -q "$1"; }
 
 # The settings file the scripts read instead of /etc/default/planner-backup.
 write_config() {
