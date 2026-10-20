@@ -351,7 +351,8 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 	try {
 		await store.deleteCalendar(calendar.url, version);
 	} catch (e) {
-		if (e instanceof RefusedError && GONE.includes(e.status)) return done; // deleted elsewhere meanwhile
+		// Deleted elsewhere meanwhile: a 404, or another tab's refresh has already dropped it from the list.
+		if (await vanished(store, calendar, e)) return done;
 		console.error(`Settings: could not delete "${calendar.name}"`, e);
 		// A late answer, or a server error, is not a refusal: the server may still delete it, or have done so.
 		if (unanswered(e)) return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);

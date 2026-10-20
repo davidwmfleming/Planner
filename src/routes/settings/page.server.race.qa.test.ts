@@ -132,4 +132,13 @@ describe('two runs of the same move (QA proposals)', () => {
 		const result = await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' });
 		expect(result).toEqual(refusal(502, { message: expect.stringContaining('Family is already gone') }));
 	});
+	it('calls it done when the other run deleted the calendar just before this run asked to delete it', async () => {
+		fake = sharedListStore([me, family, tasks], { [family.url]: [doc(family, 'a'), doc(family, 'b')] });
+		fake.deleteCalendar = async (url: string) => {
+			// the other tab got there first: deleted Family and refreshed the shared list, so the real store says "No calendar at"
+			fake.listed = fake.listed.filter((c) => c.url !== url);
+			throw new Error(`No calendar at ${url}`);
+		};
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual({ action: 'delete', deleted: 'Family', count: 2, movedTo: 'Me' });
+	});
 });
