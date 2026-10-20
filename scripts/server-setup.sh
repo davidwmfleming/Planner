@@ -98,7 +98,7 @@ sudo install -m 0644 scripts/systemd/planner-backup.service scripts/systemd/plan
 sudo systemctl daemon-reload
 sudo systemctl enable --now planner-backup.timer
 # One backup now, to check it works (and fetch the small helper image it uses).
-sudo systemctl start planner-backup
+sudo systemctl start planner-backup || echo "Warning: the first backup failed; the messages below say why."
 sudo journalctl -u planner-backup -n 3 --no-pager -o cat
 systemctl list-timers planner-backup.timer --no-pager
 
