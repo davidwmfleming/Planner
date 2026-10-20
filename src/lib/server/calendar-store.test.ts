@@ -15,8 +15,8 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 	let dir: string;
 	let store: CalendarStore;
 
-	beforeAll(async () => {
-		dir = mkdtempSync(join(tmpdir(), 'planner-caldav-'));
+	// Starts (or restarts) Radicale on the same folder, then connects a fresh store to it.
+	async function start() {
 		server = spawn('bash', ['scripts/dev-calendar.sh'], {
 			env: { ...process.env, DEV_CALENDAR_DIR: dir, DEV_CALENDAR_PORT: String(PORT) },
 			stdio: 'ignore'
@@ -31,6 +31,17 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		}
 		store = new CalendarStore({ serverUrl: `http://127.0.0.1:${PORT}/`, username: 'david', password: 'dev' });
 		await store.connect();
+	}
+
+	async function stop() {
+		const exited = new Promise((r) => server.once('exit', r));
+		server.kill();
+		await exited;
+	}
+
+	beforeAll(async () => {
+		dir = mkdtempSync(join(tmpdir(), 'planner-caldav-'));
+		await start();
 	}, 15000);
 
 	afterAll(() => {
@@ -97,5 +108,37 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 			['2026-10-12', 'Gym', 'open'],
 			['2026-10-19', 'Gym', 'done']
 		]);
+	});
+
+	it('keeps the planner settings on the Tasks collection, even after the server restarts', async () => {
+		const tasks = await store.ensureCalendar('Tasks', ['task']);
+		const family = await store.ensureCalendar('Family', ['event']);
+		const settings = { categories: ['This month', 'Waiting', 'Kids & school <3'], workCalendar: null, defaultEventCalendar: new URL(family.url).pathname };
+		await store.writeSettings(tasks.url, settings);
+		expect(await store.readSettings(tasks.url)).toEqual(settings);
+
+		await stop();
+		await start();
+		expect(await store.readSettings(tasks.url)).toEqual(settings);
+		// Renaming the collection rewrites its properties; the settings must survive that too.
+		await store.renameCalendar('Family', 'Family & friends');
+		expect(await store.readSettings(tasks.url)).toEqual(settings);
+	}, 15000);
+
+	it('uses the default settings when none are stored', async () => {
+		const blank = await store.ensureCalendar('Blank tasks', ['task']);
+		const me = await store.ensureCalendar('Me', ['event']);
+		const work = await store.ensureCalendar('Work', ['event']);
+		expect(await store.readSettings(blank.url)).toEqual({
+			categories: ['This month', 'Waiting', 'Someday'],
+			workCalendar: new URL(work.url).pathname,
+			defaultEventCalendar: new URL(me.url).pathname
+		});
+	});
+
+	it('uses the defaults if the Tasks collection is gone, and says so when settings cannot be saved', async () => {
+		const gone = new URL('david/no-such-list/', `http://127.0.0.1:${PORT}/`).href;
+		expect((await store.readSettings(gone)).categories).toEqual(['This month', 'Waiting', 'Someday']);
+		await expect(store.writeSettings(gone, { categories: [], workCalendar: null, defaultEventCalendar: null })).rejects.toThrow(/refused to save the settings/);
 	});
 });

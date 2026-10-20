@@ -1,6 +1,7 @@
 // Reads and writes planner items on a CalDAV server (Radicale in production and development).
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
+import { parseSettings, type Settings } from '$lib/settings';
 import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
 
 export interface StoreConfig {
@@ -24,6 +25,11 @@ export interface Calendar {
 	/** Which kinds of item the calendar accepts (from its supported components). */
 	accepts: ItemKind[];
 }
+
+/** The planner's own XML namespace, for the settings property it keeps on the Tasks collection. */
+const PLANNER_NS = 'urn:planner:ns';
+
+const escapeXml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 const ALL_COMPONENTS = { 'comp-filter': { _attributes: { name: 'VCALENDAR' } } };
 
@@ -95,17 +101,42 @@ export class CalendarStore {
 	async renameCalendar(from: string, to: string): Promise<void> {
 		const calendar = this.calendars().find((c) => c.name === from);
 		if (!calendar) return;
-		const escaped = to.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-		const response = await fetch(calendar.url, {
+		const status = await this.proppatch(calendar.url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
+		if (status >= 300) throw new Error(`The calendar server refused to rename "${from}" (${status})`);
+		await this.refreshCalendars();
+	}
+
+	/** The settings kept on a collection (the Tasks one), with defaults for anything not stored. */
+	async readSettings(calendarUrl: string): Promise<Settings> {
+		const [response] = await this.client.propfind({
+			url: calendarUrl,
+			props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
+			depth: '0'
+		});
+		// A missing property (or collection) comes back as 404; that just means the defaults.
+		const raw = response?.ok ? davText(response.props?.plannerSettings) : undefined;
+		return parseSettings(raw, this.calendars());
+	}
+
+	async writeSettings(calendarUrl: string, settings: Settings): Promise<void> {
+		const status = await this.proppatch(calendarUrl, `<p:planner-settings xmlns:p="${PLANNER_NS}">${escapeXml(JSON.stringify(settings))}</p:planner-settings>`);
+		if (status >= 300) throw new Error(`The calendar server refused to save the settings (${status})`);
+	}
+
+	/** Sets one property on a collection and returns the status. Radicale answers 207 even when it refuses
+	 * a property, with the real answer inside, so the first status that isn't a success is returned. */
+	private async proppatch(url: string, prop: string): Promise<number> {
+		const response = await fetch(url, {
 			method: 'PROPPATCH',
 			headers: {
 				Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
 				'Content-Type': 'application/xml; charset=utf-8'
 			},
-			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><d:displayname>${escaped}</d:displayname></d:prop></d:set></d:propertyupdate>`
+			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>${prop}</d:prop></d:set></d:propertyupdate>`
 		});
-		if (!response.ok) throw new Error(`The calendar server refused to rename "${from}" (${response.status})`);
-		await this.refreshCalendars();
+		if (!response.ok) return response.status;
+		const inner = [...(await response.text()).matchAll(/<(?:\w+:)?status>HTTP\/[\d.]+ (\d{3})/g)].map((m) => Number(m[1]));
+		return inner.find((status) => status >= 300) ?? response.status;
 	}
 
 	async listItems(): Promise<StoredItem[]> {
