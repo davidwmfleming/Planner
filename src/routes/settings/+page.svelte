@@ -2,6 +2,7 @@
 	import { enhance } from '$app/forms';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { tick } from 'svelte';
+	import { fetchExport } from '$lib/export-download';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
@@ -56,6 +57,53 @@
 			await stopRename();
 		};
 	};
+
+	// "Download everything": one export at a time; a failure is said here, on the page.
+	let exporting = $state(false);
+	let exportError = $state<string | undefined>();
+	/** A zip the phone wouldn't open the share sheet for (too long after the tap); one more tap shares it. */
+	let unshared = $state<File | undefined>();
+
+	async function downloadEverything() {
+		if (exporting) return;
+		exporting = true;
+		exportError = undefined;
+		unshared = undefined;
+		try {
+			const result = await fetchExport();
+			if ('error' in result) exportError = result.error;
+			else await save(result.file);
+		} finally {
+			exporting = false;
+		}
+	}
+
+	/** The installed app (home screen) has no downloads bar, so there the zip goes to the share sheet when the phone allows it. */
+	const installed = () => matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+
+	async function save(file: File) {
+		unshared = undefined;
+		if (installed() && navigator.canShare?.({ files: [file] })) {
+			try {
+				await navigator.share({ files: [file] });
+				return;
+			} catch (e) {
+				const name = e instanceof DOMException ? e.name : '';
+				if (name === 'AbortError') return; // the share sheet was closed
+				if (name === 'NotAllowedError') {
+					unshared = file;
+					return;
+				}
+				// Any other refusal: save it as an ordinary download instead.
+			}
+		}
+		const url = URL.createObjectURL(file);
+		const link = Object.assign(document.createElement('a'), { href: url, download: file.name });
+		document.body.append(link);
+		link.click();
+		link.remove();
+		setTimeout(() => URL.revokeObjectURL(url), 60_000);
+	}
 
 	function renameKeys(e: KeyboardEvent) {
 		if (e.key === 'Escape') {
@@ -153,6 +201,17 @@
 			</ul>
 			<p class="hint">In this order on the Future tasks list.</p>
 		</section>
+
+		<section aria-labelledby="h-export">
+			<h2 id="h-export">Export</h2>
+			<div class="edit">
+				<!-- aria-disabled, not disabled: a disabled button drops keyboard and screen-reader focus to the page. -->
+				<button type="button" class="btn" aria-disabled={exporting} aria-busy={exporting} onclick={downloadEverything}>{exporting ? 'Making the export…' : 'Download everything (.ics)'}</button>
+				{#if unshared}<button type="button" class="btn primary" onclick={() => unshared && save(unshared)}>Save or share the zip</button>{/if}
+			</div>
+			{#if exportError}<p class="error" role="alert">{exportError}</p>{/if}
+			<p class="hint">A zip with one .ics file per calendar, to keep or to move elsewhere. Import each file on its own, into the calendar it should go in. Apple Calendar and Google Calendar skip the tasks in Tasks.ics; task apps such as Thunderbird read them.</p>
+		</section>
 	</main>
 </div>
 
@@ -221,6 +280,8 @@
 	.announce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
 	button.btn { cursor: pointer; }
+	button.btn:disabled,
+	button.btn[aria-disabled='true'] { color: var(--muted); border-color: var(--muted); cursor: progress; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	.btn.small { font-size: 0.85rem; padding: 0 0.6rem; }
 	.lines li .btn { margin-block: 0.15rem; }

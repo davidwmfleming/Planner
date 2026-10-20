@@ -214,7 +214,7 @@ export class CalendarStore {
 		const response = await fetch(url, {
 			method: 'PROPPATCH',
 			headers: {
-				Authorization: `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`,
+				Authorization: this.authorization(),
 				'Content-Type': 'application/xml; charset=utf-8'
 			},
 			body: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop>${prop}</d:prop></d:set></d:propertyupdate>`,
@@ -223,6 +223,24 @@ export class CalendarStore {
 		if (!response.ok) return response.status;
 		const inner = [...(await response.text()).matchAll(/<(?:\w+:)?status>HTTP\/[\d.]+ (\d{3})/g)].map((m) => Number(m[1]));
 		return inner.find((status) => status >= 300) ?? response.status;
+	}
+
+	/** A whole calendar as one .ics file, time zones included, exactly as the server hands it out.
+	 * Undefined if the calendar has been deleted (on a phone) since the list was read. */
+	async calendarFile(url: string): Promise<string | undefined> {
+		const calendar = this.calendarAt(url);
+		const name = calendar.displayName ?? url;
+		// The time limit covers the whole file, so a server that stops halfway can't hang the export either.
+		const signal = AbortSignal.timeout(this.timeoutMs);
+		try {
+			const response = await fetch(calendar.url, { headers: { Authorization: this.authorization(), Accept: 'text/calendar' }, signal });
+			if (response.status === 404) return undefined;
+			if (!response.ok) throw new Error(`The calendar server would not hand out "${name}" (${response.status})`);
+			return await response.text();
+		} catch (e) {
+			if (signal.aborted) throw new Error(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
+			throw e;
+		}
 	}
 
 	async listItems(): Promise<StoredItem[]> {
@@ -301,6 +319,10 @@ export class CalendarStore {
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
 		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
+	}
+
+	private authorization(): string {
+		return `Basic ${Buffer.from(`${this.config.username}:${this.config.password}`).toString('base64')}`;
 	}
 
 	private calendarAt(url: string): DAVCalendar {
