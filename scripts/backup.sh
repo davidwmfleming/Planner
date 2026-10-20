@@ -23,6 +23,8 @@ case "$KEEP_DAYS" in '' | *[!0-9]*) die "KEEP_DAYS must be a whole number of day
 # Checked first because "docker run -v" would quietly make an empty volume and back that up.
 docker volume inspect "$VOLUME" >/dev/null 2>&1 || die "there is no Docker volume called $VOLUME. Is the planner installed?"
 
+# Folders above BACKUP_DIR (such as /srv/backups) stay open to pass through, so the owner can reach it.
+mkdir -p "$(dirname "$BACKUP_DIR")"
 umask 077
 mkdir -p "$BACKUP_DIR"
 chmod 700 "$BACKUP_DIR"

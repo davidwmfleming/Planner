@@ -74,7 +74,7 @@ volume_has() { volume_files | grep -q "$1"; }
 write_config() {
 	mkdir -p "$WORK/compose"
 	cat > "$WORK/config" <<EOF
-BACKUP_DIR=$WORK/backups
+BACKUP_DIR=$WORK/srv/backups
 KEEP_DAYS=30
 VOLUME=$TEST_VOLUME
 PLANNER_DIR=$WORK/compose

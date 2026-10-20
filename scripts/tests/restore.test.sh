@@ -9,9 +9,9 @@ docker volume rm -f "$TEST_VOLUME" >/dev/null 2>&1 || true
 start_compose
 fill_volume
 bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
-ARCHIVE="$WORK/backups/planner-$(date +%F).tar.gz"
+ARCHIVE="$WORK/srv/backups/planner-$(date +%F).tar.gz"
 EVENT=./collections/collection-root/david/me/dentist.ics
-safety_copies() { find "$WORK/backups" -name 'before-restore-*.tar.gz' | wc -l; }
+safety_copies() { find "$WORK/srv/backups" -name 'before-restore-*.tar.gz' | wc -l; }
 
 echo "== Restoring brings back a deleted calendar file"
 docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" sh -c \
@@ -22,7 +22,7 @@ volume_files >"$WORK/files"
 check "the deleted event is back, owned by Radicale" grep -qx "5232 $EVENT" "$WORK/files"
 check "the password file is back" grep -qx "5232 ./users" "$WORK/files"
 check "files added since the backup are gone" not grep -q added-later.ics "$WORK/files"
-SAFETY=$(find "$WORK/backups" -name 'before-restore-*.tar.gz' | head -n 1)
+SAFETY=$(find "$WORK/srv/backups" -name 'before-restore-*.tar.gz' | head -n 1)
 check "a safety copy of the data before the restore was made" test -n "$SAFETY"
 check "the safety copy holds the newer file" sh -c "tar -tzf '$SAFETY' | grep -q added-later.ics"
 check "the safety copy is private" test "$(stat -c %a "$SAFETY")" = 600

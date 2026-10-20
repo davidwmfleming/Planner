@@ -41,6 +41,7 @@ if [ "$YES" != yes ]; then
 	[ "$answer" = yes ] || die "nothing was changed."
 fi
 
+mkdir -p "$(dirname "$BACKUP_DIR")"
 umask 077
 mkdir -p "$BACKUP_DIR"
 SAFETY="$BACKUP_DIR/before-restore-$(date +%F-%H%M%S).tar.gz"
