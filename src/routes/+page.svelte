@@ -448,7 +448,7 @@
 						</select>
 					</label>
 					{#if newCalendar}
-						<label class="field">New calendar's name <input name="newCalendar" id="f-new-calendar" maxlength="40" required /></label>
+						<label class="field">New calendar's name <input name="newCalendar" id="f-new-calendar" required /></label>
 					{/if}
 				{/if}
 				<label class="field">Repeats

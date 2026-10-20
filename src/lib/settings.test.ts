@@ -92,10 +92,24 @@ describe('checkCalendarName', () => {
 		expect(checkCalendarName('Fam\u200bily', all)).toEqual({ error: 'There is already a calendar called "Family"' });
 	});
 
+	it('keeps a zero-width non-joiner inside a word, where Persian and other scripts need it, but not at the ends', () => {
+		expect(checkCalendarName('\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645', all)).toEqual({ name: '\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645' });
+		expect(checkCalendarName('\u200cHome\u200c', all)).toEqual({ name: 'Home' });
+		expect(checkCalendarName('Home \u200c', all)).toEqual({ name: 'Home' });
+		expect(checkCalendarName('\u200c\u200c', all)).toEqual({ error: 'Give the calendar a name' });
+	});
+
 	it('allows 40 letters but not 41, counting an emoji as one', () => {
 		expect(checkCalendarName('a'.repeat(40), all)).toEqual({ name: 'a'.repeat(40) });
 		expect(checkCalendarName('a'.repeat(41), all)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
 		expect(checkCalendarName(`${'a'.repeat(38)}🎹`, all)).toEqual({ name: `${'a'.repeat(38)}🎹` });
+	});
+
+	it('counts what a person sees as one letter as one: a family emoji, an accent typed separately', () => {
+		const family = '👨\u200d👩\u200d👧';
+		expect(checkCalendarName(`${'a'.repeat(39)}${family}`, all)).toEqual({ name: `${'a'.repeat(39)}${family}` });
+		expect(checkCalendarName(`${'a'.repeat(39)}e\u0301`, all)).toEqual({ name: `${'a'.repeat(39)}e\u0301` });
+		expect(checkCalendarName(`${'a'.repeat(40)}${family}`, all)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
 	});
 
 	it('refuses a name already used by any calendar or list, whatever the case', () => {
@@ -134,6 +148,15 @@ describe('menuLabels', () => {
 			{ path: '/david/me/', name: 'Me' }
 		]).map((c) => c.label);
 		expect(labels).toEqual(['Family (family)', 'family (family-2)', 'Doctors (Ärzte)', 'Doctors (doctors)', 'Me']);
+	});
+
+	it('shows only the end of a long address, so the menu stays readable on a phone', () => {
+		const labels = menuLabels([
+			{ path: '/david/0f8a3c2e-1b4d-4e5f-9a6b-7c8d9e0f1a2b/', name: 'Family' },
+			{ path: '/david/family-from-the-old-ipad/', name: 'Family' },
+			{ path: '/david/family/', name: 'Family' }
+		]).map((c) => c.label);
+		expect(labels).toEqual(['Family (…7c8d9e0f1a2b)', 'Family (…the-old-ipad)', 'Family (family)']);
 	});
 
 	it('keeps the other fields', () => {
