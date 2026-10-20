@@ -185,6 +185,23 @@ describe('moving the items, then deleting the calendar', () => {
 		expect(fake.deleted).toEqual([family.url]);
 	});
 
+	it('moves nothing when the calendar changed since its items were counted, and gives the new count', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a'), doc(family, 'b')] });
+		fake.versions[family.url] = '"v2"';
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
+			refusal(409, { path: '/david/family/', count: 2, version: '"v2"', message: 'Family changed since you looked, so nothing was moved or deleted. It now holds 2 items.' })
+		);
+		expect(fake.moves).toEqual([]);
+	});
+
+	it('after a move that stopped part way, gives the count and version of what is left, so the confirm names it', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: ['a', 'b', 'c'].map((u) => doc(family, u)) });
+		fake.outcomes = ['moved', 'clash'];
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
+			refusal(502, { path: '/david/family/', count: 1, version: '"v2"' })
+		);
+	});
+
 	it('refuses to move items into the calendar being deleted, into Tasks, or into one that is gone', async () => {
 		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a')] });
 		for (const to of ['/david/family/', '/david/tasks/', '/david/gone/', '']) {

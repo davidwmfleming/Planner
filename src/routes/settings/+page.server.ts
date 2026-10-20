@@ -148,18 +148,16 @@ export const actions: Actions = {
 		if ('refusal' in found) return found.refusal;
 		const { store, calendar } = found;
 		const name = shortTitle(calendar.name);
+		if (mode !== 'move' && mode !== 'delete') return refuse(400, 'Choose whether to move the items or delete them too');
 		const held = await contents(store, calendar);
 		if ('refusal' in held) return held.refusal;
-
-		if (mode === 'delete') {
-			const version = String(form.get('version') ?? '');
-			// Something changed (on a phone, say) since David saw the count: he agreed to delete what he saw, not this.
-			if (!version || version !== held.version) {
-				return fail(409, { action: 'delete', path, count: held.documents.length, version: held.version, message: `${name} changed since you looked, so nothing was deleted. It now holds ${items(held.documents.length)}.` });
-			}
-			return finish(store, calendar, version, { action: 'delete' as const, deleted: calendar.name, count: held.documents.length });
+		// Something changed (on a phone, say) since David saw the count: he agreed to what he saw, not this.
+		const version = String(form.get('version') ?? '');
+		if (!version || version !== held.version) {
+			const what = mode === 'move' ? 'moved or deleted' : 'deleted';
+			return fail(409, { action: 'delete', path, count: held.documents.length, version: held.version, message: `${name} changed since you looked, so nothing was ${what}. It now holds ${items(held.documents.length)}.` });
 		}
-		if (mode !== 'move') return refuse(400, 'Choose whether to move the items or delete them too');
+		if (mode === 'delete') return recounted(store, calendar, await finish(store, calendar, version, { action: 'delete' as const, deleted: calendar.name, count: held.documents.length }));
 
 		const to = calendarAtPath(eventCalendars(store), String(form.get('to') ?? ''));
 		if (!to) return refuse(400, 'Choose a calendar to move the items to; if it was deleted elsewhere, reload the page');
@@ -180,15 +178,15 @@ export const actions: Actions = {
 		const total = held.documents.length;
 		if (tally.moved.length < total) {
 			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, tally);
-			return refuse(502, unfinished(name, toName, total, tally));
+			return recounted(store, calendar, refuse(502, unfinished(name, toName, total, tally)));
 		}
 		// Read again, so the delete can't take an item that arrived (on a phone) while the others were moved.
 		const left = await contents(store, calendar);
 		if ('refusal' in left) return left.refusal;
 		if (left.documents.length > 0) {
-			return refuse(409, `Moved ${items(total)} to ${toName}, but ${left.documents.length} more arrived in ${name} meanwhile, so it is still there. Reload the page and delete it again to move those too.`);
+			return recounted(store, calendar, refuse(409, `Moved ${items(total)} to ${toName}, but ${left.documents.length} more arrived in ${name} meanwhile, so it is still there. Reload the page and delete it again to move those too.`));
 		}
-		return finish(store, calendar, left.version, { action: 'delete' as const, deleted: calendar.name, count: total, movedTo: to.name });
+		return recounted(store, calendar, await finish(store, calendar, left.version, { action: 'delete' as const, deleted: calendar.name, count: total, movedTo: to.name }));
 	}
 };
 
@@ -221,6 +219,18 @@ async function deletable(path: string): Promise<{ store: CalendarStore; calendar
 		return { refusal: refuse(400, `${name} is the only event calendar, and new events need somewhere to go. Add another calendar before deleting this one.`) };
 	}
 	return { store, calendar };
+}
+
+/** A refusal given after items may have moved or changed, with what the calendar holds now and its version, so
+ * the confirm names exactly what a second tap would do. Unchanged if that can't be read (the calendar is gone, say). */
+async function recounted(store: CalendarStore, calendar: Calendar, result: Deleted | Refusal) {
+	if (!('status' in result)) return result;
+	try {
+		const now = await store.documents(calendar.url);
+		return fail(result.status, { ...result.data, path: pathOf(calendar.url), count: now.documents.length, version: now.version });
+	} catch {
+		return result;
+	}
 }
 
 /** What a calendar holds now, and its version; or the refusal to show if that can't be read. */

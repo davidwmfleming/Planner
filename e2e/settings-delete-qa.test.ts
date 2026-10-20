@@ -74,3 +74,27 @@ test('a refused move is reported with its own calendar when another Delete was t
 		await deleteCalendar(request, eventsOnly.path);
 	}
 });
+
+test('after a move that stopped part way, the confirm names what is left, not the old count', async ({ page, request }, info) => {
+	const from = await calendarWith(request, info, 'Part');
+	const to = await calendarWith(request, info, 'Into');
+	await putEntry(request, from.path, 'a.ics', event(`a-${from.slug}`, 'Moves'));
+	await putEntry(request, from.path, 'b.ics', event(`b-${from.slug}`, 'Stays'));
+	// Another item already has that file name in the target, so b.ics can't go there.
+	await putEntry(request, to.path, 'b.ics', event(`other-${to.slug}`, 'Someone else'));
+	try {
+		await page.goto('/settings');
+		const calendars = calendarsOn(page);
+		await calendars.getByRole('button', { name: `Delete ${from.name}` }).click();
+		const confirm = calendars.getByRole('group', { name: `Delete ${from.name}` });
+		await confirm.getByLabel('Calendar to move them to').selectOption({ label: to.name });
+		await confirm.getByRole('button', { name: `Move 2 items to ${to.name} and delete ${from.name}` }).click();
+		await expect(confirm.getByRole('alert')).toContainText('Moved 1 of 2 items');
+		expect(await hasEntry(request, from.path, 'b.ics')).toBe(true);
+		// The confirm button must name exactly what a second tap would do. On c4efaad it still says 2 items.
+		await expect(confirm.getByRole('button', { name: /^Move 2 items/ })).toHaveCount(0);
+	} finally {
+		await deleteCalendar(request, from.path);
+		await deleteCalendar(request, to.path);
+	}
+});
