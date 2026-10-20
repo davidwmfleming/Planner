@@ -27,6 +27,10 @@ Work meetings are entered by hand into the **Work** calendar (created automatica
 
 The starting calendars (Me, Family, Workouts, Morgan Meals, Work and the Tasks list) are made only on a first run, when the calendar server has no event calendars yet, so a calendar deleted on a phone stays deleted.
 
+## Settings
+
+The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. For now it only shows them; changing them from this page comes in later versions. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
+
 ## Running it on the server (or a test VM)
 
 The planner and its calendar server run in Docker (`compose.yaml`), reachable only over Tailscale with an https address from Tailscale Serve. All calendar data lives in the Compose volume `planner_data`, which the nightly backup covers. On a fresh Ubuntu Server with your user able to `sudo`:

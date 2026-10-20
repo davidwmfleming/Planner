@@ -328,6 +328,14 @@
 			<a class="btn" href={pageUrl(data.next)} aria-label="Next page">›</a>
 			<input type="date" id="jump" aria-label="Go to date" value={data.start} onchange={onJump} />
 		</nav>
+		<!-- A drawn gear rather than ⚙, which some phones show as a colour emoji. -->
+		<a class="btn gear" href="/settings" aria-label="Settings">
+			<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor">
+				<circle cx="12" cy="12" r="8.5" stroke-width="3.5" stroke-dasharray="3.34 3.34" />
+				<circle cx="12" cy="12" r="6.5" stroke-width="2.5" />
+				<circle cx="12" cy="12" r="2" stroke-width="2" />
+			</svg>
+		</a>
 	</header>
 
 	{#if gestureMessage}<p class="error" role="alert">{gestureMessage}</p>{/if}
@@ -494,6 +502,7 @@
 		text-decoration: none;
 	}
 	input[type='date'] { padding: 0 0.4rem; }
+	.gear { padding: 0; }
 	.wrap { touch-action: pan-y; }
 	.page { margin-top: 0.4rem; }
 	/* Dragging an item: it gets a dashed outline, and the day it would land on a thick one. */
@@ -615,9 +624,9 @@
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: 1fr; }
-		/* Title and month on one line, all four controls on the next: no third row eating the page. */
-		h1 { flex-basis: 100%; }
-		nav { flex-wrap: nowrap; width: 100%; }
+		/* Title, month and the gear on one line, the four page controls on the next: no third row eating the page. */
+		h1 { flex: 1; }
+		nav { flex-wrap: nowrap; width: 100%; order: 1; }
 		input[type='date'] { flex: 1; min-width: 0; font-size: 0.95rem; }
 	}
 </style>
