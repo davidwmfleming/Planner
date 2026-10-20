@@ -220,7 +220,12 @@ export const actions: Actions = {
 		const found = await findItem(form);
 		if (!('item' in found)) return found;
 		const { store, item } = found;
-		return change(`delete "${shortTitle(item.title)}"`, () => store.remove(item));
+		// Already gone (deleted on a phone, or an earlier delete that got no answer landed after all) is done, not a failure.
+		return change(`delete "${shortTitle(item.title)}"`, () =>
+			store.remove(item).catch((e) => {
+				if (!(e instanceof RefusedError && GONE.includes(e.status))) throw e;
+			})
+		);
 	},
 
 	/** Removes one day of a repeating item and keeps the rest of the series. */
@@ -323,8 +328,16 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	return fail(502, {
 		message: answered
 			? `"${title}" may now be in two calendars, because it seems to have been moved on another device at the same time. Reload the page and delete the one you don't want.`
-			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. Reload the page and delete the one you don't want.`
+			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. ${waitThenDelete(store, old)}`
 	});
+}
+
+/** After a delete that got no answer: it may still land, so deleting the other copy straight away could leave none.
+ * Say to wait, and which copy to delete: the one whose delete is pending, named as the menus name its calendar. */
+function waitThenDelete(store: Awaited<ReturnType<typeof getStore>>, pending: StoredItem) {
+	const calendars = menuLabels(store.calendars().map((c) => ({ path: pathOf(c.url), name: c.name })));
+	const where = calendars.find((c) => c.path === pathOf(pending.calendarUrl))?.label ?? 'the calendar it came from';
+	return `Wait a minute before reloading the page; then, if it's still in two, delete the one in ${where}.`;
 }
 
 /** The calendar server refused to remove the old copy, so it is surely still there: take the new one back out.
@@ -337,6 +350,8 @@ async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: Stored
 		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
 	} catch (e) {
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
+		// No answer: the new copy's delete may still land, so the old one must not be deleted straight away.
+		if (!refused(e)) return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, and didn't confirm it took the new copy back out. ${waitThenDelete(store, copy)}` });
 		return fail(502, { message: `"${title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
 	}
 }
