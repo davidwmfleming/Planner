@@ -1,12 +1,12 @@
 <script lang="ts">
 	import { deserialize, enhance } from '$app/forms';
-	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
+	import { beforeNavigate, goto, invalidateAll, preloadData } from '$app/navigation';
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
-	import { dayBegun, pageForNewDay, untilMidnight } from '$lib/new-day';
+	import { dataAddress, dataAnswered, dayBegun, pageForNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
@@ -349,7 +349,7 @@
 	// A page showing today moves on to the new today's page; one flipped to on purpose stays, refreshed.
 	// Nothing changes under a line being written or saved, a mark or tap saving, a stroke or the details sheet: it waits.
 	const WHILE_WRITING = 10_000;
-	// The server's clock may be a little behind this one: ask again shortly, a few times.
+	// The server's clock may be a little behind this one, or it can't be reached yet: ask again shortly, a few times.
 	const SERVER_BEHIND = 60_000;
 	let seen: { today: string; todayPage: string; start: string } | undefined;
 	let dayTimer: ReturnType<typeof setTimeout> | undefined;
@@ -360,6 +360,25 @@
 	const busy = () =>
 		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 ||
 		[...document.querySelectorAll<HTMLInputElement>('input.entry')].some((i) => i.value.trim());
+	/** Whether this page's data can be read now. A refresh that fails would swap the planner for the error screen
+	 * (no Wi-Fi yet on waking, the calendar server down), so the page only refreshes once a try has worked. */
+	async function answers() {
+		try {
+			const response = await fetch(dataAddress(location.pathname, location.search), { cache: 'no-store' });
+			return dataAnswered(response.status, await response.text());
+		} catch {
+			return false;
+		}
+	}
+	/** The same for another page; a page read this way is then shown without reading it again. */
+	async function preloaded(address: string) {
+		try {
+			const result = await preloadData(address);
+			return result.type === 'loaded' && result.status === 200;
+		} catch {
+			return false;
+		}
+	}
 	async function newDay() {
 		if (checking) return;
 		checking = true;
@@ -368,16 +387,22 @@
 		try {
 			seen ??= shown();
 			const waiting = busy();
-			if (!waiting && dayBegun(new Date(), data.today)) await invalidateAll();
+			let failed = false;
+			if (!waiting && dayBegun(new Date(), data.today)) {
+				if (await answers()) await invalidateAll();
+				else failed = true;
+			}
 			const to = pageForNewDay(seen, shown());
 			const held = waiting || busy();
 			if (to && !held) {
-				await goto(pageUrl(to), { replaceState: true });
-				seen = shown();
+				if (await preloaded(pageUrl(to))) {
+					await goto(pageUrl(to), { replaceState: true });
+					seen = shown();
+				} else failed = true;
 			} else if (!to) seen = shown();
 			const behind = dayBegun(new Date(), data.today);
-			tries = behind && !held ? tries + 1 : 0;
-			wait = held && (to || behind) ? WHILE_WRITING : behind && tries <= 5 ? SERVER_BEHIND : untilMidnight(new Date());
+			tries = (behind || failed) && !held ? tries + 1 : 0;
+			wait = held && (to || behind) ? WHILE_WRITING : (behind || failed) && tries <= 5 ? SERVER_BEHIND : untilMidnight(new Date());
 		} catch {
 			wait = SERVER_BEHIND;
 		} finally {

@@ -82,3 +82,41 @@ test('a line half written at midnight is not lost: the page waits until it is sa
 	await page.goto(`/?page=${MON}`);
 	await expect(page.locator(`section.day[data-date="${WED}"]`).getByText(title)).toBeVisible();
 });
+
+test('woken before the network is back: the planner stays on screen, then moves on once it is', async ({ page, context }) => {
+	await serverDay(page, WED);
+	await page.clock.install({ time: at(21, 0) });
+	await page.goto('/');
+	await serverDay(page, THU);
+	await page.clock.setSystemTime(at(7, 0, 16));
+	await context.setOffline(true);
+	const tried = page.waitForEvent('requestfailed', (r) => r.url().includes('__data.json'));
+	await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+	await tried;
+	await expect(todayTag(page, WED)).toBeVisible();
+
+	await context.setOffline(false);
+	await page.clock.runFor('01:05');
+	await expect(todayTag(page, THU)).toBeVisible();
+});
+
+test('calendar server down at midnight: the planner stays on screen, then moves on once it answers', async ({ page }) => {
+	await serverDay(page, WED);
+	await page.clock.install({ time: at(23, 59) });
+	await page.goto(`/?page=${MON}`);
+	// What the planner's server sends when the calendar server is down as the page is read.
+	const message = "The calendar server isn't answering. Check that it is running, then reload.";
+	const down = { type: 'data', nodes: [{ type: 'skip' }, { type: 'error', error: { message }, status: 503 }] };
+	let asked = 0;
+	await page.route('**/__data.json**', (r) => (asked++, r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(down) })));
+	await serverDay(page, THU);
+	await page.clock.runFor('01:10');
+	await expect.poll(() => asked).toBeGreaterThan(0);
+	await expect(todayTag(page, WED)).toBeVisible();
+	await expect(page.getByText(message)).toHaveCount(0);
+
+	await page.unroute('**/__data.json**');
+	await page.clock.runFor('01:05');
+	await expect(todayTag(page, THU)).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`\\?page=${THU}$`));
+});

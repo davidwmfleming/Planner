@@ -25,3 +25,17 @@ export function pageForNewDay(before: Shown, after: Shown): string | undefined {
 	if (after.today === before.today || after.start !== before.start || before.start !== before.todayPage) return undefined;
 	return after.start === after.todayPage ? undefined : after.todayPage;
 }
+
+/** Where SvelteKit reads a page's data from: the page's own path and query, asked for as data. */
+export const dataAddress = (pathname: string, search: string) => `${pathname.replace(/\/$/, '')}/__data.json${search}`;
+
+/** Whether a page's data came back whole. A load that failed (the calendar server down) still answers 200, with an error in it. */
+export function dataAnswered(status: number, body: string): boolean {
+	if (status !== 200) return false;
+	try {
+		const answer = JSON.parse(body.split('\n')[0]);
+		return answer?.type === 'data' && Array.isArray(answer.nodes) && !answer.nodes.some((n: { type?: string } | null) => n?.type === 'error');
+	} catch {
+		return false;
+	}
+}

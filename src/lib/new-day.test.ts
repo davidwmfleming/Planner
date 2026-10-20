@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayBegun, pageForNewDay, untilMidnight } from './new-day';
+import { dataAddress, dataAnswered, dayBegun, pageForNewDay, untilMidnight } from './new-day';
 
 // Wednesday 21 October 2026 is on the Mon–Wed page (from the 19th); Thursday starts the Thu–Sun page.
 const wed = { today: '2026-10-21', todayPage: '2026-10-19', start: '2026-10-19' };
@@ -42,5 +42,29 @@ describe('pageForNewDay', () => {
 	});
 	it('does nothing when the page shown already is the new today’s (an address with no page in it)', () => {
 		expect(pageForNewDay(wed, { ...thu, start: thu.todayPage })).toBeUndefined();
+	});
+});
+
+describe('dataAddress', () => {
+	it('asks for the page’s data at its own path and query', () => {
+		expect(dataAddress('/', '')).toBe('/__data.json');
+		expect(dataAddress('/', '?page=2026-10-19')).toBe('/__data.json?page=2026-10-19');
+	});
+});
+
+describe('dataAnswered', () => {
+	const ok = JSON.stringify({ type: 'data', nodes: [{ type: 'skip' }, { type: 'data', data: [{}], uses: {} }] });
+	it('is true only for page data that came back whole', () => {
+		expect(dataAnswered(200, ok)).toBe(true);
+		expect(dataAnswered(200, `${ok}\n{"type":"chunk"}`)).toBe(true);
+	});
+	it('is false when the calendar server is down (an error inside a 200)', () => {
+		const down = { type: 'data', nodes: [{ type: 'skip' }, { type: 'error', error: { message: 'down' }, status: 503 }] };
+		expect(dataAnswered(200, JSON.stringify(down))).toBe(false);
+	});
+	it('is false for a failed answer, a redirect or something that is not page data', () => {
+		expect(dataAnswered(502, ok)).toBe(false);
+		expect(dataAnswered(200, JSON.stringify({ type: 'redirect', location: '/' }))).toBe(false);
+		expect(dataAnswered(200, '<html>Bad gateway</html>')).toBe(false);
 	});
 });
