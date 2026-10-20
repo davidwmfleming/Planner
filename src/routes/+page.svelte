@@ -111,8 +111,14 @@
 		if (!item) return;
 		const row = done.row;
 		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
-		if (read === 'tick' && !row?.classList.contains('done')) return send('mark', { ...item, state: 'done' });
-		if (read === 'scratch' && !row?.classList.contains('dropped')) return send('mark', { ...item, state: 'dropped' });
+		const mark = read === 'tick' ? 'done' : read === 'scratch' ? 'dropped' : undefined;
+		if (!mark || !row || row.classList.contains(mark)) return;
+		// Show the mark at once; the page redraws from the server when the save is done.
+		row.classList.add('marked', mark);
+		return send('mark', { ...item, state: mark }).then((ok) => {
+			row.classList.remove('marked');
+			if (!ok) row.classList.remove(mark);
+		});
 	}
 	function onStrokeCancel() {
 		stroke = null;
@@ -148,10 +154,17 @@
 	async function send(action: string, fields: Record<string, string>) {
 		const body = new FormData();
 		for (const [k, v] of Object.entries(fields)) body.set(k, v);
-		const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
-		const result = deserialize(await response.text());
+		let result;
+		try {
+			const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+			result = deserialize(await response.text());
+		} catch {
+			gestureMessage = 'That did not save. Check the connection and try again.';
+			return false;
+		}
 		gestureMessage = result.type === 'failure' ? String(result.data?.message ?? 'That did not work; try again') : result.type === 'error' ? 'That did not work; try again' : '';
 		await invalidateAll();
+		return result.type === 'success';
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
 	// Tapping away from a line saves it too, so handwriting needs no Enter. The cursor then stays where you tapped.
@@ -513,6 +526,7 @@
 	.allday { color: var(--pen); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 4.4em; }
 	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
 	li.done .title, li.done .time { color: var(--muted); }
+	li.done.marked .sq::after { content: '✓'; }
 	li.dropped .title, li.dropped .time { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
 	.blank form { flex: 1; display: flex; }
 	.entry {

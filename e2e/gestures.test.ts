@@ -109,3 +109,15 @@ test('a check mark works straight after writing on a line, away from that line',
 	await expect(row).toHaveClass(/done/);
 	await expect(page.locator(`section.day[data-date="${wed}"]`).getByText(`Next thing ${name}`)).toBeVisible();
 });
+
+test('one stroke across an item and back again strikes it out', async ({ page }, info) => {
+	const name = unique('Water the plants', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await onScreen(row);
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	// Left-handed, as David writes: to the right, then back to the left.
+	await draw(page, [[box.x + 60, y], [box.x + 180, y + 3], [box.x + 70, y + 6]]);
+	await expect(row).toHaveClass(/dropped/);
+});
