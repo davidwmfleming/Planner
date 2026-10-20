@@ -6,7 +6,8 @@
 # It stops the planner, saves the current data as before-restore-<time>.tar.gz in the backup
 # folder (so the restore itself can be undone), replaces the data with the archive, and starts
 # the planner again. It asks before changing anything (--yes skips the question).
-# The safety copy is made by backup.sh (next to this script), with the same care over who owns it.
+# The safety copy is made by the installed backup (/usr/local/sbin/planner-backup, or backup.sh
+# next to this script if it isn't installed), with the same care over who owns it.
 # Settings: /etc/default/planner-backup (PLANNER_BACKUP_CONFIG points elsewhere, for the tests).
 set -euo pipefail
 
@@ -17,7 +18,11 @@ BACKUP_DIR="${BACKUP_DIR:-/srv/backups/planner}"
 VOLUME="${VOLUME:-planner_data}"
 PLANNER_DIR="${PLANNER_DIR:-/srv/planner}"
 IMAGE="${IMAGE:-debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f}"
-BACKUP_SCRIPT="$(dirname "$0")/backup.sh"
+LOCK="${PLANNER_BACKUP_LOCK:-/run/planner-backup.lock}" # shared with backup.sh
+# The installed backup (the one the nightly job runs, which only root can change); the checkout's
+# backup.sh only if it isn't installed.
+BACKUP_SCRIPT="${PLANNER_INSTALLED_BACKUP:-/usr/local/sbin/planner-backup}"
+[ -f "$BACKUP_SCRIPT" ] || BACKUP_SCRIPT="$(dirname "$0")/backup.sh"
 
 die() { echo "Restore stopped: $1" >&2; exit 1; }
 
@@ -45,13 +50,15 @@ if [ "$YES" != yes ]; then
 fi
 
 # No backup may run while the data is being replaced; a nightly one that is running is waited for.
-exec 9<"$BACKUP_DIR"
+(umask 077 && : >>"$LOCK") # only root may open it
+exec 9>>"$LOCK"
 flock -w 1800 9 || die "a backup has been running for 30 minutes."
 SAFETY_NAME="before-restore-$(date +%F-%H%M%S).tar.gz"
 SAFETY="${BACKUP_DIR%/}/$SAFETY_NAME"
 docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull -q "$IMAGE" >/dev/null
 
 STAGE=stopping
+SAFETY_MADE=no
 on_exit() {
 	status=$?
 	[ "$status" = 0 ] && return
@@ -62,7 +69,7 @@ on_exit() {
 		echo "The data was restored, but the planner didn't start. Try:  cd $PLANNER_DIR && sudo docker compose up -d" >&2
 	else
 		echo "Restore failed before any data was changed; starting the planner again." >&2
-		rm -f "$SAFETY"
+		[ "$SAFETY_MADE" = no ] || rm -f "$SAFETY"
 		compose up -d >&2 || true
 	fi
 }
@@ -74,6 +81,7 @@ compose down
 echo "== Saving the current data"
 STAGE=saving
 PLANNER_BACKUP_LOCKED=yes bash "$BACKUP_SCRIPT" --safety-copy "$SAFETY_NAME"
+SAFETY_MADE=yes
 echo "Safety copy: $SAFETY"
 
 echo "== Putting back the copy"

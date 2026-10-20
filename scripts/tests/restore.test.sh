@@ -30,12 +30,12 @@ check "it says where the safety copy is" grep -q "before-restore-" "$WORK/out"
 check "the planner is running again" compose_running
 
 echo "== A restore waits for a backup that is running"
-flock "$WORK/srv/backups" sleep 3 &
+flock "$PLANNER_BACKUP_LOCK" sleep 6 &
 holder=$!
 sleep 0.5
 start=$(date +%s)
 bash "$REPO/scripts/restore.sh" --yes "$ARCHIVE" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "restore.sh exits cleanly"; }
-check "it waited for the backup to finish" test $(($(date +%s) - start)) -ge 2
+check "it waited for the backup to finish" test $(($(date +%s) - start)) -ge 5
 wait "$holder"
 check "the deleted event is still back" volume_has dentist.ics
 COPIES=$(safety_copies)
@@ -46,6 +46,27 @@ if echo no | bash "$REPO/scripts/restore.sh" "$ARCHIVE" >"$WORK/out" 2>&1; then 
 check "the data is untouched" not volume_has dentist.ics
 check "the planner was left running" compose_running
 check "no extra safety copy" test "$(safety_copies)" = "$COPIES"
+
+echo "== The installed backup (/usr/local/sbin/planner-backup) makes the safety copy when there is one"
+printf '#!/usr/bin/env bash\ntouch "%s/installed-ran"\nexec bash "%s/scripts/backup.sh" "$@"\n' "$WORK" "$REPO" >"$WORK/installed-backup"
+chmod 755 "$WORK/installed-backup"
+PLANNER_INSTALLED_BACKUP="$WORK/installed-backup" bash "$REPO/scripts/restore.sh" --yes "$ARCHIVE" >"$WORK/out" 2>&1 ||
+	{ cat "$WORK/out"; bad "restore.sh exits cleanly"; }
+check "the installed copy was run" test -e "$WORK/installed-ran"
+check "the planner is running again" compose_running
+COPIES=$(safety_copies)
+
+echo "== A safety copy this run didn't make is never removed"
+# Copies with the names the next few seconds would get, so the safety copy can't be saved.
+for s in 0 1 2 3 4 5 6 7 8 9; do
+	echo "an earlier safety copy" >"$WORK/srv/backups/before-restore-$(date -d "+$s seconds" +%F-%H%M%S).tar.gz"
+done
+COPIES=$(safety_copies)
+if bash "$REPO/scripts/restore.sh" --yes "$ARCHIVE" >"$WORK/out" 2>&1; then bad "restore.sh stops"; else ok "restore.sh stops"; fi
+check "all the earlier safety copies are still there" test "$(safety_copies)" = "$COPIES"
+check "the planner is running again" compose_running
+find "$WORK/srv/backups" -name 'before-restore-*' -size -100c -delete
+COPIES=$(safety_copies)
 
 echo "== A file that isn't a planner backup is refused"
 echo "not an archive" >"$WORK/junk.tar.gz"
