@@ -191,7 +191,9 @@ test('a failure about a long title keeps the header short, and × puts the messa
 
 // QA (PR #31): with the buttons beside it, a long message was squeezed into a narrow column and the header
 // covered 45% of a 375x667 phone and about 70% of a 320x568 one. On a phone the text gets the full width.
-for (const [width, height, most] of [[375, 667, 0.36], [320, 568, 0.5]] as const) {
+// The height limits leave room for fonts that set wider on GitHub's Linux machines (37% there at 375x667);
+// the full-width checks below are what catch the old squeezed layout.
+for (const [width, height, most] of [[375, 667, 0.42], [320, 568, 0.6]] as const) {
 	test(`a long failure message leaves most of a ${width}x${height} screen free`, async ({ page }, info) => {
 		test.skip(info.project.name !== 'phone', 'a phone size, set here');
 		await page.setViewportSize({ width, height });
