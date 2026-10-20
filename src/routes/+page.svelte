@@ -384,9 +384,11 @@
 		<!-- In the header, which stays at the top of the screen, so a message is seen however far down the page is scrolled. -->
 		{#if gestureMessage}
 			<div class="trouble">
+				<span class="trouble-buttons">
+					{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+					<button type="button" class="btn close" aria-label="Close the message" onclick={() => (gestureMessage = '')}>×</button>
+				</span>
 				<p class="error" role="alert">{gestureMessage}</p>
-				{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
-				<button type="button" class="btn close" aria-label="Close the message" onclick={() => (gestureMessage = '')}>×</button>
 			</div>
 		{/if}
 	</header>
@@ -505,9 +507,11 @@
 					<!-- In the Save bar, which stays on screen on a phone while the rest of the sheet scrolls. -->
 					{#if sheetMessage}
 						<div class="trouble" bind:this={sheetTrouble}>
+							<span class="trouble-buttons">
+								{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+								<button type="button" class="btn close" aria-label="Close the message" onclick={() => (sheetMessage = '')}>×</button>
+							</span>
 							<p class="error" role="alert">{sheetMessage}</p>
-							{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
-							<button type="button" class="btn close" aria-label="Close the message" onclick={() => (sheetMessage = '')}>×</button>
 						</div>
 					{/if}
 					{#if editing.occurrence}
@@ -685,6 +689,9 @@
 	.actions .trouble { order: -1; }
 	.trouble .error { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 	.trouble .close { font-size: 1.4rem; line-height: 1; padding-inline: 0.7rem; }
+	/* The buttons come first, for the phone layout below; beside the text they go after it. */
+	.trouble-buttons { display: contents; }
+	.trouble .error { order: -1; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
@@ -698,5 +705,10 @@
 		h1 { flex: 1; }
 		nav { flex-wrap: nowrap; width: 100%; order: 1; }
 		input[type='date'] { flex: 1; min-width: 0; font-size: 0.95rem; }
+		/* A message beside its buttons is squeezed into a narrow column many lines tall. Here Reload and × sit
+		   together in the top corner, and the text wraps round them, then runs the box's full width. */
+		.trouble { display: flow-root; border: 2px solid var(--ink); border-radius: 6px; padding: 0.15rem 0.15rem 0.15rem 0.5rem; }
+		.trouble .error { display: inline; border: 0; padding: 0; font-size: 0.95rem; }
+		.trouble-buttons { display: flex; gap: 0.3rem; float: right; margin-left: 0.3rem; }
 	}
 </style>

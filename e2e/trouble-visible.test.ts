@@ -188,3 +188,40 @@ test('a failure about a long title keeps the header short, and × puts the messa
 	await expect(sheet.getByRole('alert')).toHaveCount(0);
 	await expect(sheet).toBeVisible();
 });
+
+// QA (PR #31): with the buttons beside it, a long message was squeezed into a narrow column and the header
+// covered 45% of a 375x667 phone and about 70% of a 320x568 one. On a phone the text gets the full width.
+for (const [width, height, most] of [[375, 667, 0.36], [320, 568, 0.5]] as const) {
+	test(`a long failure message leaves most of a ${width}x${height} screen free`, async ({ page }, info) => {
+		test.skip(info.project.name !== 'phone', 'a phone size, set here');
+		await page.setViewportSize({ width, height });
+		const name = unique('Pick up the dry cleaning and then the groceries for the weekend party at Morgan\'s place', info);
+		const row = await addTask(page, name);
+		// The longest message a tap gets: a title cut to 40 characters, and a Reload button.
+		const message = 'The calendar server didn\'t save the mark on "Pick up the dry cleaning and then the g…". Reload the page and try again.';
+		await page.route('**/*&/mark', (r) => r.fulfill(refused(message)));
+		await row.getByRole('button', { name: `Tick ${name}` }).click();
+		const alert = page.getByRole('alert');
+		await expect(alert).toBeVisible();
+		const header = (await page.getByRole('banner').boundingBox())!;
+		expect(header.height).toBeLessThan(height * most);
+		// The text runs the box's full width, not a narrow column beside the buttons.
+		const fullWidth = async (said: typeof alert) =>
+			said.evaluate((el) => el.getBoundingClientRect().width / el.closest('.trouble')!.getBoundingClientRect().width);
+		expect(await fullWidth(alert)).toBeGreaterThan(0.8);
+
+		await page.unroute('**/*&/mark');
+		await page.getByRole('button', { name: 'Close the message' }).click();
+		await row.getByRole('button', { name: `Details for ${name}` }).click();
+		const sheet = page.getByRole('dialog', { name: 'Details' });
+		await page.route('**/*&/save', (r) => r.fulfill(refused(message.replace('the mark on ', ''))));
+		await sheet.getByRole('button', { name: 'Save' }).click();
+		const said = sheet.getByRole('alert');
+		await expect(said).toBeVisible();
+		expect(await fullWidth(said)).toBeGreaterThan(0.8);
+		// The message and the Save bar under it together still leave room to see the sheet.
+		const bar = (await sheet.locator('.actions').boundingBox())!;
+		expect(bar.height).toBeLessThan(height * most);
+		await expect(sheet.getByRole('button', { name: 'Save' })).toBeInViewport();
+	});
+}
