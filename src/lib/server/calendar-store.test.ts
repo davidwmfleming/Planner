@@ -61,6 +61,36 @@ describe('CalendarStore without a server', () => {
 		expect((await store.listItems()).map((i) => i.title)).toEqual(['Mine']);
 	});
 
+	it('skips items whose address is not a plain file in their calendar (a query, a fragment, a sub-folder, the calendar itself)', async () => {
+		const ics = (uid: string) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:20261019T120000Z\r\nDTSTART;VALUE=DATE:20261020\r\nSUMMARY:${uid}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+		const store = storeWith({
+			propfind: async () => [listing('/david/me/', 'Me')],
+			calendarQuery: async () => [
+				{ href: '/david/me/a.ics', props: { calendarData: ics('Plain') } },
+				{ href: '/david/me/b.ics?x=1', props: { calendarData: ics('Query') } },
+				{ href: '/david/me/c.ics#top', props: { calendarData: ics('Fragment') } },
+				{ href: '/david/me/sub/d.ics', props: { calendarData: ics('Sub-folder') } },
+				{ href: '/david/me/', props: { calendarData: ics('Itself') } }
+			]
+		});
+		expect((await store.listItems()).map((i) => i.title)).toEqual(['Plain']);
+	});
+
+	it('never moves a document whose file name carries a query or a fragment', async () => {
+		const asked: string[] = [];
+		const store = storeWith({}, 100);
+		(store as unknown as { davCalendars: unknown }).davCalendars = [{ url: 'http://127.0.0.1:1/david/from/' }, { url: 'http://127.0.0.1:1/david/to/' }];
+		(store as unknown as { send: unknown }).send = async (method: string, url: string) => {
+			asked.push(`${method} ${url}`);
+			return new Response(null, { status: 201 });
+		};
+		for (const name of ['a.ics?x=1', 'a.ics#top', '?', '#']) {
+			const doc = { calendarUrl: 'http://127.0.0.1:1/david/from/', url: `http://127.0.0.1:1/david/from/${name}`, etag: '"1"', ics: '' };
+			expect(await store.moveDocument(doc, 'http://127.0.0.1:1/david/to/')).toBe('kept');
+		}
+		expect(asked).toEqual([]);
+	});
+
 	it('treats a journal-only calendar as neither events nor tasks', async () => {
 		const store = storeWith({ propfind: async () => [listing('/david/notes/', 'Notes', ['VJOURNAL']), listing('/david/any/', 'Any', [])] });
 		await store.refreshCalendars();

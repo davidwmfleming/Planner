@@ -327,9 +327,13 @@ export class CalendarStore {
 		for (const res of responses) {
 			const ics = davText(res.props?.calendarData);
 			if (!res.href || !ics?.trim()) continue;
-			const url = new URL(res.href, calendar.url).href;
-			// Saving or deleting an item sends the password to its address, so it must be inside its calendar.
-			if (!url.startsWith(calendar.url)) continue;
+			const address = new URL(res.href, calendar.url);
+			const url = address.href;
+			// Saving, deleting or moving an item sends the password to its address, so it must be a plain file
+			// directly inside its calendar: no query or fragment, not a sub-folder, not the calendar itself.
+			if (!url.startsWith(calendar.url) || address.search || address.hash) continue;
+			const file = url.slice(calendar.url.length);
+			if (!file || file.includes('/')) continue;
 			documents.push({ calendarUrl: calendar.url, url, etag: davText(res.props?.getetag), ics });
 		}
 		return documents;
@@ -342,7 +346,8 @@ export class CalendarStore {
 	async moveDocument(doc: StoredDocument, toCalendarUrl: string): Promise<MoveOutcome> {
 		const to = this.calendarAt(toCalendarUrl);
 		const filename = doc.url.startsWith(doc.calendarUrl) ? doc.url.slice(doc.calendarUrl.length) : '';
-		if (!filename || filename.includes('/') || to.url === doc.calendarUrl) return 'kept';
+		// Only a plain file name: a query or fragment would send the copy somewhere other than a file in the new calendar.
+		if (!filename || /[/?#]/.test(filename) || to.url === doc.calendarUrl) return 'kept';
 		const target = new URL(filename, to.url).href;
 		let copied: Response;
 		try {
