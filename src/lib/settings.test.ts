@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, parseSettings } from './settings';
+import { byName, calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -114,5 +114,29 @@ describe('byName', () => {
 	it('sorts calendars by name the way a person would', () => {
 		const sorted = [{ name: 'work' }, { name: 'Family' }, { name: 'Ärzte' }, { name: 'Me 10' }, { name: 'Me 9' }].sort(byName);
 		expect(sorted.map((c) => c.name)).toEqual(['Ärzte', 'Family', 'Me 9', 'Me 10', 'work']);
+	});
+});
+
+describe('menuLabels', () => {
+	it('shows just the name when no other calendar has it', () => {
+		expect(menuLabels([{ path: '/david/me/', name: 'Me' }, { path: '/david/work/', name: 'Work' }])).toEqual([
+			{ path: '/david/me/', name: 'Me', label: 'Me' },
+			{ path: '/david/work/', name: 'Work', label: 'Work' }
+		]);
+	});
+
+	it('adds the end of the address when two calendars share a name, whatever the case', () => {
+		const labels = menuLabels([
+			{ path: '/david/family/', name: 'Family', work: true },
+			{ path: '/david/family-2/', name: 'family' },
+			{ path: '/david/%C3%84rzte/', name: 'Doctors' },
+			{ path: '/david/doctors/', name: 'Doctors' },
+			{ path: '/david/me/', name: 'Me' }
+		]).map((c) => c.label);
+		expect(labels).toEqual(['Family (family)', 'family (family-2)', 'Doctors (Ärzte)', 'Doctors (doctors)', 'Me']);
+	});
+
+	it('keeps the other fields', () => {
+		expect(menuLabels([{ path: '/david/me/', name: 'Me', work: true }])[0]).toMatchObject({ work: true });
 	});
 });

@@ -54,6 +54,23 @@ export function calendarAtPath<T extends { url: string }>(calendars: T[], path: 
 /** Orders calendars by name as a person would (capitals and accents aside, "Me 9" before "Me 10"). */
 export const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
 
+/** The last part of a calendar's address, readable: /david/family-2/ → family-2. */
+function lastSegment(path: string): string {
+	const segment = path.split('/').filter(Boolean).pop() ?? path;
+	try {
+		return decodeURIComponent(segment);
+	} catch {
+		return segment;
+	}
+}
+
+/** What each calendar is called in a menu: its name, plus the end of its address when another calendar
+ * has the same name (made on a phone, say), so the two entries can be told apart. */
+export function menuLabels<T extends { path: string; name: string }>(calendars: T[]): (T & { label: string })[] {
+	const clashes = (c: T) => calendars.some((other) => other !== c && other.name.toLowerCase() === c.name.toLowerCase());
+	return calendars.map((c) => ({ ...c, label: clashes(c) ? `${c.name} (${lastSegment(c.path)})` : c.name }));
+}
+
 /** Longest calendar name the settings page accepts. */
 export const MAX_NAME = 40;
 

@@ -6,7 +6,7 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
-import { byName, calendarAtPath, checkCalendarName } from '$lib/settings';
+import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -54,7 +54,7 @@ export const load: PageServerLoad = async ({ url }) => {
 
 	return {
 		today,
-		eventCalendars: eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name })),
+		eventCalendars: menuLabels(eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
 		defaultEventCalendar: newEvents && pathOf(newEvents),
 		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
 		start,

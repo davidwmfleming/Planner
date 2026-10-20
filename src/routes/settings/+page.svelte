@@ -162,13 +162,13 @@
 						<label for="work-calendar">Show as work (light red)</label>
 						<select id="work-calendar" name="work" value={data.workPath ?? ''} onchange={() => (saved = false)}>
 							<option value="">None</option>
-							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.label}</option>{/each}
 						</select>
 					</div>
 					<div class="field">
 						<label for="new-events-calendar">New events go in</label>
 						<select id="new-events-calendar" name="newEvents" value={data.defaultEventPath} onchange={() => (saved = false)}>
-							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.label}</option>{/each}
 						</select>
 					</div>
 					<div class="edit">

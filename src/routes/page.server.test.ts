@@ -114,9 +114,9 @@ describe('the planner page', () => {
 		});
 		const data = await run();
 		expect(data.eventCalendars).toEqual([
-			{ path: '/david/b/', name: 'Family' },
-			{ path: '/david/a/', name: 'Family' },
-			{ path: '/david/work/', name: 'Work' }
+			{ path: '/david/b/', name: 'Family', label: 'Family (b)' },
+			{ path: '/david/a/', name: 'Family', label: 'Family (a)' },
+			{ path: '/david/work/', name: 'Work', label: 'Work' }
 		]);
 		expect(data.workCalendar).toBe('/david/work/');
 		expect(data.defaultEventCalendar).toBe('/david/a/');

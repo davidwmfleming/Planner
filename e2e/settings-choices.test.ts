@@ -131,7 +131,19 @@ test('two calendars with the same name from another device are kept apart', asyn
 		await expect(sheet).toBeVisible();
 		await expect(sheet.locator('#f-calendar option', { hasText: name })).toHaveCount(2);
 		await expect(sheet.locator('#f-calendar')).toHaveValue(second);
+		// Each says which one it is, by the end of its address.
+		expect(await sheet.locator('#f-calendar option', { hasText: name }).allInnerTexts()).toEqual(
+			expect.arrayContaining([`${name} (twin-a-${stamp})`, `${name} (twin-b-${stamp})`])
+		);
 		await sheet.getByRole('button', { name: 'Cancel' }).click();
+
+		const settings = page.getByRole('region', { name: 'Event calendars' });
+		await page.goto('/settings');
+		for (const menu of ['Show as work (light red)', 'New events go in']) {
+			const twins = await settings.getByLabel(menu).locator('option', { hasText: name }).allInnerTexts();
+			expect(twins.sort()).toEqual([`${name} (twin-a-${stamp})`, `${name} (twin-b-${stamp})`]);
+		}
+		expect(await settings.getByLabel('New events go in').locator('option').allInnerTexts()).toContain('Work');
 
 		await chooseByPath(page, { work: second, newEvents: second });
 		await page.goto(`/?page=${day}`);

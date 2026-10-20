@@ -443,7 +443,7 @@
 				{#if editing.kind === 'event'}
 					<label class="field">Calendar
 						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar} onchange={(e) => (newCalendar = e.currentTarget.value === '+new')}>
-							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.label}</option>{/each}
 							<option value="+new">New calendar…</option>
 						</select>
 					</label>
