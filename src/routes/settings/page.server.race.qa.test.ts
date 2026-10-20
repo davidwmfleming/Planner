@@ -141,4 +141,13 @@ describe('two runs of the same move (QA proposals)', () => {
 		};
 		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual({ action: 'delete', deleted: 'Family', count: 2, movedTo: 'Me' });
 	});
+	it('does not call it deleted when the delete failed and the calendar server then briefly lists nothing', async () => {
+		fake = sharedListStore([me, family, tasks], { [family.url]: [doc(family, 'a'), doc(family, 'b')] });
+		fake.deleteCalendar = async () => {
+			fake.listed = [];
+			throw new Error('socket hang up');
+		};
+		const result = await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' });
+		expect(result).toEqual(refusal(502, { message: expect.stringContaining("didn't delete Family") }));
+	});
 });

@@ -272,7 +272,8 @@ async function isGone(store: CalendarStore, calendar: Calendar): Promise<boolean
 
 /** Whether a failure to read a calendar means it is gone: the server said so (404), or a fresh calendar list no
  * longer has it. Another run of this delete (a second tab, or a tap after a refresh) may have deleted it and refreshed
- * the shared list, and then the store refuses to read it at all. A list that can't be read again proves nothing. */
+ * the shared list, and then the store refuses to read it at all. A list that can't be read again, or comes back
+ * without the Tasks list, proves nothing. */
 async function vanished(store: CalendarStore, calendar: Calendar, e: unknown): Promise<boolean> {
 	if (e instanceof RefusedError) return GONE.includes(e.status);
 	try {
@@ -280,6 +281,8 @@ async function vanished(store: CalendarStore, calendar: Calendar, e: unknown): P
 	} catch {
 		return false;
 	}
+	// A list without the Tasks list is the calendar server briefly listing nothing, which proves nothing.
+	if (!tasksUrl(store)) return false;
 	return !store.calendars().some((c) => c.url === calendar.url);
 }
 
