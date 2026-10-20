@@ -8,8 +8,8 @@ import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
 import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
-import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
-import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
+import { byName, calendarAtPath, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
+import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -64,8 +64,12 @@ export const load: PageServerLoad = async ({ url }) => {
 		eventCalendars: menuLabels(eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
 		defaultEventCalendar: newEvents && pathOf(newEvents),
 		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
-		// Every calendar's name, as messages name them: shown on an item that is in two calendars (a move that stopped halfway).
+		// Every calendar's name, as messages name them: what an item's calendar tag says in full.
 		calendarLabels: calendarLabels(calendars),
+		// The few letters each item's calendar tag shows.
+		calendarTags: calendarTags(calendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
+		// Tasks in the main list need no tag; those in a list made on a phone, say, get one.
+		tasksCalendar: tasksPath(store),
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -336,6 +340,12 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 			: `"${title}" may now be in two calendars, because the calendar server didn't confirm it removed the old one. ${waitThenDelete(store, old)}`
 	});
 }
+
+/** Path of the main Tasks list, or null if it is missing (then every task shows its list). */
+const tasksPath = (store: Awaited<ReturnType<typeof getStore>>) => {
+	const url = tasksUrl(store);
+	return url ? pathOf(url) : null;
+};
 
 /** Each calendar's name by path, told apart as the menus do when two share a name. */
 const calendarLabels = (calendars: { url: string; name: string }[]) =>
