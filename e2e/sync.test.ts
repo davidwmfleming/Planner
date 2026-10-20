@@ -43,7 +43,9 @@ test('another calendar app finds the calendars, and events flow both ways', asyn
 	await page.locator(`#add-event-${tue}`).fill(`5pm ${fromPlanner}`);
 	await page.locator(`#add-event-${tue}`).press('Enter');
 	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner })).toBeVisible();
-	const everywhere = (await Promise.all(calendars.map((c) => client.fetchCalendarObjects({ calendar: c })))).flat();
+	// Only the starting calendars: others are made and deleted by tests running alongside, and may be gone by now.
+	const starting = calendars.filter((c) => ['Me', 'Family', 'Workouts', 'Morgan Meals', 'Work'].includes(String(c.displayName)));
+	const everywhere = (await Promise.all(starting.map((c) => client.fetchCalendarObjects({ calendar: c })))).flat();
 	expect(everywhere.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
 });
 
