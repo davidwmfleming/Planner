@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CATEGORIES, parseSettings } from './settings';
+import { calendarAtPath, DEFAULT_CATEGORIES, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -31,5 +31,27 @@ describe('parseSettings', () => {
 		expect(parseSettings('[1, 2]', calendars).workCalendar).toBe('/david/work/');
 		const partly = parseSettings(JSON.stringify({ categories: ['Errands', 7, ''], workCalendar: 3 }), calendars);
 		expect(partly).toEqual({ categories: DEFAULT_CATEGORIES, workCalendar: '/david/work/', defaultEventCalendar: '/david/me/' });
+	});
+});
+
+describe('filling in the Work and default choices', () => {
+	it('can use other calendar names than Work and Me', () => {
+		const chosen = parseSettings(undefined, calendars, { workCalendar: 'Family', defaultEventCalendar: 'Work' });
+		expect(chosen).toEqual({ categories: DEFAULT_CATEGORIES, workCalendar: '/david/family/', defaultEventCalendar: '/david/work/' });
+	});
+
+	it('leaves a choice empty when the named calendar is missing', () => {
+		expect(parseSettings(undefined, calendars, { workCalendar: 'Office', defaultEventCalendar: 'Me' }).workCalendar).toBeNull();
+	});
+});
+
+describe('calendarAtPath', () => {
+	it('finds a calendar by the path stored in the settings', () => {
+		expect(calendarAtPath(calendars, '/david/work/')?.name).toBe('Work');
+	});
+
+	it('finds nothing for no choice or a calendar that is gone', () => {
+		expect(calendarAtPath(calendars, null)).toBeUndefined();
+		expect(calendarAtPath(calendars, '/david/old/')).toBeUndefined();
 	});
 });

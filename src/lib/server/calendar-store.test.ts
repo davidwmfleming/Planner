@@ -129,6 +129,7 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		const blank = await store.ensureCalendar('Blank tasks', ['task']);
 		const me = await store.ensureCalendar('Me', ['event']);
 		const work = await store.ensureCalendar('Work', ['event']);
+		expect(await store.storedSettings(blank.url)).toBeUndefined();
 		expect(await store.readSettings(blank.url)).toEqual({
 			categories: ['This month', 'Waiting', 'Someday'],
 			workCalendar: new URL(work.url).pathname,
@@ -138,6 +139,7 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 
 	it('uses the defaults if the Tasks collection is gone, and says so when settings cannot be saved', async () => {
 		const gone = new URL('david/no-such-list/', `http://127.0.0.1:${PORT}/`).href;
+		expect(await store.storedSettings(gone)).toBeUndefined();
 		expect((await store.readSettings(gone)).categories).toEqual(['This month', 'Waiting', 'Someday']);
 		await expect(store.writeSettings(gone, { categories: [], workCalendar: null, defaultEventCalendar: null })).rejects.toThrow(/refused to save the settings/);
 	});

@@ -6,7 +6,8 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
-import { defaultCalendarUrl, getStore, workCalendarName } from '$lib/server/store';
+import { calendarAtPath } from '$lib/settings';
+import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -22,11 +23,12 @@ export const load: PageServerLoad = async ({ url }) => {
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
 
-	let items, store;
+	let items, store, settings;
 	try {
 		await rollover(today);
 		store = await getStore();
 		items = await store.listItems();
+		settings = await getSettings(store);
 	} catch (e) {
 		error(503, `The calendar server isn't answering. Check that it is running, then reload. (${(e as Error).message})`);
 	}
@@ -38,8 +40,8 @@ export const load: PageServerLoad = async ({ url }) => {
 	return {
 		today,
 		eventCalendars,
-		defaultEventCalendar: calendarName(defaultCalendarUrl(store, 'event')),
-		workCalendar: workCalendarName(),
+		defaultEventCalendar: calendarName(defaultCalendarUrl(store, 'event', settings)),
+		workCalendar: calendarAtPath(calendars, settings.workCalendar)?.name,
 		start,
 		previous: flipPage(start, -1),
 		next: flipPage(start, 1),
@@ -76,7 +78,7 @@ export const actions: Actions = {
 		if (!title) return fail(400, { message: 'Write something on the line first' });
 
 		const store = await getStore();
-		await store.create(defaultCalendarUrl(store, kind), {
+		await store.create(defaultCalendarUrl(store, kind, await getSettings(store)), {
 			uid: crypto.randomUUID(),
 			kind,
 			title,
@@ -153,7 +155,7 @@ export const actions: Actions = {
 		} else if (result.item.kind === 'event') {
 			wanted = store.calendars().find((c) => c.name === field('calendar') && c.accepts.includes('event'));
 		}
-		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind));
+		const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, await getSettings(store)));
 		if (result.item.kind === item.kind && target === item.calendarUrl) {
 			// Fields left blank are removed, so save the whole item rather than a merge.
 			await store.replace(item, result.item);

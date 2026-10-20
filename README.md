@@ -23,7 +23,13 @@ Open the planner's address in the browser, then add it to the home screen: in Ch
 
 ## Work events
 
-Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Set `WORK_CALENDAR` in `.env` to use a different calendar name.
+Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Which calendar counts as Work, and which one new events go in (**Me** at first), are kept in the planner's settings on the calendar server, so they still apply after a calendar is renamed. `WORK_CALENDAR` and `EVENTS_CALENDAR` in `.env` only fill these in the first time the planner starts.
+
+The starting calendars (Me, Family, Workouts, Morgan Meals, Work and the Tasks list) are made only on a first run, when the calendar server has no event calendars yet, so a calendar deleted on a phone stays deleted.
+
+## Settings
+
+The gear at the top of the planner opens **Settings**, which lists the event calendars, the Tasks list and the task categories, and shows which calendar is shaded as Work and where new events go. For now it only shows them; changing them from this page comes in later versions. **‹ Planner** at the top leads back, which matters in the installed app, where there is no browser back button.
 
 ## Running it on the server (or a test VM)
 
