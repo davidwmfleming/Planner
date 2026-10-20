@@ -339,6 +339,9 @@
 	</header>
 
 	{#if gestureMessage}<p class="error" role="alert">{gestureMessage}</p>{/if}
+	{#if !data.eventCalendars.length}
+		<p class="notice">There are no event calendars, so new events have nowhere to go. <a href="/settings">Add one in Settings</a>.</p>
+	{/if}
 	<main class="page">
 		{#each data.days as day (day.date)}
 			<section class="day" class:weekend={day.weekend} class:drop-target={dropDay === day.date} aria-label={day.date} data-date={day.date}>
@@ -425,7 +428,7 @@
 				{#if editing.kind === 'event'}
 					<label class="field">Calendar
 						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar} onchange={(e) => (newCalendar = e.currentTarget.value === '+new')}>
-							{#each data.eventCalendars as name (name)}<option value={name}>{name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
 							<option value="+new">New calendar…</option>
 						</select>
 					</label>
@@ -614,6 +617,8 @@
 	.actions-left, .actions-right { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	button.btn { cursor: pointer; }
+	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem 0 0; }
+	.notice a { color: var(--ink); font-weight: 700; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }

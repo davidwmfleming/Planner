@@ -3,6 +3,7 @@
 import { expect, test } from './fixtures';
 import { futureWeek, iso } from './dates';
 import { unique } from './unique';
+import { deleteCalendar, makeCalendar } from './calendar-server';
 import type { Page } from '@playwright/test';
 
 const { wed: day } = futureWeek();
@@ -12,6 +13,17 @@ async function choose(page: Page, choices: { work?: string; newEvents?: string }
 	const calendars = page.getByRole('region', { name: 'Event calendars' });
 	if (choices.work) await calendars.getByLabel('Show as work (light red)').selectOption({ label: choices.work });
 	if (choices.newEvents) await calendars.getByLabel('New events go in').selectOption({ label: choices.newEvents });
+	await calendars.getByRole('button', { name: 'Save choices' }).click();
+	await expect(calendars.getByRole('status')).toHaveText('Saved');
+	await expect(calendars.getByRole('button', { name: 'Save choices' })).toBeFocused();
+}
+
+/** Picks calendars by path, for when two have the same name. */
+async function chooseByPath(page: Page, choices: { work: string; newEvents: string }) {
+	await page.goto('/settings');
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByLabel('Show as work (light red)').selectOption(choices.work);
+	await calendars.getByLabel('New events go in').selectOption(choices.newEvents);
 	await calendars.getByRole('button', { name: 'Save choices' }).click();
 	await expect(calendars.getByRole('status')).toHaveText('Saved');
 }
@@ -82,5 +94,50 @@ test('new events go in the calendar chosen on the settings page', async ({ page 
 	await page.locator(`#add-event-${day}`).press('Enter');
 	const row = page.locator(`section.day[data-date="${day}"] li`, { hasText: name });
 	await row.getByRole('button', { name: `Details for ${name}` }).click();
-	await expect(page.getByRole('dialog', { name: 'Details' }).locator('#f-calendar')).toHaveValue('Family');
+	await expect(page.getByRole('dialog', { name: 'Details' }).locator('#f-calendar option:checked')).toHaveText('Family');
+});
+
+test('a line still saves when the new-events calendar was deleted on another device', async ({ page, request }, info) => {
+	const name = unique('Gone', info);
+	const event = unique('Vet', info);
+	await addCalendar(page, name);
+	await choose(page, { newEvents: name });
+	await page.goto(`/?page=${day}`);
+	await deleteCalendar(request, `/david/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}/`);
+
+	await page.locator(`#add-event-${day}`).fill(`3pm ${event}`);
+	await page.locator(`#add-event-${day}`).press('Enter');
+	await expect(page.locator(`section.day[data-date="${day}"] li`, { hasText: event })).toBeVisible();
+	await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('two calendars with the same name from another device are kept apart', async ({ page, request }, info) => {
+	const name = unique('Twin', info);
+	const stamp = `${info.project.name}-${Date.now()}`;
+	const [first, second] = [await makeCalendar(request, `twin-a-${stamp}`, name), await makeCalendar(request, `twin-b-${stamp}`, name)];
+	const event = unique('Twin meeting', info);
+	try {
+		await chooseByPath(page, { work: first, newEvents: second });
+		await page.goto(`/?page=${day}`);
+		await page.locator(`#add-event-${day}`).fill(`9am ${event}`);
+		await page.locator(`#add-event-${day}`).press('Enter');
+		const row = page.locator(`section.day[data-date="${day}"] li`, { hasText: event });
+		await expect(row).toBeVisible();
+		await expect(row).not.toHaveClass(/work/); // it is in the other calendar of that name
+
+		// The details sheet opens and offers both.
+		await row.getByRole('button', { name: `Details for ${event}` }).click();
+		const sheet = page.getByRole('dialog', { name: 'Details' });
+		await expect(sheet).toBeVisible();
+		await expect(sheet.locator('#f-calendar option', { hasText: name })).toHaveCount(2);
+		await expect(sheet.locator('#f-calendar')).toHaveValue(second);
+		await sheet.getByRole('button', { name: 'Cancel' }).click();
+
+		await chooseByPath(page, { work: second, newEvents: second });
+		await page.goto(`/?page=${day}`);
+		await expect(row).toHaveClass(/work/);
+	} finally {
+		await deleteCalendar(request, first);
+		await deleteCalendar(request, second);
+	}
 });

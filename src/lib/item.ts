@@ -27,7 +27,7 @@ export interface Item {
 	occurrence?: string;
 	/** On one showing of a repeating item: the day the series starts. */
 	seriesStart?: string;
-	/** Name of the calendar it is kept in (Me, Family, Work…). Shown only; not part of the .ics. */
+	/** Path of the calendar it is kept in (Me, Family, Work…), which a rename doesn't change. Not part of the .ics. */
 	calendar?: string;
 }
 

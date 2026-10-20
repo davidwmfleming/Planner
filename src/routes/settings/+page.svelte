@@ -20,18 +20,49 @@
 		document.querySelector<HTMLInputElement>('#rename-field')?.select();
 	}
 
+	/** Closes the name field and puts the keyboard back on that calendar's Rename button. */
+	async function stopRename() {
+		const path = renaming;
+		renaming = undefined;
+		await tick();
+		document.querySelector<HTMLButtonElement>(`button[data-rename="${CSS.escape(path ?? '')}"]`)?.focus();
+	}
+
+	// Added and renamed calendars are read out by screen readers; the page itself shows the change in the list.
+	let announcement = $state('');
+
 	// "Saved" shows after the choices are stored, until one is changed again.
 	let saved = $state(false);
-	const chose: SubmitFunction = () => async ({ result, update }) => {
+	const chose: SubmitFunction = ({ submitter }) => async ({ result, update }) => {
 		await update({ reset: false });
 		saved = result.type === 'success';
+		if (submitter instanceof HTMLElement && submitter.isConnected) submitter.focus();
+	};
+
+	/** After adding, the field is ready for another name (or to fix the one refused). */
+	const added: SubmitFunction = () => async ({ result, update }) => {
+		await update();
+		if (result.type === 'success') announcement = `Added ${result.data?.added}`;
+		document.querySelector<HTMLInputElement>('#new-calendar')?.focus();
 	};
 
 	/** A rename that worked closes its field; one that didn't keeps it open with the reason. */
-	const renamed: SubmitFunction = () => async ({ result, update }) => {
-		await update({ reset: false });
-		if (result.type === 'success') renaming = undefined;
+	const renamed: SubmitFunction = ({ formData }) => {
+		const from = data.eventCalendars.find((c) => c.path === formData.get('path'))?.name;
+		return async ({ result, update }) => {
+			await update({ reset: false });
+			if (result.type !== 'success') return;
+			announcement = `Renamed ${from} to ${result.data?.renamed}`;
+			await stopRename();
+		};
 	};
+
+	function renameKeys(e: KeyboardEvent) {
+		if (e.key === 'Escape') {
+			e.preventDefault();
+			stopRename();
+		}
+	}
 </script>
 
 <svelte:head>
@@ -44,6 +75,7 @@
 		<a class="btn" href="/" aria-label="Back to the planner">‹ Planner</a>
 		<h1>Settings</h1>
 	</header>
+	<p class="announce" role="status">{announcement}</p>
 
 	<main>
 		<section aria-labelledby="h-calendars">
@@ -54,21 +86,21 @@
 						{#if renaming === calendar.path}
 							<form method="POST" action="?/rename" use:enhance={renamed} class="edit">
 								<input type="hidden" name="path" value={calendar.path} />
-								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.name}" autocomplete="off" />
+								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.name}" autocomplete="off" onkeydown={renameKeys} />
 								<button class="btn primary">Save name</button>
-								<button type="button" class="btn" onclick={() => (renaming = undefined)}>Cancel</button>
+								<button type="button" class="btn" onclick={stopRename}>Cancel</button>
 								{#if renameError}<p class="error" role="alert">{renameError}</p>{/if}
 							</form>
 						{:else}
 							<span class="name">{calendar.name}</span>
 							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
 							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
-							<button type="button" class="btn small" aria-label="Rename {calendar.name}" onclick={() => startRename(calendar.path)}>Rename</button>
+							<button type="button" class="btn small" aria-label="Rename {calendar.name}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
 						{/if}
 					</li>
 				{/each}
 			</ul>
-			<form method="POST" action="?/add" use:enhance class="add">
+			<form method="POST" action="?/add" use:enhance={added} class="add">
 				<label for="new-calendar">New calendar</label>
 				<div class="edit">
 					<input id="new-calendar" class="text" name="name" value={form?.action === 'add' ? form.name : ''} placeholder="Name, up to 40 letters" autocomplete="off" />
@@ -93,7 +125,7 @@
 					</div>
 					<div class="edit">
 						<button class="btn primary">Save choices</button>
-						{#if saved}<span role="status">Saved</span>{/if}
+						<span role="status">{saved ? 'Saved' : ''}</span>
 					</div>
 					{#if form?.action === 'choose' && form.message}<p class="error" role="alert">{form.message}</p>{/if}
 				</form>
@@ -167,8 +199,9 @@
 	/* Work: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
-	.choices { margin: 1rem 0 0; display: grid; gap: 0.6rem; }
-	.field { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+	/* A long calendar name must not widen the choices past a narrow phone screen. */
+	.choices { margin: 1rem 0 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.6rem; }
+	.field { min-width: 0; display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
 	.field select {
 		font: inherit;
 		font-size: 1rem;
@@ -179,10 +212,13 @@
 		border: 2px solid var(--ink);
 		border-radius: 6px;
 		min-height: 44px;
-		max-width: 100%;
+		width: 100%;
+		min-width: 0;
 		padding: 0.2rem 0.5rem;
 	}
 	[role='status'] { font-weight: 700; }
+	/* Read out, not shown: the list already shows what changed. */
+	.announce { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; margin: 0; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
 	button.btn { cursor: pointer; }
 	.btn.primary { background: var(--ink); color: var(--paper); }

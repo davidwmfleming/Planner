@@ -24,7 +24,7 @@ test('choosing Work in the details sheet files an event as work, and it can stil
 
 	const sheet = page.getByRole('dialog', { name: 'Details' });
 	await row.getByRole('button', { name: `Details for ${name}` }).click();
-	await expect(sheet.locator('#f-calendar')).toHaveValue('Me');
+	await expect(sheet.locator('#f-calendar option:checked')).toHaveText('Me');
 	await sheet.locator('#f-calendar').selectOption('Work');
 	await sheet.getByRole('button', { name: 'Save' }).click();
 	await expect(sheet).toBeHidden();
@@ -34,5 +34,5 @@ test('choosing Work in the details sheet files an event as work, and it can stil
 	await row.getByRole('button', { name: `Tick ${name}` }).click();
 	await expect(row).toHaveClass(/done/);
 	await row.getByRole('button', { name: `Details for ${name}` }).click();
-	await expect(sheet.locator('#f-calendar')).toHaveValue('Work');
+	await expect(sheet.locator('#f-calendar option:checked')).toHaveText('Work');
 });

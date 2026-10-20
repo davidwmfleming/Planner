@@ -1,5 +1,6 @@
 import { expect, test } from './fixtures';
 import { unique } from './unique';
+import { deleteCalendar, makeCalendar } from './calendar-server';
 
 test('the gear opens the settings, which list the calendars, the Tasks list and the categories', async ({ page }) => {
 	await page.goto('/');
@@ -119,4 +120,72 @@ test('the add and rename controls are easy to hit on a phone', async ({ page }) 
 	}
 	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
 	expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('a 40-letter calendar name does not make the settings page scroll sideways', async ({ page }, info) => {
+	const name = unique('Morgan', info).padEnd(40, 'W').slice(0, 40);
+	await page.goto('/settings');
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByLabel('New calendar').fill(name);
+	await calendars.getByRole('button', { name: 'Add calendar' }).click();
+	await expect(calendars.getByRole('list').getByText(name, { exact: true })).toBeVisible();
+	for (const width of [320, 390]) {
+		await page.setViewportSize({ width, height: 640 });
+		const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+		expect(overflow, `at ${width}px`).toBe(0);
+	}
+});
+
+test('after adding or renaming, the keyboard lands somewhere sensible and the change is announced', async ({ page }, info) => {
+	const name = unique('Focus', info);
+	const renamed = unique('Focused', info);
+	await page.goto('/settings');
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	const announced = page.getByRole('status').filter({ hasText: /^(Added|Renamed)/ });
+
+	// Added: ready for the next one.
+	await calendars.getByLabel('New calendar').fill(name);
+	await calendars.getByRole('button', { name: 'Add calendar' }).click();
+	await expect(calendars.getByLabel('New calendar')).toBeFocused();
+	await expect(announced).toHaveText(`Added ${name}`);
+
+	// Cancel and Escape put the keyboard back on the Rename button.
+	const rename = calendars.getByRole('button', { name: `Rename ${name}` });
+	await rename.click();
+	await calendars.getByRole('button', { name: 'Cancel' }).click();
+	await expect(rename).toBeFocused();
+	await rename.click();
+	await calendars.getByLabel(`New name for ${name}`).fill('Not this');
+	await calendars.getByLabel(`New name for ${name}`).press('Escape');
+	await expect(calendars.getByLabel(`New name for ${name}`)).toHaveCount(0);
+	await expect(rename).toBeFocused();
+	await expect(calendars.getByRole('list').getByText(name, { exact: true })).toBeVisible();
+
+	// Renamed: back on that calendar's Rename button.
+	await rename.click();
+	await calendars.getByLabel(`New name for ${name}`).fill(renamed);
+	await calendars.getByLabel(`New name for ${name}`).press('Enter');
+	await expect(calendars.getByRole('button', { name: `Rename ${renamed}` })).toBeFocused();
+	await expect(announced).toHaveText(`Renamed ${name} to ${renamed}`);
+});
+
+test('calendars are listed by name, and a notes-only calendar from another app is left out', async ({ page, request }, info) => {
+	const notes = unique('Journal', info);
+	const path = await makeCalendar(request, `journal-${info.project.name}-${Date.now()}`, notes, ['VJOURNAL']);
+	try {
+		await page.goto('/settings');
+		const names = await page.getByRole('region', { name: 'Event calendars' }).locator('.lines .name').allInnerTexts();
+		expect(names).toEqual([...names].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })));
+		await expect(page.getByText(notes)).toHaveCount(0);
+	} finally {
+		await deleteCalendar(request, path);
+	}
+});
+
+test('a name of only invisible characters is refused', async ({ page }) => {
+	await page.goto('/settings');
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByLabel('New calendar').fill('\u200b\u200b');
+	await calendars.getByRole('button', { name: 'Add calendar' }).click();
+	await expect(calendars.getByRole('alert')).toHaveText('Give the calendar a name');
 });

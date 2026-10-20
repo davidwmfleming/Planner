@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, parseSettings } from './settings';
+import { byName, calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -68,6 +68,14 @@ describe('checkCalendarName', () => {
 		expect(checkCalendarName('   ', all)).toEqual({ error: 'Give the calendar a name' });
 	});
 
+	it('removes control characters and refuses a name of only invisible characters', () => {
+		expect(checkCalendarName('School\u0000\u0007 run\n', all)).toEqual({ name: 'School run' });
+		expect(checkCalendarName('\u200b\u200d\ufeff', all)).toEqual({ error: 'Give the calendar a name' });
+		expect(checkCalendarName('\u0001\u001f\u007f', all)).toEqual({ error: 'Give the calendar a name' });
+		// A joiner inside an emoji family is part of the name, not padding.
+		expect(checkCalendarName('👨\u200d👩\u200d👧 Home', all)).toEqual({ name: '👨\u200d👩\u200d👧 Home' });
+	});
+
 	it('allows 40 letters but not 41, counting an emoji as one', () => {
 		expect(checkCalendarName('a'.repeat(40), all)).toEqual({ name: 'a'.repeat(40) });
 		expect(checkCalendarName('a'.repeat(41), all)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
@@ -83,5 +91,12 @@ describe('checkCalendarName', () => {
 		expect(checkCalendarName('Work', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ name: 'Work' });
 		expect(checkCalendarName('WORK', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ name: 'WORK' });
 		expect(checkCalendarName('Me', all, 'http://127.0.0.1:5232/david/work/')).toEqual({ error: 'There is already a calendar called "Me"' });
+	});
+});
+
+describe('byName', () => {
+	it('sorts calendars by name the way a person would', () => {
+		const sorted = [{ name: 'work' }, { name: 'Family' }, { name: 'Ärzte' }, { name: 'Me 10' }, { name: 'Me 9' }].sort(byName);
+		expect(sorted.map((c) => c.name)).toEqual(['Ärzte', 'Family', 'Me 9', 'Me 10', 'work']);
 	});
 });
