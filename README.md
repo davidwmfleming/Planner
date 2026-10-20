@@ -54,7 +54,7 @@ The copies don't include `.env`; `server-setup.sh` makes a new one with a new ca
 
 ### Copy on the Mac (and so in Proton Drive)
 
-Each morning at 07:00 the Mac fetches any new copies from the server over Tailscale into a folder inside Proton Drive, which uploads them. If the Mac is asleep at 07:00 it fetches when it wakes, and it also fetches each time you log in. It only ever adds copies (an empty or broken server can't wipe the Mac's), and it removes its own copies older than 30 days. If the newest copy on the Mac is more than 2 days old, a notification says so. The Mac uses its own ssh key, which the server only lets read the backup folder. This uses the server's normal ssh server (`openssh-server`, installed if missing), not Tailscale SSH: Tailscale SSH ignores the key's limit, so keep it off (`server-setup.sh` warns if it is on).
+Each morning at 07:00 the Mac fetches any new copies from the server over Tailscale into a folder inside Proton Drive, which uploads them. If the Mac is asleep at 07:00 it fetches when it wakes, and it also fetches each time you log in. It only ever adds copies: an empty or broken server can't wipe the Mac's, and a copy the Mac already has is never replaced by a same-named one from the server. It removes its own nightly copies older than 30 days (only after a good fetch). Safety copies from a restore (`before-restore-*`) are kept on the Mac until you delete them, as on the server. If the newest copy on the Mac is more than 2 days old, a notification says so. The Mac uses its own ssh key, which the server only lets read the backup folder. This uses the server's normal ssh server (`openssh-server`, installed if missing), not Tailscale SSH: Tailscale SSH ignores the key's limit, so keep it off (`server-setup.sh` warns if it is on).
 
 Adding the Mac's key also tightens the server's ssh server with `/etc/ssh/sshd_config.d/00-planner-backup.conf`: keys only (no passwords), no signing in as root, and only your account, only over Tailscale. **Any other account that signs in to the server by ssh, or signing in from the home network rather than Tailscale, stops working.** To keep one, add it to `SSH_ALLOW_USERS` in `/etc/default/planner-backup` (for example `SSH_ALLOW_USERS="alice"`) and run `server-setup.sh` again. The ssh server checks the new settings first and the old ones are put back if it rejects them. The firewall isn't touched (Home Assistant needs its ports on the home network). The first time, keep a Tailscale or console session to the server open until you have checked, from a new Terminal window, that you can still sign in.
 
@@ -63,7 +63,14 @@ Setting it up, once, in Terminal on the Mac (from a copy of this repository):
 1. Install Homebrew's rsync (the one built into recent macOS doesn't work as well with the server): `brew install rsync`
 2. Make the key: `ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C planner-backup`, then show it with `cat ~/.ssh/planner-backup.pub`.
 3. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line it showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups (or fixes the line if the key is already there), and tightens the ssh server as described above.
-4. Copy the script: `mkdir -p ~/bin && cp scripts/mac/pull-backup.sh ~/bin/planner-pull-backup.sh`, then open `~/bin/planner-pull-backup.sh` and fill in the settings at the top: `SERVER` (the server's Tailscale name, for example `homebase`), `SERVER_USER` (your account on it) and `PROTON_DRIVE` (Proton Drive's folder; `ls ~/Library/CloudStorage` shows its name).
+4. Copy the script and its settings file, then fill in the settings:
+   ```
+   mkdir -p ~/bin ~/.config
+   cp scripts/mac/pull-backup.sh ~/bin/planner-pull-backup.sh
+   cp scripts/mac/planner-backup.conf.example ~/.config/planner-backup.conf
+   open -e ~/.config/planner-backup.conf
+   ```
+   In TextEdit, set `SERVER` (the server's Tailscale name, for example `homebase`), `SERVER_USER` (your account on it) and `PROTON_DRIVE` (Proton Drive's folder; `ls ~/Library/CloudStorage` shows its name), and save. The settings live there, not in the script, so copying a newer script later keeps them. If you change `KEEP_DAYS` on the server, keep the Mac's at least as high.
 5. Try it: `bash ~/bin/planner-pull-backup.sh`. The copies should appear in Proton Drive under `Backups/planner`.
 6. Schedule it:
    ```
@@ -71,7 +78,9 @@ Setting it up, once, in Terminal on the Mac (from a copy of this repository):
    plutil -lint ~/Library/LaunchAgents/local.planner.pull-backup.plist
    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.planner.pull-backup.plist
    ```
-   It runs once straight away; check `~/Library/Logs/planner-pull-backup.log`. If the log says "Operation not permitted", macOS is blocking the job from Proton Drive's folder: in System Settings → Privacy & Security → Full Disk Access, add `/bin/bash` and `/opt/homebrew/bin/rsync`, then run `launchctl kickstart -k gui/$(id -u)/local.planner.pull-backup`.
+   It runs once straight away; check `~/Library/Logs/planner-pull-backup.log`. Saving into Proton Drive's folder normally needs no extra permission. Only if the log says "Can't save files in …" or "Operation not permitted": in System Settings → Privacy & Security → Full Disk Access, add `/opt/homebrew/bin/rsync` (the program that writes the copies; press ⌘⇧G in the file picker to type the path), then run `launchctl kickstart -k gui/$(id -u)/local.planner.pull-backup`. Don't add `/bin/bash` there: that would give every shell script full access to the Mac.
+
+The log and the notifications say which side a problem is on: "couldn't reach" means the server or Tailscale (normal while you're away; you only hear about it once the newest copy is more than 2 days old), "couldn't save" or "Can't save files" means this Mac (often a full disk), and "some copies couldn't be fetched" means a file on the server couldn't be read. Unfinished downloads wait in `~/Library/Caches/planner-pull-backup`, outside Proton Drive, so Proton never uploads half a file.
 
 To stop it: `launchctl bootout gui/$(id -u)/local.planner.pull-backup`.
 
@@ -88,7 +97,11 @@ It shows what it will do and waits for you to type `yes`. Then it stops the plan
 
 Phones and computers catch up on their next sync. If one still shows old items, remove the calendar account on it and add it again.
 
-- **Copy kept on the Mac:** copy it back first, for example `scp planner-2026-10-19.tar.gz homebase:/tmp/`, then restore `/tmp/planner-2026-10-19.tar.gz`.
+- **Copy kept on the Mac:** copy it back first, from the Proton Drive folder, then restore `/tmp/planner-2026-10-19.tar.gz` on the server:
+  ```
+  cd ~/Library/CloudStorage/ProtonDrive-*/Backups/planner
+  scp planner-2026-10-19.tar.gz homebase:/tmp/
+  ```
 - **New machine:** run `server-setup.sh` first, then the restore. The calendar password is the new one in the new `.env`, so re-enter it on each phone.
 
 ## Syncing with other calendar apps
