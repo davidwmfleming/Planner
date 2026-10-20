@@ -17,9 +17,20 @@ async function calendarApp(baseURL: string, password = 'dev') {
 	return client;
 }
 
+/** The calendar list, as a calendar app reads it. Radicale answers 500 to a listing when a calendar is deleted while
+ * it lists (other tests running alongside delete theirs), so a server error is retried once, as a calendar app would. */
+async function listCalendars(client: DAVClient) {
+	try {
+		return await client.fetchCalendars();
+	} catch (e) {
+		if (!/failed: 5\d\d\b/.test(e instanceof Error ? e.message : '')) throw e;
+		return client.fetchCalendars();
+	}
+}
+
 test('another calendar app finds the calendars, and events flow both ways', async ({ page, baseURL }, info) => {
 	const client = await calendarApp(baseURL!);
-	const calendars = await client.fetchCalendars();
+	const calendars = await listCalendars(client);
 	const work = calendars.find((c) => c.displayName === 'Work');
 	expect(work, 'the Work calendar is offered to other apps').toBeTruthy();
 	expect(new URL(work!.url).pathname).toMatch(/^\/dav\//);
