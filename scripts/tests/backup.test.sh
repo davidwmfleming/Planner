@@ -29,19 +29,62 @@ check "a safety copy from a restore is kept" test -e "$WORK/srv/backups/before-r
 check "other files are left alone" test -e "$WORK/srv/backups/notes.txt"
 
 echo "== A running calendar server is paused for the copy and carries on afterwards"
-docker run -d --name plannertest-radicale -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
+docker run -d --name "$TEST_CONTAINER" -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
 bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
-check "the backup says it paused the server" grep -q "plannertest-radicale" "$WORK/out"
-check "the server is running again (not paused)" test "$(docker inspect -f '{{.State.Status}}' plannertest-radicale)" = running
-docker rm -f plannertest-radicale >/dev/null
+check "the backup says it paused the server" grep -q "$TEST_CONTAINER" "$WORK/out"
+check "the server is running again (not paused)" test "$(docker inspect -f '{{.State.Status}}' "$TEST_CONTAINER")" = running
+docker rm -f "$TEST_CONTAINER" >/dev/null
 
 echo "== A calendar server left paused by a backup that was killed mid-copy is resumed"
-docker run -d --name plannertest-radicale -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
-docker pause plannertest-radicale >/dev/null # what kill -9 during the copy leaves behind
+docker run -d --name "$TEST_CONTAINER" -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
+docker pause "$TEST_CONTAINER" >/dev/null # what kill -9 during the copy leaves behind
 bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
-check "the server is running again" test "$(docker inspect -f '{{.State.Status}}' plannertest-radicale)" = running
+check "the server is running again" test "$(docker inspect -f '{{.State.Status}}' "$TEST_CONTAINER")" = running
 check "the backup says it found it paused" grep -q "left paused" "$WORK/out"
-docker rm -f plannertest-radicale >/dev/null
+docker rm -f "$TEST_CONTAINER" >/dev/null
+
+echo "== A calendar server that goes away just before the pause doesn't stop the backup"
+docker run -d --name "$TEST_CONTAINER" -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
+mkdir -p "$WORK/dockerbin"
+REAL_DOCKER=$(command -v docker)
+# shellcheck disable=SC2016 # $1 and $@ belong to the stand-in
+printf '#!/usr/bin/env bash\n[ "$1" != pause ] || "%s" rm -f "%s" >/dev/null\nexec "%s" "$@"\n' \
+	"$REAL_DOCKER" "$TEST_CONTAINER" "$REAL_DOCKER" >"$WORK/dockerbin/docker"
+chmod +x "$WORK/dockerbin/docker"
+copies() { find "$WORK/srv/backups" -maxdepth 1 -name '*.tar.gz' | wc -l; }
+before=$(copies)
+PATH="$WORK/dockerbin:$PATH" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
+check "a copy is still saved" test "$(copies)" = $((before + 1))
+
+echo "== A backup stopped with SIGTERM mid-copy (systemctl stop, or the time limit) resumes Radicale and says so"
+docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" sh -c 'head -c 200000000 /dev/urandom >/data/big'
+docker run -d --name "$TEST_CONTAINER" -v "$TEST_VOLUME:/data" "$IMAGE" sleep 600 >/dev/null
+status() { docker inspect -f '{{.State.Status}}' "$TEST_CONTAINER"; }
+set -m
+bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 &
+pid=$!
+set +m
+for _ in $(seq 100); do [ "$(status)" = paused ] && break; sleep 0.1; done
+check "(the server was paused for the copy)" test "$(status)" = paused
+kill -TERM -- "-$pid" # the whole job, as systemd does
+wait "$pid"
+check "the server is running again" test "$(status)" = running
+check "no half-written file is left" test -z "$(find "$WORK/srv/backups" -name '*.partial')"
+check "the log says the backup was stopped" grep -q "^Backup failed: stopped" "$WORK/out"
+docker rm -f "$TEST_CONTAINER" >/dev/null
+docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" rm /data/big
+
+echo "== A backup waits while another holds the lock file"
+flock "$PLANNER_BACKUP_LOCK" sleep 3 &
+holder=$!
+sleep 0.5
+start=$(date +%s)
+bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
+check "it waited for the lock" test $(($(date +%s) - start)) -ge 2
+wait "$holder"
+rm -f "$PLANNER_BACKUP_LOCK"
+bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly"; }
+check "the lock file it makes is private" test "$(stat -c %a "$PLANNER_BACKUP_LOCK")" = 600
 
 echo "== A second copy on the same day never replaces the first"
 todays() { find "$WORK/srv/backups" -maxdepth 1 -name "planner-$(date +%F)*.tar.gz" | wc -l; }
@@ -84,10 +127,10 @@ check "a quoted BACKUP_DIR with a trailing / works" test -f "$WORK/srv/quoted/pl
 
 echo "== A missing volume fails loudly and changes nothing"
 touch -d '31 days ago' "$WORK/srv/backups/planner-2000-01-02.tar.gz"
-sed -i "s/^VOLUME=.*/VOLUME=plannertest_missing/" "$WORK/config"
+sed -i "s/^VOLUME=.*/VOLUME=plannertest_missing_$$/" "$WORK/config"
 if bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1; then bad "backup.sh fails when the volume is missing"; else ok "backup.sh fails when the volume is missing"; fi
-check "the message names the missing volume" grep -q "plannertest_missing" "$WORK/out"
-check "the missing volume is not created" sh -c "! docker volume inspect plannertest_missing >/dev/null 2>&1"
+check "the message names the missing volume" grep -q "plannertest_missing_$$" "$WORK/out"
+check "the missing volume is not created" sh -c "! docker volume inspect plannertest_missing_$$ >/dev/null 2>&1"
 check "old archives are not removed after a failed run" test -e "$WORK/srv/backups/planner-2000-01-02.tar.gz"
 sed -i "s/^VOLUME=.*/VOLUME=$TEST_VOLUME/" "$WORK/config"
 
@@ -103,15 +146,16 @@ if can_be_root; then
 		echo "root secret" >"$1/target" && chmod 600 "$1/target"
 		mkdir "$2" && echo old >"$2/planner-2000-01-05.tar.gz" && chown -R nobody "$2"
 		ln -s "$1/target" "$2/.planner-$3.tar.gz.partial"
-		ln -s "$1/target" "$2/planner-$3.tar.gz"' _ "$ROOT_WORK" "$RDIR" "$(date +%F)"
+		ln -s "$1/target" "$2/planner-$3.tar.gz"
+		ln "$1/target" "$2/planner-2000-01-06.tar.gz"' _ "$ROOT_WORK" "$RDIR" "$(date +%F)"
 	sed -e "s|^BACKUP_DIR=.*|BACKUP_DIR=$RDIR|" "$WORK/config" | as_root tee "$ROOT_WORK/config" >/dev/null
 	echo "BACKUP_OWNER=nobody" | as_root tee -a "$ROOT_WORK/config" >/dev/null
-	as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly as root"; }
+	as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config" PLANNER_BACKUP_LOCK="$ROOT_WORK/lock" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1 || { cat "$WORK/out"; bad "backup.sh exits cleanly as root"; }
 	owner() { as_root stat -c '%U:%G %a' "$1"; }
 	check "the folder is root's, group $GROUP may read it (750)" test "$(owner "$RDIR")" = "root:$GROUP 750"
 	check "today's copy is root's, group $GROUP may read it (640)" test "$(owner "$RDIR/planner-$(date +%F).tar.gz")" = "root:$GROUP 640"
 	check "an older copy is taken back by root (640)" test "$(owner "$RDIR/planner-2000-01-05.tar.gz")" = "root:$GROUP 640"
-	check "the file a planted link pointed to is untouched" test "$(as_root cat "$ROOT_WORK/target") $(owner "$ROOT_WORK/target")" = "root secret root:root 600"
+	check "the file a planted link (or hard link) pointed to is untouched" test "$(as_root cat "$ROOT_WORK/target") $(owner "$ROOT_WORK/target")" = "root secret root:root 600"
 	check "the planted links are gone" test -z "$(as_root find "$RDIR" -type l)"
 	check "the owner's account can read today's copy" as_root su -s /bin/sh nobody -c "tar -tzf '$RDIR/planner-$(date +%F).tar.gz' >/dev/null"
 	check "the owner's account can't add files to the folder" not as_root su -s /bin/sh nobody -c "touch '$RDIR/x' 2>/dev/null"
@@ -120,14 +164,14 @@ if can_be_root; then
 	# shellcheck disable=SC2016 # expanded by the inner sh
 	as_root sh -c 'mkdir "$1/user" && chown nobody "$1/user"' _ "$ROOT_WORK"
 	sed -e "s|^BACKUP_DIR=.*|BACKUP_DIR=$ROOT_WORK/user/backups|" "$WORK/config" | as_root tee "$ROOT_WORK/config-user" >/dev/null
-	if as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config-user" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1; then bad "it is refused"; else check "it is refused" grep -q "must belong to root" "$WORK/out"; fi
+	if as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config-user" PLANNER_BACKUP_LOCK="$ROOT_WORK/lock" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1; then bad "it is refused"; else check "it is refused" grep -q "must belong to root" "$WORK/out"; fi
 
 	echo "== As root: a full disk is reported as a failed backup"
 	docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" sh -c 'head -c 2000000 /dev/urandom >/data/big'
 	# shellcheck disable=SC2016 # expanded by the inner sh
 	as_root sh -c 'mkdir "$1/full" && mount -t tmpfs -o size=64k,mode=755 tmpfs "$1/full"' _ "$ROOT_WORK"
 	sed -e "s|^BACKUP_DIR=.*|BACKUP_DIR=$ROOT_WORK/full/backups|" "$WORK/config" | as_root tee "$ROOT_WORK/config-full" >/dev/null
-	if as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config-full" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1; then bad "the backup fails"; else ok "the backup fails"; fi
+	if as_root env PLANNER_BACKUP_CONFIG="$ROOT_WORK/config-full" PLANNER_BACKUP_LOCK="$ROOT_WORK/lock" bash "$REPO/scripts/backup.sh" >"$WORK/out" 2>&1; then bad "the backup fails"; else ok "the backup fails"; fi
 	check "the message starts with 'Backup failed:' and mentions the disk" grep -q "^Backup failed: .*disk full" "$WORK/out"
 	check "no copy or half-written file is left" test -z "$(as_root find "$ROOT_WORK/full/backups" -type f)"
 	docker run --rm -v "$TEST_VOLUME:/data" "$IMAGE" rm /data/big
@@ -140,6 +184,8 @@ UNIT="$REPO/scripts/systemd/planner-backup.service"
 for line in TimeoutStartSec=30min PrivateTmp=yes ProtectHome=yes NoNewPrivileges=yes; do
 	check "the service has $line" grep -qx "$line" "$UNIT"
 done
+check "the README says what to do when calendars stop syncing" \
+	grep -q "stopped syncing.*sudo systemctl start planner-backup" "$REPO/README.md"
 check "the helper image is pinned by digest in backup.sh and restore.sh" \
 	test "$(grep -c 'IMAGE:-debian:trixie-slim@sha256:[0-9a-f]\{64\}}' "$REPO/scripts/backup.sh" "$REPO/scripts/restore.sh" | grep -c ':1$')" = 2
 

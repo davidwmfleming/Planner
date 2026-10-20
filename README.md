@@ -47,7 +47,8 @@ The times and dates follow the server's clock, so set its time zone once: `timed
 
 - See when it last ran and when it runs next: `systemctl list-timers planner-backup.timer`
 - Make a copy now: `sudo systemctl start planner-backup`, then `ls -l /srv/backups/planner`
-- If it went wrong: `journalctl -u planner-backup`. Every problem starts with "Backup failed:", for example a full disk (check with `df -h /srv/backups`).
+- If it went wrong: `journalctl -u planner-backup`. Every problem starts with "Backup failed:", for example a full disk (check with `df -h /srv/backups`). "Backup failed: stopped" means the copy was stopped part-way (by hand, a shutdown or the 30-minute limit); nothing was saved and the calendar server carried on.
+- If phones and computers have stopped syncing right after a backup (the calendar server was left paused, which only happens if the server lost power mid-copy): `sudo systemctl start planner-backup`. It resumes a paused calendar server and makes a copy.
 - Settings (folder, days kept): `/etc/default/planner-backup`. `server-setup.sh` never overwrites your edits. Days kept must be a whole number, 1 or more.
 
 The copies don't include `.env`; `server-setup.sh` makes a new one with a new calendar password on a new machine.

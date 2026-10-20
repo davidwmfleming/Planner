@@ -14,6 +14,7 @@
 set -euo pipefail
 
 CONFIG="${PLANNER_BACKUP_CONFIG:-/etc/default/planner-backup}"
+LOCK="${PLANNER_BACKUP_LOCK:-/run/planner-backup.lock}" # shared with restore.sh
 # shellcheck source=/dev/null
 [ -f "$CONFIG" ] && . "$CONFIG"
 BACKUP_DIR="${BACKUP_DIR:-/srv/backups/planner}"
@@ -69,27 +70,30 @@ fi
 umask 077
 mkdir -p "$BACKUP_DIR"
 
-# One backup or restore at a time; a second one waits for the first to finish.
-# (restore.sh holds the lock itself while it runs this for the safety copy.)
+# One backup or restore at a time; a second one waits for the first to finish. The lock is a file
+# in /run, where only root can make files. (restore.sh holds it while it runs this for the safety copy.)
 if [ -z "${PLANNER_BACKUP_LOCKED:-}" ]; then
-	exec 9<"$BACKUP_DIR"
+	exec 9>>"$LOCK"
 	flock -w 1800 9 || die "another backup or restore has been running for 30 minutes."
 fi
 
 # Root owns the folder and the copies; the owner's group can read them. Earlier versions let the
-# owner's account own them, so take them back, and drop anything that account could have planted.
+# owner's account own them, so take them back (shutting that account out first), and drop
+# anything it could have planted. A file with a second name (a hard link) may be another file
+# entirely, so it is never given to the group.
 if [ "$(id -u)" = 0 ]; then
 	chown root:"$GROUP" "$BACKUP_DIR"
+	chmod 700 "$BACKUP_DIR"
 	find "$BACKUP_DIR" -maxdepth 1 \( -type l -o -name '.planner-*.partial' \) -print -delete | sed 's/^/Removed stray /'
-	find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.tar.gz' -exec chown root:"$GROUP" {} +
+	find "$BACKUP_DIR" -maxdepth 1 -type f -links 1 -name '*.tar.gz' -exec chown root:"$GROUP" {} +
 fi
 if [ "$GROUP" = root ]; then
 	chmod 700 "$BACKUP_DIR"
 	FILE_MODE=600
 else
+	find "$BACKUP_DIR" -maxdepth 1 -type f -links 1 -name '*.tar.gz' -exec chmod 640 {} +
 	chmod 750 "$BACKUP_DIR"
 	FILE_MODE=640
-	find "$BACKUP_DIR" -maxdepth 1 -type f -name '*.tar.gz' -exec chmod 640 {} +
 fi
 
 NAME=${SAFETY_NAME:-planner-$(date +%F).tar.gz}
@@ -111,7 +115,8 @@ resume() {
 	PAUSED=""
 }
 trap 'resume; rm -f "$PARTIAL"' EXIT
-trap 'exit 1' TERM INT HUP # systemd stopping the job still resumes Radicale
+# systemd stopping the job (by hand or at the time limit) still resumes Radicale, and says so.
+trap 'die "stopped (by systemctl stop, a shutdown or the 30-minute limit)."' TERM INT HUP
 names() { docker inspect -f '{{.Name}}' "$@" | tr -d / | tr '\n' ' '; }
 if [ -n "$LEFT_PAUSED" ]; then
 	# shellcheck disable=SC2086
@@ -120,8 +125,11 @@ fi
 if [ -n "$RUNNING" ]; then
 	# shellcheck disable=SC2086
 	echo "Pausing $(names $RUNNING)for the copy"
-	# shellcheck disable=SC2086
-	docker pause $RUNNING >/dev/null
+	for c in $RUNNING; do
+		# One that stopped since the list was made is fine: it isn't writing either.
+		docker pause "$c" >/dev/null 2>&1 || [ "$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null)" != running ] ||
+			die "couldn't pause container $c for the copy."
+	done
 fi
 
 timeout $((COPY_MINUTES * 60 + 60)) docker run --rm --network none -v "$VOLUME:/data:ro" "$IMAGE" \

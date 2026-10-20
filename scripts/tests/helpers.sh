@@ -5,13 +5,18 @@
 # shellcheck disable=SC2034 # used by the tests that source this file
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WORK=$(mktemp -d)
-TEST_VOLUME="plannertest_data"
+# Names with this run's process number, so two test runs on one Docker daemon never touch each
+# other's volume, Compose project or containers.
+TEST_VOLUME="plannertest_data_$$"
+TEST_PROJECT="plannertest-$$"
+TEST_CONTAINER="plannertest-radicale-$$"
 IMAGE="${TEST_IMAGE:-debian:trixie-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f}"
 FAILED=0
 ROOT_WORK="" # a folder only root can change, for the checks that need root (see root_work)
 
 cleanup() {
-	docker compose --project-directory "$WORK/compose" down >/dev/null 2>&1 || true
+	docker rm -f "$TEST_CONTAINER" >/dev/null 2>&1 || true
+	[ ! -f "$WORK/compose/compose.yaml" ] || docker compose -f "$WORK/compose/compose.yaml" down >/dev/null 2>&1 || true
 	docker volume rm -f "$TEST_VOLUME" >/dev/null 2>&1 || true
 	rm -rf "$WORK"
 	if [ -n "$ROOT_WORK" ]; then
@@ -63,7 +68,7 @@ fill_volume() {
 start_compose() {
 	mkdir -p "$WORK/compose"
 	cat >"$WORK/compose/compose.yaml" <<EOF
-name: plannertest
+name: $TEST_PROJECT
 services:
   radicale:
     image: $IMAGE
@@ -73,6 +78,7 @@ services:
       - data:/data
 volumes:
   data:
+    name: $TEST_VOLUME
 EOF
 	docker compose -f "$WORK/compose/compose.yaml" up -d --quiet-pull >/dev/null 2>&1
 }
@@ -96,5 +102,8 @@ VOLUME=$TEST_VOLUME
 PLANNER_DIR=$WORK/compose
 IMAGE=$IMAGE
 EOF
-	export PLANNER_BACKUP_CONFIG="$WORK/config"
+	# The lock file (normally /run/planner-backup.lock), and where the installed backup would be
+	# (normally /usr/local/sbin/planner-backup; nothing there here, so restore.sh uses backup.sh).
+	export PLANNER_BACKUP_CONFIG="$WORK/config" PLANNER_BACKUP_LOCK="$WORK/backup.lock" \
+		PLANNER_INSTALLED_BACKUP="$WORK/no-installed-backup"
 }
