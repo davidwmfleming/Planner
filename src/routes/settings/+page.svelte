@@ -134,16 +134,17 @@
 						{#if renaming === calendar.path}
 							<form method="POST" action="?/rename" use:enhance={renamed} class="edit">
 								<input type="hidden" name="path" value={calendar.path} />
-								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.name}" autocomplete="off" onkeydown={renameKeys} />
+								<input id="rename-field" class="text" name="name" value={calendar.name} aria-label="New name for {calendar.label}" autocomplete="off" onkeydown={renameKeys} />
 								<button class="btn primary">Save name</button>
 								<button type="button" class="btn" onclick={stopRename}>Cancel</button>
 								{#if renameError}<p class="error" role="alert">{renameError}</p>{/if}
 							</form>
 						{:else}
-							<span class="name">{calendar.name}</span>
+							<!-- Two calendars can share a name (one made on a phone, say); the label adds the end of the address. -->
+							<span class="name">{calendar.label}</span>
 							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
 							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
-							<button type="button" class="btn small" aria-label="Rename {calendar.name}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
+							<button type="button" class="btn small" aria-label="Rename {calendar.label}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
 						{/if}
 					</li>
 				{/each}
@@ -162,13 +163,13 @@
 						<label for="work-calendar">Show as work (light red)</label>
 						<select id="work-calendar" name="work" value={data.workPath ?? ''} onchange={() => (saved = false)}>
 							<option value="">None</option>
-							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.label}</option>{/each}
 						</select>
 					</div>
 					<div class="field">
 						<label for="new-events-calendar">New events go in</label>
 						<select id="new-events-calendar" name="newEvents" value={data.defaultEventPath} onchange={() => (saved = false)}>
-							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.label}</option>{/each}
 						</select>
 					</div>
 					<div class="edit">

@@ -16,3 +16,9 @@ export async function makeCalendar(request: APIRequestContext, slug: string, nam
 export async function deleteCalendar(request: APIRequestContext, path: string) {
 	await request.fetch(`/dav${path}`, { method: 'DELETE', headers: auth });
 }
+
+/** Saves a calendar entry (.ics text) under this file name in a calendar, as a phone would. */
+export async function putEntry(request: APIRequestContext, path: string, filename: string, ics: string) {
+	const saved = await request.fetch(`/dav${path}${filename}`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'text/calendar' }, data: ics });
+	if (!saved.ok()) throw new Error(`PUT ${path}${filename}: ${saved.status()}`);
+}

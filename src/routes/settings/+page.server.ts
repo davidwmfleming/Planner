@@ -1,5 +1,5 @@
 import { error, fail } from '@sveltejs/kit';
-import { byName, calendarAtPath, checkCalendarName } from '$lib/settings';
+import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -41,7 +41,7 @@ export const load: PageServerLoad = async () => {
 	const [newEvents, newTasks] = [urlFor('event'), urlFor('task')];
 
 	return {
-		eventCalendars: events.map((c) => ({ path: pathOf(c.url), name: c.name, work: c.url === work?.url, newEvents: c.url === newEvents })),
+		eventCalendars: menuLabels(events.map((c) => ({ path: pathOf(c.url), name: c.name, work: c.url === work?.url, newEvents: c.url === newEvents }))),
 		// Lists that take only tasks; a calendar of notes only (VJOURNAL) is neither, so it isn't shown.
 		taskLists: calendars.filter((c) => c.accepts.includes('task') && !c.accepts.includes('event')).map((c) => ({ path: pathOf(c.url), name: c.name, newTasks: c.url === newTasks })),
 		workPath: work && pathOf(work.url),

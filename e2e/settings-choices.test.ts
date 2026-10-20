@@ -113,7 +113,8 @@ test('a line still saves when the new-events calendar was deleted on another dev
 
 test('two calendars with the same name from another device are kept apart', async ({ page, request }, info) => {
 	const name = unique('Twin', info);
-	const stamp = `${info.project.name}-${Date.now()}`;
+	// Short, so the menus show the whole address ending (a long one shows only its last 12 letters).
+	const stamp = Math.random().toString(36).slice(2, 6);
 	const [first, second] = [await makeCalendar(request, `twin-a-${stamp}`, name), await makeCalendar(request, `twin-b-${stamp}`, name)];
 	const event = unique('Twin meeting', info);
 	try {
@@ -131,7 +132,19 @@ test('two calendars with the same name from another device are kept apart', asyn
 		await expect(sheet).toBeVisible();
 		await expect(sheet.locator('#f-calendar option', { hasText: name })).toHaveCount(2);
 		await expect(sheet.locator('#f-calendar')).toHaveValue(second);
+		// Each says which one it is, by the end of its address.
+		expect(await sheet.locator('#f-calendar option', { hasText: name }).allInnerTexts()).toEqual(
+			expect.arrayContaining([`${name} (twin-a-${stamp})`, `${name} (twin-b-${stamp})`])
+		);
 		await sheet.getByRole('button', { name: 'Cancel' }).click();
+
+		const settings = page.getByRole('region', { name: 'Event calendars' });
+		await page.goto('/settings');
+		for (const menu of ['Show as work (light red)', 'New events go in']) {
+			const twins = await settings.getByLabel(menu).locator('option', { hasText: name }).allInnerTexts();
+			expect(twins.sort()).toEqual([`${name} (twin-a-${stamp})`, `${name} (twin-b-${stamp})`]);
+		}
+		expect(await settings.getByLabel('New events go in').locator('option').allInnerTexts()).toContain('Work');
 
 		await chooseByPath(page, { work: second, newEvents: second });
 		await page.goto(`/?page=${day}`);

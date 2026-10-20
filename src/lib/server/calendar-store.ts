@@ -73,6 +73,8 @@ export class CalendarStore {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const late = new Promise<never>((_, reject) => {
 			timer = setTimeout(() => reject(new Error(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
+			// Only the request itself should keep the planner running, not the wait for it.
+			timer.unref();
 		});
 		return Promise.race([work, late]).finally(() => clearTimeout(timer));
 	}
@@ -80,7 +82,8 @@ export class CalendarStore {
 	private home(): string {
 		const home = this.client.account?.homeUrl;
 		if (!home) throw new Error('The calendar server did not report a home folder for this user');
-		return home;
+		// Always a folder, so "/david" never matches "/david-two/" and new calendars go inside it, not beside it.
+		return home.endsWith('/') ? home : `${home}/`;
 	}
 
 	/** The address a calendar with this name is first made at. Tasks is found by it, since a phone can rename it. */
@@ -116,7 +119,8 @@ export class CalendarStore {
 				return { url: new URL(r.href!, home), displayName: davText(r.props?.displayname), components };
 			})
 			.filter((c) => inHome(c.url))
-			.map((c) => ({ ...c, url: c.url.href }));
+			// As folders, ending in '/', so an item's address can be checked to lie inside its calendar.
+			.map((c) => ({ ...c, url: c.url.href.endsWith('/') ? c.url.href : `${c.url.href}/` }));
 	}
 
 	calendars(): Calendar[] {
