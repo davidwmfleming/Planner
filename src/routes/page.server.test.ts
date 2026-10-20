@@ -316,6 +316,17 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(removed).toEqual([`${family.url}dentist.ics`]);
 	});
 
+	it('says the other changes made in the sheet were not saved either when the move is taken back', async () => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new RefusedError('Deleting "Dentist" failed (403)', 403);
+			removed.push(stored.url);
+		};
+		expect(await act('save', { ...toFamily, notes: 'Bring the form' })).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t move "Dentist" to another calendar, so it stays where it was, and your other changes weren\'t saved either. Reload the page and try again.' }
+		});
+	});
+
 	it('keeps the new copy when the old one was in fact deleted but the answer was lost (a timeout)', async () => {
 		// The delete reached the calendar server and was done; only its answer never came back.
 		fake.remove = async (stored: StoredItem) => {

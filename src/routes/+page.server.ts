@@ -206,7 +206,7 @@ export const actions: Actions = {
 			} else {
 				// A different calendar, or events and tasks (different kinds of entry): write the new one, then remove the old.
 				const copy = await store.create(target, result.item, result.item.kind === item.kind ? item.ics : undefined);
-				moved = await removeOrUndo(store, item, copy);
+				moved = await removeOrUndo(store, item, copy, otherChanges(item, result.item));
 			}
 		});
 		return saved ?? moved;
@@ -303,7 +303,7 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
  * calendars again only tells whether the move is surely done or says it may be in two.
  * An old copy already gone (404) was removed by someone else: by another move of the same item, perhaps, whose copy
  * is now somewhere else. So once the old copy is gone, any other copy left is reported too. */
-async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
+async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited = false) {
 	// The "copy" took the old one's place (same address): there is nothing to remove, and removing would lose it.
 	if (copy.url === old.url) return;
 	const title = shortTitle(old.title);
@@ -312,7 +312,7 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 		await store.remove(old);
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
-		if (e instanceof RefusedError && !GONE.includes(e.status)) return takeBack(store, old, copy);
+		if (e instanceof RefusedError && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
 		answered = e instanceof RefusedError;
 	}
 	const left = await elsewhere(store, old, copy);
@@ -324,17 +324,25 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	});
 }
 
-/** The calendar server refused to remove the old copy, so it is surely still there: take the new one back out. */
-async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
+/** The calendar server refused to remove the old copy, so it is surely still there: take the new one back out.
+ * The new copy carried the sheet's other changes too, so those go with it; the message says so if there were any. */
+async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem, edited: boolean) {
 	const title = shortTitle(old.title);
+	const alsoLost = edited ? ", and your other changes weren't saved either" : '';
 	try {
 		await store.remove(copy);
-		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was. Reload the page and try again.` });
+		return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, so it stays where it was${alsoLost}. Reload the page and try again.` });
 	} catch (e) {
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
 		return fail(502, { message: `"${title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
 	}
 }
+
+/** The fields the details sheet edits, besides the calendar and kind. */
+const SHEET_FIELDS = ['title', 'date', 'time', 'endTime', 'location', 'notes', 'label', 'recurrence'] as const;
+
+/** Whether the sheet changed anything besides where the item is kept. */
+const otherChanges = (before: Item, after: Item) => SHEET_FIELDS.some((field) => (before[field] ?? '') !== (after[field] ?? ''));
 
 /** How many copies of the item are now kept anywhere but the new copy's address, or undefined if that can't be read. */
 async function elsewhere(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
