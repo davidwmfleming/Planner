@@ -222,7 +222,7 @@ describe('moving the items, then deleting the calendar', () => {
 		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
 			refusal(502, {
 				message:
-					"Moved 1 of 3 items to Me, so Family is still there with the rest. 1 stayed in Family, because the calendar server wouldn't put it in Me. 1 is now in both calendars, because it was changed on another device meanwhile; delete the copy you don't want. Reload the page to see."
+					"Moved 1 of 3 items to Me, so Family is still there with the rest. 1 stayed in Family, because the calendar server wouldn't put it in Me. 1 may now be in two calendars, because it was changed, moved or deleted on another device meanwhile; delete the copy you don't want. Reload the page to see."
 			})
 		);
 		expect(fake.deleted).toEqual([]);

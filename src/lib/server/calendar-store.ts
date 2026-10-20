@@ -30,8 +30,9 @@ export interface StoredDocument {
 }
 
 /** What became of a document asked to move to another calendar:
- * moved (only in the new calendar), kept (surely only in the old one), both (surely in both: the old copy changed
- * since it was read, so it wasn't removed), or unsure (the server didn't answer: it may be in both). */
+ * moved (only in the new calendar), kept (surely only in the old one), both (the new copy is there, but so is
+ * another: the old copy changed since it was read, so it wasn't removed, or it had already gone, deleted or moved
+ * elsewhere by another device), or unsure (the server didn't answer: it may be in both). */
 export type MoveOutcome = 'moved' | 'kept' | 'both' | 'unsure';
 
 /** What the calendar server says about something that isn't there (any more). */
@@ -357,7 +358,10 @@ export class CalendarStore {
 		} catch {
 			return 'unsure'; // the server may still remove it
 		}
-		if (removed.ok || GONE.includes(removed.status)) return 'moved';
+		if (removed.ok) return 'moved';
+		// Already gone: another device deleted it (the copy brings it back) or moved it elsewhere (now in two).
+		// Either way the new copy may not be wanted, and only David can tell, so it is reported, never called moved.
+		if (GONE.includes(removed.status)) return 'both';
 		return removed.status >= 500 ? 'unsure' : 'both';
 	}
 

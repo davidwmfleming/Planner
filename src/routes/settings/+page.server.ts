@@ -238,7 +238,7 @@ async function contents(store: CalendarStore, calendar: Calendar): Promise<{ ver
 function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, number>): string {
 	const parts = [`Moved ${tally.moved} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`];
 	if (tally.kept) parts.push(`${tally.kept} stayed in ${name}, because the calendar server wouldn't put ${tally.kept === 1 ? 'it' : 'them'} in ${toName}.`);
-	if (tally.both) parts.push(`${tally.both} ${tally.both === 1 ? 'is' : 'are'} now in both calendars, because ${tally.both === 1 ? 'it was' : 'they were'} changed on another device meanwhile; delete the copy you don't want.`);
+	if (tally.both) parts.push(`${tally.both} may now be in two calendars, because ${tally.both === 1 ? 'it was' : 'they were'} changed, moved or deleted on another device meanwhile; delete the copy you don't want.`);
 	// Running it again finishes the job: a copy already in place and the same only needs the old one removed.
 	if (tally.unsure) parts.push(`The calendar server stopped answering, so ${tally.unsure} may now be in both calendars. Wait a minute, then reload the page and delete ${name} again to finish.`);
 	else parts.push('Reload the page to see.');

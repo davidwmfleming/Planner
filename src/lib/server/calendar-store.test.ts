@@ -155,7 +155,8 @@ describe('CalendarStore without a server', () => {
 		['a different item has that name already', (m: string) => (m === 'PUT' ? 412 : 200), 'kept', ['PUT /david/to/a.ics', 'GET /david/to/a.ics']],
 		['the old copy changed since it was read', (m: string) => (m === 'PUT' ? 201 : 412), 'both', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
 		['removing the old copy gets no answer', (m: string) => (m === 'PUT' ? 201 : 'hang'), 'unsure', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
-		['the old copy was already gone', (m: string) => (m === 'PUT' ? 201 : 404), 'moved', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
+		// Deleted on a phone (the copy brings it back) or moved elsewhere by another device (now in two): never "moved".
+		['the old copy was already gone', (m: string) => (m === 'PUT' ? 201 : 404), 'both', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
 		['all goes well', (m: string) => (m === 'PUT' ? 201 : 204), 'moved', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']]
 	] as const)('moving a document when %s: never deletes the old copy unless the new one is surely there', async (_, answer, outcome, asked) => {
 		const s = await fromAndTo(answer);
