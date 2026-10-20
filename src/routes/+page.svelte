@@ -6,8 +6,9 @@
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
+	import { dayBegun, pageForNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -341,6 +342,66 @@
 		nav.cancel();
 		const to = nav.to.url;
 		Promise.all(lines.map((line) => sendLine(line))).finally(() => goto(to));
+	});
+
+	// A new day: a page left open overnight (the tablet asleep with the planner open) moves on by itself, at midnight
+	// and when the screen wakes. The server's today decides; this device's clock only says when to ask.
+	// A page showing today moves on to the new today's page; one flipped to on purpose stays, refreshed.
+	// Nothing changes under a line being written or saved, a mark or tap saving, a stroke or the details sheet: it waits.
+	const WHILE_WRITING = 10_000;
+	// The server's clock may be a little behind this one: ask again shortly, a few times.
+	const SERVER_BEHIND = 60_000;
+	let seen: { today: string; todayPage: string; start: string } | undefined;
+	let dayTimer: ReturnType<typeof setTimeout> | undefined;
+	let checking = false;
+	let tries = 0;
+	let gone = false;
+	const shown = () => ({ today: data.today, todayPage: data.todayPage, start: data.start });
+	const busy = () =>
+		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 ||
+		[...document.querySelectorAll<HTMLInputElement>('input.entry')].some((i) => i.value.trim());
+	async function newDay() {
+		if (checking) return;
+		checking = true;
+		clearTimeout(dayTimer);
+		let wait;
+		try {
+			seen ??= shown();
+			const waiting = busy();
+			if (!waiting && dayBegun(new Date(), data.today)) await invalidateAll();
+			const to = pageForNewDay(seen, shown());
+			const held = waiting || busy();
+			if (to && !held) {
+				await goto(pageUrl(to), { replaceState: true });
+				seen = shown();
+			} else if (!to) seen = shown();
+			const behind = dayBegun(new Date(), data.today);
+			tries = behind && !held ? tries + 1 : 0;
+			wait = held && (to || behind) ? WHILE_WRITING : behind && tries <= 5 ? SERVER_BEHIND : untilMidnight(new Date());
+		} catch {
+			wait = SERVER_BEHIND;
+		} finally {
+			checking = false;
+		}
+		if (!gone) dayTimer = setTimeout(newDay, wait);
+	}
+	// Any new data (a save, a turned page, a refresh) may bring a new today, or show where the viewer is now.
+	$effect(() => {
+		void [data.today, data.start];
+		untrack(() => void newDay());
+	});
+	onMount(() => {
+		const awake = () => document.visibilityState === 'visible' && newDay();
+		document.addEventListener('visibilitychange', awake);
+		addEventListener('focus', awake);
+		addEventListener('pageshow', awake);
+		return () => {
+			gone = true;
+			clearTimeout(dayTimer);
+			document.removeEventListener('visibilitychange', awake);
+			removeEventListener('focus', awake);
+			removeEventListener('pageshow', awake);
+		};
 	});
 
 	function onJump(e: Event) {

@@ -22,6 +22,8 @@ David's weekly planner: two pages a week (Mon–Wed, Thu–Sun), events on the l
 
 Open the planner's address in the browser, then add it to the home screen: in Chrome on Android (the ViWoods), menu → **Add to home screen** / **Install app**; in Safari on iPhone, Share → **Add to Home Screen**. It then opens full-screen like any app. With no browser buttons there, every message that says to reload has a **Reload** button, and a page that can't be shown offers **Reload** and **Back to the planner**. It needs the home server (over Tailscale) to show anything; there is no offline copy, because the calendar server is the one place the data lives.
 
+Left open overnight (the tablet asleep with the planner on screen), the page moves on to the new day by itself, at midnight or when the screen wakes: a page showing today turns to the new today's page, with unfinished tasks carried over; a page you turned to on purpose stays where it is. It waits while a line is being written or saved.
+
 ## Work events
 
 Work meetings are entered by hand into the **Work** calendar (created automatically on the calendar server): write the line as usual, open its details and choose **Calendar → Work**. Work events are shaded light red and tagged **Work**, and otherwise behave like any other event. Which calendar counts as Work, and which one new events go in (**Me** at first), are chosen on the Settings page and kept in the planner's settings on the calendar server, so they still apply after a calendar is renamed. `WORK_CALENDAR` and `EVENTS_CALENDAR` in `.env` only fill these in the first time the planner starts.

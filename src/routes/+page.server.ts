@@ -6,6 +6,8 @@ import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
+import { pageToday, TEST_TODAY_COOKIE } from '$lib/server/clock';
+import { env } from '$env/dynamic/private';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
 import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, checkCalendarName, menuLabels } from '$lib/settings';
@@ -37,15 +39,16 @@ function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event'
 /** Only plain item data goes to the browser, not where it lives on the server. */
 const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }): Item => item;
 
-export const load: PageServerLoad = async ({ url }) => {
-	const today = toISODate(new Date());
+export const load: PageServerLoad = async ({ url, cookies }) => {
+	const now = new Date();
+	const today = pageToday(now, env, env.PLANNER_TEST_CLOCK === '1' ? cookies.get(TEST_TODAY_COOKIE) : undefined);
 	const asked = url.searchParams.get('page');
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
 
 	let items, store, settings;
 	try {
-		await rollover(today);
+		await rollover(toISODate(now));
 		store = await getStore();
 		items = await store.listItems();
 		settings = await getSettings(store);

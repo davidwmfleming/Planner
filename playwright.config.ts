@@ -19,7 +19,7 @@ export default defineConfig({
 		{
 			command: 'npm run build && npm run preview -- --port 4173',
 			port: 4173,
-			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev' }
+			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev', PLANNER_TEST_CLOCK: '1' }
 		}
 	],
 	projects: [
