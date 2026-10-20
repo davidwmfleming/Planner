@@ -58,10 +58,21 @@ check "and doesn't add it twice" test "$(lines_with "$BLOB")" = 1
 
 echo "== Anything but one plain public key is refused"
 for evil in "$KEY"$'\n'"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAISecond" \
-	"command=\"sh\" $KEY" "$KEY\" ,command=\"sh" "ssh-ed25519 $BLOB a\"b" "ssh-ed25519 $BLOB "; do
+	"command=\"sh\" $KEY" "$KEY\" ,command=\"sh" "ssh-ed25519 $BLOB a\"b"; do
 	if access "$evil"; then bad "refuses $(head -c 40 <<<"$evil")"; else ok "refuses $(head -c 40 <<<"$evil")"; fi
 done
 check "authorized_keys is unchanged by refused keys" test "$(wc -l <"$AK")" = 2
+
+echo "== A key pasted with spaces or a newline at the end (as Terminal copies it) is accepted"
+access "$KEY"$'\n' || { cat "$WORK/out"; bad "a key with a trailing newline is accepted"; }
+access "$KEY  " || { cat "$WORK/out"; bad "a key with trailing spaces is accepted"; }
+check "there is still exactly one line for the key" test "$(lines_with "$BLOB")" = 1
+check "and it is the limited one" grep -qxF "restrict,command=\"rrsync -ro /srv/backups/planner\" $KEY" "$AK"
+
+echo "== An update run without the key doesn't ask for the key that is already there"
+access "" || { cat "$WORK/out"; bad "backup-access.sh exits cleanly"; }
+check "it doesn't ask for the Mac's key" not grep -q "MAC_BACKUP_KEY=" "$WORK/out"
+check "it says the key is set up" grep -q "Mac's key is already" "$WORK/out"
 
 echo "== A key already there without the limit is limited, not left as it was"
 grep -vF "$BLOB" "$AK" >"$WORK/ak" && cat "$WORK/ak" >"$AK"
@@ -107,6 +118,20 @@ printf 'SSH_ALLOW_USERS="alice\nPermitRootLogin yes"\n' >>"$WORK/config"
 if access "$KEY"; then bad "a setting that spans lines is refused"; else ok "a setting that spans lines is refused"; fi
 check "the ssh settings are unchanged" cmp -s "$WORK/dropin-before" "$DROPIN"
 sed -i '/SSH_ALLOW_USERS/,$d' "$WORK/config"
+for wild in '*' '*@100.64.0.0/10' '?*'; do
+	echo "SSH_ALLOW_USERS='$wild'" >>"$WORK/config"
+	if access "$KEY"; then bad "SSH_ALLOW_USERS='$wild' (any account) is refused"; else ok "SSH_ALLOW_USERS='$wild' (any account) is refused"; fi
+	sed -i '$d' "$WORK/config"
+done
+check "the ssh settings are unchanged" cmp -s "$WORK/dropin-before" "$DROPIN"
+
+echo "== Accounts let in by another ssh settings file are pointed out"
+echo "AllowUsers mallory" >"$WORK/sshd_config.d/50-other.conf"
+access "$KEY" || { cat "$WORK/out"; bad "backup-access.sh exits cleanly"; }
+check "it warns about the other account" grep -q "Warning: .*mallory" "$WORK/out"
+rm -f "$WORK/sshd_config.d/50-other.conf"
+access "$KEY" || { cat "$WORK/out"; bad "backup-access.sh exits cleanly"; }
+check "and says nothing when there are none" not grep -q "mallory" "$WORK/out"
 
 echo "== If sshd rejects the result, the old settings are put back and nothing is reloaded"
 access "$KEY" || { cat "$WORK/out"; bad "backup-access.sh exits cleanly"; }
@@ -124,7 +149,27 @@ if access "$KEY"; then bad "it fails the first time too"; else ok "it fails the 
 check "no settings file is left" test ! -e "$DROPIN"
 sed -i '$d' "$WORK/sshd_config"
 
+echo "== Passwords stay on while the Mac's key is the only way in (so David can't lock himself out)"
+rm -f "$DROPIN"
+grep -F "$BLOB" "$AK" >"$WORK/ak" && cat "$WORK/ak" >"$AK" # only the Mac's limited key is left
+if access "$KEY"; then bad "it stops"; else ok "it stops"; fi
+check "no ssh server settings are written" test ! -e "$DROPIN"
+check "it says to add a key of your own with ssh-copy-id first" grep -q "ssh-copy-id" "$WORK/out"
+check "the Mac's key is still added" test "$(lines_with "$BLOB")" = 1
+echo "# a comment" >>"$AK"
+echo "restrict,command=\"rrsync -ro /srv/old\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOldMacKey old" >>"$AK"
+if access "$KEY"; then bad "comments and other backup-only keys don't count"; else ok "comments and other backup-only keys don't count"; fi
+SSH_I_HAVE_ANOTHER_WAY_IN=yes access "$KEY" || { cat "$WORK/out"; bad "SSH_I_HAVE_ANOTHER_WAY_IN=yes goes ahead"; }
+check "with SSH_I_HAVE_ANOTHER_WAY_IN=yes the settings are written" test -f "$DROPIN"
+rm -f "$DROPIN"
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOtherKeyOfDavidsLaptop laptop" >>"$AK"
+access "$KEY" || { cat "$WORK/out"; bad "with a key of David's own it goes ahead"; }
+check "with a key of David's own the settings are written" test -f "$DROPIN"
+
 echo "== The README's key-making command and server-setup.sh"
+check "the README says to run ssh-copy-id before adding the Mac's key" \
+	awk '/ssh-copy-id/ && !c { c = NR } /MAC_BACKUP_KEY=/ && !m { m = NR } END { exit !(c && m && c < m) }' "$REPO/README.md"
+check "the README says how to undo the ssh settings from the console" grep -q "rm /etc/ssh/sshd_config.d/00-planner-backup.conf" "$REPO/README.md"
 check "the README makes the key with a one-word comment" grep -q 'ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C planner-backup' "$REPO/README.md"
 check "server-setup.sh runs backup-access.sh" grep -q "bash scripts/backup-access.sh" "$REPO/scripts/server-setup.sh"
 

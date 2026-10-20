@@ -63,8 +63,14 @@ Setting it up, once, in Terminal on the Mac (from a copy of this repository):
 
 1. Install Homebrew's rsync (the one built into recent macOS doesn't work as well with the server): `brew install rsync`
 2. Make the key: `ssh-keygen -t ed25519 -f ~/.ssh/planner-backup -N "" -C planner-backup`, then show it with `cat ~/.ssh/planner-backup.pub`.
-3. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line it showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups (or fixes the line if the key is already there), and tightens the ssh server as described above.
-4. Copy the script and its settings file, then fill in the settings:
+3. Make sure you can still sign in once passwords are off: give the server a key of your own (not the backup key, which can only read the backups). If `ls ~/.ssh/id_*.pub` shows nothing, make one with `ssh-keygen -t ed25519`. Then run `ssh-copy-id david@homebase` (your account and the server's Tailscale name; it asks for your password one last time), and check that `ssh david@homebase` now signs in without asking for it. `server-setup.sh` refuses to turn passwords off until your account has such a key. If you only ever use the server's console, not ssh, put `SSH_I_HAVE_ANOTHER_WAY_IN=yes` in front of the command in the next step instead.
+4. On the server, in `/srv/planner`, run `MAC_BACKUP_KEY='<the line step 2 showed>' bash scripts/server-setup.sh`. It adds the key, limited to reading the backups (or fixes the line if the key is already there), and tightens the ssh server as described above. Keep that session open and check, from a new Terminal window, that `ssh david@homebase` still works. If it doesn't, sign in at the server's own screen and keyboard (or in a session that is still open) and put the old settings back:
+   ```
+   sudo rm /etc/ssh/sshd_config.d/00-planner-backup.conf
+   sudo systemctl reload ssh
+   ```
+   Then sort out the key (step 3) and run step 4 again.
+5. Copy the script and its settings file, then fill in the settings:
    ```
    mkdir -p ~/bin ~/.config
    cp scripts/mac/pull-backup.sh ~/bin/planner-pull-backup.sh
@@ -72,8 +78,8 @@ Setting it up, once, in Terminal on the Mac (from a copy of this repository):
    open -e ~/.config/planner-backup.conf
    ```
    In TextEdit, set `SERVER` (the server's Tailscale name, for example `homebase`), `SERVER_USER` (your account on it) and `PROTON_DRIVE` (Proton Drive's folder; `ls ~/Library/CloudStorage` shows its name), and save. The settings live there, not in the script, so copying a newer script later keeps them. If you change `KEEP_DAYS` on the server, keep the Mac's at least as high.
-5. Try it: `bash ~/bin/planner-pull-backup.sh`. The copies should appear in Proton Drive under `Backups/planner`.
-6. Schedule it:
+6. Try it: `bash ~/bin/planner-pull-backup.sh`. The copies should appear in Proton Drive under `Backups/planner`.
+7. Schedule it:
    ```
    sed "s|/Users/YOURNAME|$HOME|g" scripts/mac/local.planner.pull-backup.plist > ~/Library/LaunchAgents/local.planner.pull-backup.plist
    plutil -lint ~/Library/LaunchAgents/local.planner.pull-backup.plist

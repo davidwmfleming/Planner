@@ -106,7 +106,7 @@ say "Copy on the Mac"
 # The Mac fetches the copies over ssh with its own key, which may only read the backup folder.
 # This also tightens the ssh server (keys only, Tailscale only); see the README.
 MAC_BACKUP_KEY="${MAC_BACKUP_KEY:-}" bash scripts/backup-access.sh ||
-	echo "Warning: the Mac's access wasn't set up; the message above says why. Fix that and run this again."
+	echo "Warning: the Mac's access isn't finished; the message above says why. Fix that and run this again."
 
 say "https address"
 # If HTTPS certificates are off for your tailnet, this prints a link to turn them on; then run the script again.

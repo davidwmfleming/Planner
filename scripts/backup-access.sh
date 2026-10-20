@@ -4,7 +4,9 @@
 #    backup folder with rrsync -ro, or fixes the line if the key is already there;
 #  - installs the ssh server if it's missing, and tightens it with a settings file: keys only, no
 #    root, and only BACKUP_OWNER (plus SSH_ALLOW_USERS), only from Tailscale addresses. sshd checks
-#    the file first; if it rejects it, the previous settings are put back.
+#    the file first; if it rejects it, the previous settings are put back. As passwords go off, it
+#    stops first unless your authorized_keys has a key of your own (one not limited to a command),
+#    or SSH_I_HAVE_ANOTHER_WAY_IN=yes says you don't need ssh to get in.
 # Run as BACKUP_OWNER (your normal account); it asks for your password for the sudo steps.
 # Settings: /etc/default/planner-backup. The PLANNER_SSHD_* variables are for the tests.
 set -euo pipefail
@@ -38,14 +40,27 @@ for t in $TAILSCALE_ADDRESSES; do ALLOW="$ALLOW $OWNER@$t"; done
 read -ra EXTRAS <<<"$ALLOW_EXTRA" # split on spaces, without expanding * and ?
 for extra in "${EXTRAS[@]}"; do
 	[[ $extra =~ ^[A-Za-z0-9._*?-]+(@[A-Za-z0-9.:/*?_-]+)?$ ]] || die "SSH_ALLOW_USERS in $CONFIG: '$extra' isn't an account name (or name@address)."
+	[[ ! ${extra%%@*} =~ ^[*?]+$ ]] || die "SSH_ALLOW_USERS in $CONFIG: '$extra' would let any account in; name the accounts."
 	ALLOW="$ALLOW $extra"
 done
 KEY_OPTIONS="restrict,command=\"rrsync -ro $BACKUP_DIR\""
+AK=~/.ssh/authorized_keys
 
 # ---- The Mac's key ------------------------------------------------------------------------------
-if [ -z "${MAC_BACKUP_KEY:-}" ]; then
-	echo "To let the Mac fetch the copies, run server-setup.sh again with the Mac's key (see the README):"
-	echo "  MAC_BACKUP_KEY='<contents of planner-backup.pub from the Mac>' bash scripts/server-setup.sh"
+# Terminal copies the line's newline too when it is triple-clicked; spaces at either end don't matter.
+MAC_BACKUP_KEY=${MAC_BACKUP_KEY:-}
+while [[ $MAC_BACKUP_KEY =~ ^[[:space:]] ]]; do MAC_BACKUP_KEY=${MAC_BACKUP_KEY#?}; done
+while [[ $MAC_BACKUP_KEY =~ [[:space:]]$ ]]; do MAC_BACKUP_KEY=${MAC_BACKUP_KEY%?}; done
+if [ -z "$MAC_BACKUP_KEY" ]; then
+	if [ -f "$AK" ] && grep -qF "$KEY_OPTIONS " "$AK"; then
+		echo "The Mac's key is already in ~/.ssh/authorized_keys, limited to reading $BACKUP_DIR"
+	elif [ -f "$AK" ] && grep -qF 'command="rrsync -ro ' "$AK"; then
+		echo "The Mac's key reads another folder than $BACKUP_DIR. To change it, run server-setup.sh again with the key:"
+		echo "  MAC_BACKUP_KEY='<contents of planner-backup.pub from the Mac>' bash scripts/server-setup.sh"
+	else
+		echo "To let the Mac fetch the copies, run server-setup.sh again with the Mac's key (see the README):"
+		echo "  MAC_BACKUP_KEY='<contents of planner-backup.pub from the Mac>' bash scripts/server-setup.sh"
+	fi
 else
 	# Exactly one public key on one line: type, key, and an optional comment of plain words. No
 	# options and no quotes, so it can't add its own; a second line would be a key without the limit.
@@ -53,7 +68,6 @@ else
 	[[ $MAC_BACKUP_KEY =~ $KEY_PATTERN ]] || die "MAC_BACKUP_KEY should be the one line in the Mac's ~/.ssh/planner-backup.pub"
 	BLOB=${BASH_REMATCH[3]}
 	LINE="$KEY_OPTIONS $MAC_BACKUP_KEY"
-	AK=~/.ssh/authorized_keys
 	install -d -m 700 ~/.ssh
 	touch "$AK"
 	chmod 600 "$AK"
@@ -80,7 +94,26 @@ fi
 
 # ---- The ssh server -----------------------------------------------------------------------------
 # Only once the Mac is being set up (and on later runs, to keep the settings current).
-[ -n "${MAC_BACKUP_KEY:-}" ] || [ -e "$DROPIN" ] || exit 0
+[ -n "$MAC_BACKUP_KEY" ] || [ -e "$DROPIN" ] || exit 0
+
+# Passwords go off below, so first make sure the owner has a key of their own to sign in with: the
+# Mac's key (or any key limited to one command) can't open a shell.
+OWN_KEYS=0
+[ ! -f "$AK" ] || OWN_KEYS=$(awk '!/^[[:space:]]*(#|$)/ && !/command="/ { n++ } END { print n + 0 }' "$AK")
+if [ "$OWN_KEYS" = 0 ] && [ "${SSH_I_HAVE_ANOTHER_WAY_IN:-}" != yes ]; then
+	cat >&2 <<EOF
+
+Stopped before changing the ssh server: ~/.ssh/authorized_keys has no key of your own, only
+the Mac's backup key (which can only read the backups). The ssh settings turn passwords off,
+so you couldn't sign in by ssh any more. First add a key of your own, from Terminal on the Mac:
+  ls ~/.ssh/id_*.pub || ssh-keygen -t ed25519      (makes one if there is none)
+  ssh-copy-id $OWNER@$(hostname)
+then check that  ssh $OWNER@$(hostname)  signs in without asking for your password, and run
+server-setup.sh again. If you never sign in by ssh (only at the console), run it with
+SSH_I_HAVE_ANOTHER_WAY_IN=yes in front instead.
+EOF
+	exit 1
+fi
 
 SSHD=$(command -v sshd || echo /usr/sbin/sshd)
 if [ ! -x "$SSHD" ]; then
@@ -125,6 +158,11 @@ grep -qx "allowusers $OWNER@100.64.0.0/10" <<<"$EFFECTIVE" ||
 	echo "Warning: the ssh server doesn't read $SSHD_DIR (no 'Include $SSHD_DIR/*.conf' in $SSHD_CONFIG), so these settings have no effect."
 grep -qx "passwordauthentication no" <<<"$EFFECTIVE" ||
 	echo "Warning: another file in $SSHD_DIR still turns passwords on; look for PasswordAuthentication there."
+# sshd adds up AllowUsers from every file, so another file could let more accounts in.
+read -ra EXPECTED <<<"$ALLOW"
+OTHERS=$(sed -n 's/^allowusers //p' <<<"$EFFECTIVE" | grep -vxF -f <(printf '%s\n' "${EXPECTED[@]}") | paste -sd ' ' - || true)
+[ -z "$OTHERS" ] || echo "Warning: other ssh settings (in $SSHD_CONFIG or $SSHD_DIR) also let these in: $OTHERS
+Remove them there, or add them to SSH_ALLOW_USERS in $CONFIG to keep them."
 # Reload if it's running; with Ubuntu's ssh.socket, the next connection starts it with these settings.
 sudo systemctl try-reload-or-restart ssh
 echo "The ssh server now uses these settings."
