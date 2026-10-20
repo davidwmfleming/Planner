@@ -356,10 +356,13 @@ export class CalendarStore {
 			return 'unsure'; // the copy may or may not have been made
 		}
 		if (copied.status >= 500) return 'unsure';
+		// Whether the identical copy was already there: put by an earlier run of this move, or one running alongside.
+		let foundSame = false;
 		if (copied.status === 412) {
 			// Something already has that name there: this move cut short before (the same), or something else.
 			const there = await this.holds(target, doc.ics);
 			if (there !== 'same') return there;
+			foundSame = true;
 		} else if (!copied.ok) return 'kept';
 		// Without a version, a change made on a phone since it was read could be deleted unseen.
 		if (!doc.etag) return 'both';
@@ -370,9 +373,10 @@ export class CalendarStore {
 			return 'unsure'; // the server may still remove it
 		}
 		if (removed.ok) return 'moved';
-		// Already gone: another device deleted it (the copy brings it back) or moved it elsewhere (now in two).
-		// Either way the new copy may not be wanted, and only David can tell, so it is reported, never called moved.
-		if (GONE.includes(removed.status)) return 'both';
+		// Already gone. With the identical copy found already in place, another run of this same move got there first:
+		// the item is in one place, as it was, so it is moved. After a fresh copy, another device deleted it (the copy
+		// brings it back) or moved it elsewhere (now in two); only David can tell, so it is reported, never called moved.
+		if (GONE.includes(removed.status)) return foundSame ? 'moved' : 'both';
 		return removed.status >= 500 ? 'unsure' : 'both';
 	}
 

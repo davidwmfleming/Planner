@@ -178,15 +178,19 @@ export const actions: Actions = {
 		const total = held.documents.length;
 		if (tally.moved.length < total) {
 			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, tally);
+			// Gone by now: another run of this delete (a second tab, or a tap after a refresh) finished it.
+			if (await isGone(store, calendar)) return refuse(502, unfinished(name, toName, total, tally, true));
 			return recounted(store, calendar, refuse(502, unfinished(name, toName, total, tally)));
 		}
 		// Read again, so the delete can't take an item that arrived (on a phone) while the others were moved.
 		const left = await contents(store, calendar);
-		if ('refusal' in left) return left.refusal;
+		const done = { action: 'delete' as const, deleted: calendar.name, count: total, movedTo: to.name };
+		// Already gone: another run of this delete moved the same items and deleted it. Everything is where it should be.
+		if ('refusal' in left) return left.refusal.status === 404 ? done : left.refusal;
 		if (left.documents.length > 0) {
 			return recounted(store, calendar, refuse(409, `Moved ${items(total)} to ${toName}, but ${left.documents.length} more arrived in ${name} meanwhile, so it is still there. Reload the page and delete it again to move those too.`));
 		}
-		return recounted(store, calendar, await finish(store, calendar, left.version, { action: 'delete' as const, deleted: calendar.name, count: total, movedTo: to.name }));
+		return recounted(store, calendar, await finish(store, calendar, left.version, done));
 	}
 };
 
@@ -244,6 +248,16 @@ async function recounted(store: CalendarStore, calendar: Calendar, result: Delet
 	}
 }
 
+/** Whether the calendar server says the calendar isn't there any more. Anything else (no answer, say) is a no. */
+async function isGone(store: CalendarStore, calendar: Calendar): Promise<boolean> {
+	try {
+		await store.documents(calendar.url);
+		return false;
+	} catch (e) {
+		return e instanceof RefusedError && GONE.includes(e.status);
+	}
+}
+
 /** What a calendar holds now, and its version; or the refusal to show if that can't be read. */
 async function contents(store: CalendarStore, calendar: Calendar): Promise<{ version: string | undefined; documents: StoredDocument[] } | { refusal: Refusal }> {
 	try {
@@ -263,9 +277,13 @@ function named(titles: string[]): string {
 }
 
 /** Why a move stopped before every item was moved, naming the items. Nothing is deleted then: the calendar stays with what is left. */
-function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, string[]>): string {
+function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, string[]>, gone = false): string {
 	const one = (list: string[], single: string, plural: string) => (list.length === 1 ? single : plural);
-	const parts = [`Moved ${tally.moved.length} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`];
+	const parts = [
+		gone
+			? `Moved ${tally.moved.length} of ${items(total)} to ${toName}, and ${name} is already gone, deleted in another tab or on another device.`
+			: `Moved ${tally.moved.length} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`
+	];
 	const { kept, clash, both, unsure } = tally;
 	if (kept.length) parts.push(`${named(kept)} stayed in ${name}, because the calendar server wouldn't put ${one(kept, 'it', 'them')} in ${toName}.`);
 	if (clash.length) parts.push(`${named(clash)} stayed in ${name}, because ${toName} already holds ${one(clash, 'a different item with the same file name', 'different items with the same file names')}.`);

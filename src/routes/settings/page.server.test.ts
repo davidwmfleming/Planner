@@ -285,6 +285,34 @@ describe('moving the items, then deleting the calendar', () => {
 		expect(fake.deleted).toEqual([]);
 	});
 
+	it('calls it done when another run of the same delete finished the calendar meanwhile', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a'), doc(family, 'b')] });
+		const move = fake.moveDocument.bind(fake);
+		fake.moveDocument = async (d, to) => {
+			const outcome = await move(d, to);
+			if (!fake.held[family.url].length) fake.readError = new RefusedError('gone', 404); // the other tab deleted it
+			return outcome;
+		};
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual({ action: 'delete', deleted: 'Family', count: 2, movedTo: 'Me' });
+	});
+
+	it('says a calendar is already gone, not still there, when a move stopped part way and it was deleted meanwhile', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a'), doc(family, 'b')] });
+		fake.outcomes = ['moved', 'both'];
+		const move = fake.moveDocument.bind(fake);
+		fake.moveDocument = async (d, to) => {
+			const outcome = await move(d, to);
+			fake.readError = new RefusedError('gone', 404);
+			return outcome;
+		};
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
+			refusal(502, {
+				message:
+					'Moved 1 of 2 items to Me, and Family is already gone, deleted in another tab or on another device. "b" may now be in two calendars, and the copies may differ, because it was changed, moved or deleted on another device meanwhile; delete the copy you don\'t want. Reload the page to see.'
+			})
+		);
+	});
+
 	it('keeps the calendar if an item arrives while the others are moved', async () => {
 		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a')] });
 		const move = fake.moveDocument.bind(fake);

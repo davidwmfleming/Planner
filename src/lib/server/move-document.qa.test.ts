@@ -51,4 +51,15 @@ describe('moving a document (QA proposals)', () => {
 			await s.close();
 		}
 	});
+
+	// Two runs of the same move race (two tabs, or a refresh and a second tap): the copy is identical and the
+	// other run already removed the old one, so the item is in one place only, as it was.
+	it('calls it moved when its identical copy is already there and the old one is already gone', async () => {
+		const s = await fromAndTo((m) => (m === 'PUT' ? { status: 412 } : m === 'GET' ? { status: 200, body: ics('a', 'Swim') } : { status: 404 }));
+		try {
+			expect(await s.store.moveDocument(s.doc, s.to)).toBe('moved');
+		} finally {
+			await s.close();
+		}
+	});
 });
