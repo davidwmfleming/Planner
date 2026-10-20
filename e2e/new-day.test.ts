@@ -3,12 +3,14 @@
 // The days are far ahead, so nothing here meets other tests' entries, and rollover (which goes by the real clock) leaves them be.
 import type { Page } from '@playwright/test';
 import { expect, test } from './fixtures';
+import { iso } from './dates';
 import { unique } from './unique';
 
 const MON = '2031-01-13';
 const WED = '2031-01-15';
 const THU = '2031-01-16';
 const LAST_THU = '2031-01-09';
+const addDays = (day: string, n: number) => { const [y, m, d] = day.split('-').map(Number); return iso(new Date(y, m - 1, d + n)); };
 const at = (hours: number, minutes: number, day = 15) => new Date(2031, 0, day, hours, minutes);
 
 async function serverDay(page: Page, day: string) {
@@ -22,10 +24,15 @@ for (const address of ['/', `/?page=${MON}`]) {
 		await page.clock.install({ time: at(23, 59) });
 		await page.goto(address);
 		await expect(todayTag(page, WED)).toBeVisible();
+		// Scrolled down to Wednesday, as a phone would be.
+		await todayTag(page, WED).evaluate((tag) => tag.closest('section')!.scrollIntoView());
+		expect(await page.evaluate(() => scrollY)).toBeGreaterThan(0);
 
 		await serverDay(page, THU);
 		await page.clock.runFor('01:10');
 		await expect(todayTag(page, THU)).toBeVisible();
+		// The new page starts at the top, as when the planner is opened.
+		await expect.poll(() => page.evaluate(() => scrollY)).toBe(0);
 		await expect(page.locator(`section.day[data-date="${WED}"]`)).toHaveCount(0);
 		if (address !== '/') await expect(page).toHaveURL(new RegExp(`\\?page=${THU}$`));
 	});
@@ -51,12 +58,16 @@ test('a page flipped to on purpose stays put after midnight, but is refreshed', 
 	await page.goto(`/?page=${LAST_THU}`);
 	const todayLink = page.getByRole('link', { name: 'Today', exact: true });
 	await expect(todayLink).toHaveAttribute('href', `?page=${MON}`);
+	await page.locator(`section.day[data-date="${addDays(LAST_THU, 2)}"]`).evaluate((day) => day.scrollIntoView());
+	const scrolled = await page.evaluate(() => scrollY);
+	expect(scrolled).toBeGreaterThan(0);
 
 	await serverDay(page, THU);
 	await page.clock.runFor('01:10');
 	await expect(todayLink).toHaveAttribute('href', `?page=${THU}`);
 	await expect(page).toHaveURL(new RegExp(`\\?page=${LAST_THU}$`));
-	await expect(page.locator(`section.day[data-date="${LAST_THU}"]`)).toBeVisible();
+	await expect(page.locator(`section.day[data-date="${LAST_THU}"]`)).toBeAttached();
+	expect(await page.evaluate(() => scrollY)).toBe(scrolled);
 });
 
 test('a line half written at midnight is not lost: the page waits until it is saved', async ({ page }, info) => {

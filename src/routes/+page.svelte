@@ -6,7 +6,7 @@
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
 	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
-	import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, untilMidnight } from '$lib/new-day';
+	import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, turnedToNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
@@ -393,6 +393,7 @@
 		checking = true;
 		clearTimeout(dayTimer);
 		let wait;
+		const before = seen;
 		try {
 			let failed = false;
 			if (!waiting && begun) {
@@ -410,6 +411,8 @@
 			} else if (!to) seen = shown();
 			const behind = dayBegun(new Date(), data.today);
 			tries = (behind || failed) && !held ? tries + 1 : 0;
+			// A phone keeps where it was scrolled to, which could leave the new today off screen.
+			if (turnedToNewDay(before, shown())) scrollTo(0, 0);
 			const turns = to || (behind && seen.start === seen.todayPage);
 			dayNote = held && turns && lineWritten() ? `It's now ${dayName(to ? data.today : toISODate(new Date()))}. The page turns once this line is saved or cleared.` : '';
 			wait = held && (to || behind) ? WHILE_WRITING : behind || failed ? retryAfter(tries) : untilMidnight(new Date());

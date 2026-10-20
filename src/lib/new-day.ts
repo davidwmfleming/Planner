@@ -49,3 +49,8 @@ export function dataAnswered(status: number, body: string): boolean {
 		return false;
 	}
 }
+
+/** Whether the page shown has just turned from the old today's page to the new today's (by moving, or by a refresh of
+ * an address with no page in it), so it should start at the top, as the planner does when opened. */
+export const turnedToNewDay = (before: Shown, after: Shown) =>
+	after.today !== before.today && after.start !== before.start && before.start === before.todayPage && after.start === after.todayPage;

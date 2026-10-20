@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, untilMidnight } from './new-day';
+import { dataAddress, dataAnswered, dayBegun, mayAsk, pageForNewDay, retryAfter, turnedToNewDay, untilMidnight } from './new-day';
 
 // Wednesday 21 October 2026 is on the Mon–Wed page (from the 19th); Thursday starts the Thu–Sun page.
 const wed = { today: '2026-10-21', todayPage: '2026-10-19', start: '2026-10-19' };
@@ -83,5 +83,16 @@ describe('mayAsk', () => {
 	it('then lets a wake ask at most once per ten minutes', () => {
 		expect(mayAsk(5, 599_000)).toBe(false);
 		expect(mayAsk(9, 600_000)).toBe(true);
+	});
+});
+
+describe('turnedToNewDay', () => {
+	it('is true when the page went from the old today’s page to the new one', () => {
+		expect(turnedToNewDay(wed, { ...thu, start: thu.todayPage })).toBe(true);
+	});
+	it('is false when the page stayed, or the viewer had turned to another page', () => {
+		expect(turnedToNewDay(wed, { ...thu, start: wed.start })).toBe(false);
+		expect(turnedToNewDay({ ...wed, start: '2026-10-15' }, { ...thu, start: '2026-10-15' })).toBe(false);
+		expect(turnedToNewDay(wed, { ...wed, start: '2026-10-22' })).toBe(false);
 	});
 });
