@@ -266,8 +266,21 @@ async function isGone(store: CalendarStore, calendar: Calendar): Promise<boolean
 		await store.documents(calendar.url);
 		return false;
 	} catch (e) {
-		return e instanceof RefusedError && GONE.includes(e.status);
+		return vanished(store, calendar, e);
 	}
+}
+
+/** Whether a failure to read a calendar means it is gone: the server said so (404), or a fresh calendar list no
+ * longer has it. Another run of this delete (a second tab, or a tap after a refresh) may have deleted it and refreshed
+ * the shared list, and then the store refuses to read it at all. A list that can't be read again proves nothing. */
+async function vanished(store: CalendarStore, calendar: Calendar, e: unknown): Promise<boolean> {
+	if (e instanceof RefusedError) return GONE.includes(e.status);
+	try {
+		await store.refreshCalendars();
+	} catch {
+		return false;
+	}
+	return !store.calendars().some((c) => c.url === calendar.url);
 }
 
 /** What a calendar holds now, and its version; or the refusal to show if that can't be read. */
@@ -276,7 +289,7 @@ async function contents(store: CalendarStore, calendar: Calendar): Promise<{ ver
 		return await store.documents(calendar.url);
 	} catch (e) {
 		console.error(`Settings: could not read what "${calendar.name}" holds`, e);
-		if (e instanceof RefusedError && GONE.includes(e.status)) return { refusal: refuse(404, CALENDAR_GONE) };
+		if (await vanished(store, calendar, e)) return { refusal: refuse(404, CALENDAR_GONE) };
 		return { refusal: refuse(502, `The calendar server didn't say what's in ${shortTitle(calendar.name)}. Try again in a moment.`) };
 	}
 }
