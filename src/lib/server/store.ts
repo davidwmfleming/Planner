@@ -1,7 +1,7 @@
 // One shared connection to the calendar server, configured from the environment.
 import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
-import { calendarAtPath, parseSettings, type Settings } from '$lib/settings';
+import { calendarAtPath, type Settings } from '$lib/settings';
 import { CalendarStore } from './calendar-store';
 import { prepareStore, tasksCalendarUrl } from './startup';
 
@@ -14,11 +14,15 @@ export function getStore(): Promise<CalendarStore> {
 			username: env.CALDAV_USER ?? 'david',
 			password: env.CALDAV_PASSWORD ?? 'dev'
 		});
-		store = s.connect().then(async () => {
+		const started = s.connect().then(async () => {
 			await prepareStore(s, { startingCalendars: eventCalendarNames(), ...seed(), tasksCalendar: tasksCalendarName() });
 			return s;
 		});
-		store.catch(() => (store = undefined)); // retry on the next request if the server was down
+		// Retry on the next request if the server was down or didn't answer in time.
+		started.catch(() => {
+			if (store === started) store = undefined;
+		});
+		store = started;
 	}
 	return store;
 }
@@ -38,9 +42,8 @@ export const tasksUrl = (store: CalendarStore) => tasksCalendarUrl(store, tasksC
 /** David's settings, kept on the Tasks collection. */
 export async function getSettings(store: CalendarStore): Promise<Settings> {
 	const { workCalendar, eventsCalendar } = seed();
-	const tasks = tasksCalendarUrl(store, tasksCalendarName());
-	const names = { workCalendar, defaultEventCalendar: eventsCalendar };
-	return tasks ? store.readSettings(tasks, names) : parseSettings(undefined, store.calendars(), names);
+	// Read straight from the Tasks address, so a calendar listing that comes back short can't hide them.
+	return store.readSettings(store.addressFor(tasksCalendarName()), { workCalendar, defaultEventCalendar: eventsCalendar });
 }
 
 /** Where new items go: events to the calendar chosen in the settings, tasks to Tasks; else the first that accepts the kind. */
