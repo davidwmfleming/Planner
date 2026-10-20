@@ -17,3 +17,9 @@ export function formatTime(time?: string): string {
 	const [h, m] = time.split(':').map(Number);
 	return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
 }
+
+/** A title as quoted in a message: long ones are cut to about 40 characters, so the message stays short on a phone. */
+export function shortTitle(title: string, most = 40): string {
+	const chars = [...title.trim()];
+	return chars.length <= most ? chars.join('') : `${chars.slice(0, most - 1).join('').trimEnd()}…`;
+}

@@ -218,6 +218,14 @@ describe('when the calendar server fails during a change', () => {
 		connectError = new Error('connect ECONNREFUSED 10.1.2.3:5232');
 		expect(await act(action, fields)).toMatchObject({ status: 503, data: { message: "The calendar server isn't answering. Check that it is running, then reload." } });
 	});
+
+	it('quotes only the start of a long title, so the message fits on a phone', async () => {
+		fake.items = [{ ...dentist(me), title: 'Pick up the dry cleaning and then the groceries for the weekend party' }];
+		expect(await act('delete', { uid: 'dentist' })).toMatchObject({
+			status: 502,
+			data: { message: 'The calendar server didn\'t delete "Pick up the dry cleaning and then the g…". Reload the page and try again.' }
+		});
+	});
 });
 
 describe('an item stored in two calendars under one UID (a move whose delete failed)', () => {

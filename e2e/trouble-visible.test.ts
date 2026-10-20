@@ -158,3 +158,33 @@ test('a double tap on the tick ticks once, with no failure shown', async ({ page
 	await expect(page.getByRole('alert')).toHaveCount(0);
 	expect(sent).toBe(1);
 });
+
+test('a failure about a long title keeps the header short, and × puts the message away', async ({ page }, info) => {
+	const name = unique('Pick up the dry cleaning and then the groceries for the weekend party at Morgan\'s place', info);
+	await page.goto(`/?page=${day}`);
+	// The planner itself is not answering, so the line's own words are quoted back.
+	await page.route('**/*&/add', (r) => r.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ type: 'error', status: 500, error: { message: 'x' } }) }));
+	await page.locator(`#add-task-${day}`).fill(name);
+	await page.locator(`#add-task-${day}`).press('Enter');
+	const alert = page.getByRole('alert');
+	await expect(alert).toContainText('Couldn\'t save "Pick up the dry cleaning');
+	await expect(alert).not.toContainText('Morgan');
+	const header = await page.getByRole('banner').boundingBox();
+	const screen = page.viewportSize()!;
+	expect(header!.height).toBeLessThan(screen.height * 0.35);
+	await page.getByRole('button', { name: 'Close the message' }).click();
+	await expect(alert).toHaveCount(0);
+
+	// The same in the details sheet.
+	await page.unroute('**/*&/add');
+	await page.locator(`#add-task-${day}`).fill(name);
+	await page.locator(`#add-task-${day}`).press('Enter');
+	await page.getByRole('button', { name: `Details for ${name}` }).click();
+	const sheet = page.getByRole('dialog', { name: 'Details' });
+	await page.route('**/*&/save', (r) => r.fulfill(refused('The calendar server didn\'t save "Pick up the dry cleaning and then the g…". Reload the page and try again.')));
+	await sheet.getByRole('button', { name: 'Save' }).click();
+	await expect(sheet.getByRole('alert')).toBeVisible();
+	await sheet.getByRole('button', { name: 'Close the message' }).click();
+	await expect(sheet.getByRole('alert')).toHaveCount(0);
+	await expect(sheet).toBeVisible();
+});

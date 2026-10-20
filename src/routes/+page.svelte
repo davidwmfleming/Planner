@@ -4,7 +4,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
+	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick } from 'svelte';
@@ -236,7 +236,7 @@
 			} else {
 				line.value = line.value.trim() ? `${written} ${line.value}` : written;
 				gestureMessage =
-					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${written}"; try again`) : `Couldn't save "${written}". Check the connection, then tap the line and try again.`;
+					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${shortTitle(written)}"; try again`) : `Couldn't save "${shortTitle(written)}". Check the connection, then tap the line and try again.`;
 			}
 			saving.delete(formElement);
 			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
@@ -386,6 +386,7 @@
 			<div class="trouble">
 				<p class="error" role="alert">{gestureMessage}</p>
 				{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+				<button type="button" class="btn close" aria-label="Close the message" onclick={() => (gestureMessage = '')}>×</button>
 			</div>
 		{/if}
 	</header>
@@ -506,6 +507,7 @@
 						<div class="trouble" bind:this={sheetTrouble}>
 							<p class="error" role="alert">{sheetMessage}</p>
 							{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+							<button type="button" class="btn close" aria-label="Close the message" onclick={() => (sheetMessage = '')}>×</button>
 						</div>
 					{/if}
 					{#if editing.occurrence}
@@ -682,6 +684,7 @@
 	.trouble { flex: 1 0 100%; order: 2; display: flex; gap: 0.5rem; align-items: center; }
 	.actions .trouble { order: -1; }
 	.trouble .error { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+	.trouble .close { font-size: 1.4rem; line-height: 1; padding-inline: 0.7rem; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }

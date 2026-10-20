@@ -1,6 +1,7 @@
 import { error, fail } from '@sveltejs/kit';
 import { addDays, comingSaturday, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
 import { applyEdit, daysBetween } from '$lib/edit';
+import { shortTitle } from '$lib/format';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
@@ -115,7 +116,7 @@ export const actions: Actions = {
 			});
 		} catch (e) {
 			console.error(`Planner: could not save "${title}"`, e);
-			return fail(502, { message: `The calendar server didn't save "${title}". Try again in a moment.` });
+			return fail(502, { message: `The calendar server didn't save "${shortTitle(title)}". Try again in a moment.` });
 		}
 		return { added: title };
 	},
@@ -133,7 +134,7 @@ export const actions: Actions = {
 		const day = String(form.get('occurrence') ?? '');
 		const shown = shownOn(item, day);
 		return change(
-			`save the mark on "${item.title}"`,
+			`save the mark on "${shortTitle(item.title)}"`,
 			() => (item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, toggle) : store.update(item, toggle(item))),
 			shown && { item, day, wanted: toggle(shown) }
 		);
@@ -153,7 +154,7 @@ export const actions: Actions = {
 		const day = String(form.get('occurrence') ?? '');
 		const shown = shownOn(item, day);
 		return change(
-			`move "${item.title}"`,
+			`move "${shortTitle(item.title)}"`,
 			() => (item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, moveTo) : store.update(item, moveTo(item))),
 			shown && { item, day, wanted: moveTo(shown) }
 		);
@@ -167,7 +168,7 @@ export const actions: Actions = {
 		const { store, item } = found;
 		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Future tasks' });
 		const { date, time, carriedFrom, ...rest } = item;
-		return change(`move "${item.title}"`, () => store.replace(item, rest));
+		return change(`move "${shortTitle(item.title)}"`, () => store.replace(item, rest));
 	},
 
 	/** The details sheet: edit any field, switch between event and task. */
@@ -188,7 +189,7 @@ export const actions: Actions = {
 		const newName = result.item.kind === 'event' && field('calendar') === NEW_CALENDAR ? checkCalendarName(field('newCalendar'), store.calendars()) : undefined;
 		if (newName && 'error' in newName) return fail(400, { message: newName.error });
 		let moved;
-		const saved = await change(`save "${item.title}"`, async () => {
+		const saved = await change(`save "${shortTitle(item.title)}"`, async () => {
 			const wanted = newName
 				? await store.ensureCalendar(newName.name, ['event'])
 				: result.item.kind === 'event'
@@ -212,7 +213,7 @@ export const actions: Actions = {
 		const found = await findItem(form);
 		if (!('item' in found)) return found;
 		const { store, item } = found;
-		return change(`delete "${item.title}"`, () => store.remove(item));
+		return change(`delete "${shortTitle(item.title)}"`, () => store.remove(item));
 	},
 
 	/** Removes one day of a repeating item and keeps the rest of the series. */
@@ -224,7 +225,7 @@ export const actions: Actions = {
 		if (!('item' in found)) return found;
 		const { store, item } = found;
 		if (!item.recurrence) return fail(400, { message: 'This item does not repeat' });
-		return change(`delete that day of "${item.title}"`, () => store.removeOccurrence(item, day));
+		return change(`delete that day of "${shortTitle(item.title)}"`, () => store.removeOccurrence(item, day));
 	}
 };
 
@@ -303,13 +304,13 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	} catch (e) {
 		// Never take the new copy out without knowing the old one is there: that could leave the item nowhere.
 		console.error(`Planner: could not check whether the old copy of "${old.title}" is still there`, e);
-		return fail(502, { message: `"${old.title}" may now be in two calendars, because the calendar server didn't say whether the old one was removed. Reload the page and delete the one you don't want.` });
+		return fail(502, { message: `"${shortTitle(old.title)}" may now be in two calendars, because the calendar server didn't say whether the old one was removed. Reload the page and delete the one you don't want.` });
 	}
 	try {
 		await store.remove(copy);
-		return fail(502, { message: `The calendar server didn't move "${old.title}" to another calendar, so it stays where it was. Reload the page and try again.` });
+		return fail(502, { message: `The calendar server didn't move "${shortTitle(old.title)}" to another calendar, so it stays where it was. Reload the page and try again.` });
 	} catch (e) {
 		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
-		return fail(502, { message: `"${old.title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
+		return fail(502, { message: `"${shortTitle(old.title)}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
 	}
 }
