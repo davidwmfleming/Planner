@@ -1,7 +1,9 @@
 // One shared connection to the calendar server, configured from the environment.
 import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
+import { calendarAtPath, parseSettings, type Settings } from '$lib/settings';
 import { CalendarStore } from './calendar-store';
+import { prepareStore, tasksCalendarUrl } from './startup';
 
 let store: Promise<CalendarStore> | undefined;
 
@@ -13,12 +15,7 @@ export function getStore(): Promise<CalendarStore> {
 			password: env.CALDAV_PASSWORD ?? 'dev'
 		});
 		store = s.connect().then(async () => {
-			// "Personal" was the first name for David's own calendar; it is now "Me".
-			if (!s.calendars().some((c) => c.name === 'Me')) await s.renameCalendar('Personal', 'Me').catch((e) => console.error('Could not rename Personal to Me', e));
-			// The starting set of event calendars, plus Work, where work meetings are entered by hand.
-			for (const name of [...eventCalendarNames(), workCalendarName()]) {
-				await s.ensureCalendar(name, ['event']).catch((e) => console.error(`Could not create the ${name} calendar`, e));
-			}
+			await prepareStore(s, { startingCalendars: eventCalendarNames(), ...seed(), tasksCalendar: tasksCalendarName() });
 			return s;
 		});
 		store.catch(() => (store = undefined)); // retry on the next request if the server was down
@@ -26,18 +23,27 @@ export function getStore(): Promise<CalendarStore> {
 	return store;
 }
 
-/** Event calendars every planner starts with. More can be added from the details sheet. */
+/** Event calendars a planner starts with on a first run. More can be added from the details sheet. */
 export const eventCalendarNames = () =>
 	(env.EVENT_CALENDARS ?? 'Me,Family,Workouts,Morgan Meals').split(',').map((n) => n.trim()).filter(Boolean);
 
-/** The calendar whose events are shown as work meetings (light red, tagged Work). */
-export const workCalendarName = () => env.WORK_CALENDAR ?? 'Work';
+const tasksCalendarName = () => env.TASKS_CALENDAR ?? 'Tasks';
 
-/** Where new items go: the calendar named in the environment, else the first one that accepts the kind. */
-export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind): string {
-	const wanted = kind === 'event' ? (env.EVENTS_CALENDAR ?? 'Me') : (env.TASKS_CALENDAR ?? 'Tasks');
-	const options = store.calendars().filter((c) => c.accepts.includes(kind));
-	const chosen = options.find((c) => c.name === wanted) ?? options[0];
-	if (!chosen) throw new Error(`No calendar on the server accepts ${kind}s yet`);
-	return chosen.url;
+/** WORK_CALENDAR and EVENTS_CALENDAR only fill in the settings the first time; after that the settings decide. */
+const seed = () => ({ workCalendar: env.WORK_CALENDAR ?? 'Work', eventsCalendar: env.EVENTS_CALENDAR ?? 'Me' });
+
+/** David's settings, kept on the Tasks collection. */
+export async function getSettings(store: CalendarStore): Promise<Settings> {
+	const { workCalendar, eventsCalendar } = seed();
+	const tasks = tasksCalendarUrl(store, tasksCalendarName());
+	const names = { workCalendar, defaultEventCalendar: eventsCalendar };
+	return tasks ? store.readSettings(tasks, names) : parseSettings(undefined, store.calendars(), names);
+}
+
+/** Where new items go: events to the calendar chosen in the settings, tasks to Tasks; else the first that accepts the kind. */
+export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind, settings: Settings): string {
+	const events = store.calendars().filter((c) => c.accepts.includes('event'));
+	const url = kind === 'event' ? (calendarAtPath(events, settings.defaultEventCalendar) ?? events[0])?.url : tasksCalendarUrl(store, tasksCalendarName());
+	if (!url) throw new Error(`No calendar on the server accepts ${kind}s yet`);
+	return url;
 }

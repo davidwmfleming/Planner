@@ -1,7 +1,7 @@
 // Reads and writes planner items on a CalDAV server (Radicale in production and development).
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
-import { parseSettings, type Settings } from '$lib/settings';
+import { parseSettings, type Settings, type SettingsSeed } from '$lib/settings';
 import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
 
 export interface StoreConfig {
@@ -107,15 +107,19 @@ export class CalendarStore {
 	}
 
 	/** The settings kept on a collection (the Tasks one), with defaults for anything not stored. */
-	async readSettings(calendarUrl: string): Promise<Settings> {
+	async readSettings(calendarUrl: string, seed?: SettingsSeed): Promise<Settings> {
+		return parseSettings(await this.storedSettings(calendarUrl), this.calendars(), seed);
+	}
+
+	/** The settings exactly as stored, or undefined if nothing is stored there yet. */
+	async storedSettings(calendarUrl: string): Promise<string | undefined> {
 		const [response] = await this.client.propfind({
 			url: calendarUrl,
 			props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
 			depth: '0'
 		});
 		// A missing property (or collection) comes back as 404; that just means the defaults.
-		const raw = response?.ok ? davText(response.props?.plannerSettings) : undefined;
-		return parseSettings(raw, this.calendars());
+		return response?.ok ? davText(response.props?.plannerSettings) : undefined;
 	}
 
 	async writeSettings(calendarUrl: string, settings: Settings): Promise<void> {
