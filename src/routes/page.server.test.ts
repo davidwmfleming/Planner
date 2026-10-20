@@ -1,6 +1,6 @@
 // The planner page's server side with a pretend calendar server, for the cases a shared test server can't stage.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Calendar } from '$lib/server/calendar-store';
+import type { Calendar, StoredItem } from '$lib/server/calendar-store';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
@@ -28,9 +28,24 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 		async refreshCalendars() {
 			this.listed = this.onServer;
 		},
+		/** Items on the server, as the store hands them out. */
+		items: [] as StoredItem[],
+		/** Names of calendars made by the planner. */
+		made: [] as string[],
 		async listItems() {
-			return [];
+			return this.items;
 		},
+		async ensureCalendar(name: string, accepts: Calendar['accepts']) {
+			const made = { url: `${HOME}${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/`, name, accepts };
+			this.made.push(name);
+			this.listed = this.onServer = [...this.onServer, made];
+			return made;
+		},
+		async replace() {},
+		async update() {},
+		async updateOccurrence() {},
+		async remove() {},
+		async removeOccurrence() {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
 		async readSettings() {
 			return settings;
@@ -46,11 +61,27 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 const cal = (slug: string, name: string, accepts: Calendar['accepts'] = ['event']): Calendar => ({ url: `${HOME}${slug}/`, name, accepts });
 const { load, actions } = await import('./+page.server');
 const run = (url = 'http://localhost/') => (load as (e: unknown) => Promise<Record<string, unknown>>)({ url: new URL(url) });
-const add = (fields: Record<string, string>) => {
+const act = (action: keyof typeof actions, fields: Record<string, string>) => {
 	const body = new FormData();
 	for (const [k, v] of Object.entries(fields)) body.set(k, v);
-	return (actions.add as (e: unknown) => Promise<unknown>)({ request: new Request('http://localhost/?/add', { method: 'POST', body }) });
+	return (actions[action] as (e: unknown) => Promise<unknown>)({ request: new Request(`http://localhost/?/${action}`, { method: 'POST', body }) });
 };
+const add = (fields: Record<string, string>) => act('add', fields);
+const dentist = (calendar: Calendar): StoredItem => ({
+	uid: 'dentist',
+	kind: 'event',
+	title: 'Dentist',
+	state: 'open',
+	date: '2026-10-21',
+	calendarUrl: calendar.url,
+	url: `${calendar.url}dentist.ics`,
+	ics: ''
+});
+/** The details sheet's fields for the dentist, filed in a new calendar with this name. */
+const inNewCalendar = (newCalendar: string) => ({
+	uid: 'dentist', title: 'Dentist', kind: 'event', date: '2026-10-21', time: '', endTime: '', location: '', label: '', notes: '',
+	repeat: '', calendar: '+new', newCalendar
+});
 
 let logged: typeof console.error;
 beforeEach(() => {
@@ -117,5 +148,29 @@ describe('adding a line', () => {
 			status: 502,
 			data: { message: 'The calendar server didn\'t save "Dentist". Try again in a moment.' }
 		});
+	});
+});
+
+describe('the details sheet', () => {
+	const me = cal('me', 'Me');
+	beforeEach(() => {
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])]);
+		fake.items = [dentist(me)];
+	});
+
+	it('refuses a new calendar whose name is only invisible characters', async () => {
+		expect(await act('save', inNewCalendar('\u200b\u200b'))).toMatchObject({ status: 400, data: { message: 'Give the calendar a name' } });
+		expect(fake.made).toEqual([]);
+	});
+
+	it('drops control characters from a new calendar name rather than failing', async () => {
+		await act('save', inNewCalendar('Bell\u0007 ringing'));
+		expect(fake.made).toEqual(['Bell ringing']);
+	});
+
+	it('follows the same rules as the settings page for a name already used or too long', async () => {
+		expect(await act('save', inNewCalendar('tasks'))).toMatchObject({ status: 400, data: { message: 'There is already a calendar called "Tasks"' } });
+		expect(await act('save', inNewCalendar('a'.repeat(41)))).toMatchObject({ status: 400, data: { message: 'Keep the name to 40 letters or fewer' } });
+		expect(fake.made).toEqual([]);
 	});
 });

@@ -6,7 +6,7 @@ import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrencesBetween } from '$lib/server/ical';
-import { byName, calendarAtPath } from '$lib/settings';
+import { byName, calendarAtPath, checkCalendarName } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -177,12 +177,10 @@ export const actions: Actions = {
 		// Events can be filed in any calendar that takes events (Me, Family, Work…), or in a new one made here.
 		let wanted;
 		if (result.item.kind === 'event' && field('calendar') === NEW_CALENDAR) {
-			const name = field('newCalendar').trim();
-			if (!name || name.length > 40) return fail(400, { message: 'Give the new calendar a name (up to 40 letters)' });
-			if (store.calendars().some((c) => c.name.toLowerCase() === name.toLowerCase() && !c.accepts.includes('event'))) {
-				return fail(400, { message: `"${name}" is a task list; pick another name` });
-			}
-			wanted = store.calendars().find((c) => c.name.toLowerCase() === name.toLowerCase()) ?? (await store.ensureCalendar(name, ['event']));
+			// The same name rules as the settings page; a calendar that already exists is picked from the list.
+			const checked = checkCalendarName(field('newCalendar'), store.calendars());
+			if ('error' in checked) return fail(400, { message: checked.error });
+			wanted = await store.ensureCalendar(checked.name, ['event']);
 		} else if (result.item.kind === 'event') {
 			wanted = calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'));
 		}
