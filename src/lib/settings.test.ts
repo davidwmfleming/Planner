@@ -159,6 +159,38 @@ describe('menuLabels', () => {
 		expect(labels).toEqual(['Family (…7c8d9e0f1a2b)', 'Family (…the-old-ipad)', 'Family (family)']);
 	});
 
+	it('shows the whole of a short address when the ends of two are the same', () => {
+		const labels = menuLabels([
+			{ path: '/david/kids-shared-calendar/', name: 'Family' },
+			{ path: '/david/home-shared-calendar/', name: 'Family' },
+			{ path: '/david/shared-calendar/', name: 'Family' }
+		]).map((c) => c.label);
+		expect(labels).toEqual(['Family (kids-shared-calendar)', 'Family (home-shared-calendar)', 'Family (shared-calendar)']);
+	});
+
+	it('shows the part that differs when two long addresses end the same way (Google calendars)', () => {
+		const labels = menuLabels([
+			{ path: '/david/c_9f3e2a1b7c6d5e4f%40group.calendar.google.com/', name: 'Family' },
+			{ path: '/david/c_0a1b2c3d4e5f6a7b%40group.calendar.google.com/', name: 'Family' },
+			{ path: '/david/me/', name: 'Me' }
+		]).map((c) => c.label);
+		expect(labels).toEqual(['Family (…2a1b7c6d5e4f…)', 'Family (…2c3d4e5f6a7b…)', 'Me']);
+	});
+
+	it('tells apart a long address that is the end of another', () => {
+		const labels = menuLabels([
+			{ path: '/david/shared-calendar-of-the-family/', name: 'Family' },
+			{ path: '/david/kids-shared-calendar-of-the-family/', name: 'Family' }
+		]).map((c) => c.label);
+		expect(labels).toEqual(['Family (…f-the-family)', 'Family (kids-…)']);
+	});
+
+	it('never shows two of a name the same way, however alike their addresses', () => {
+		const paths = ['/david/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x-calendar-for-the-family/', '/david/baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-x-calendar-for-the-family/', '/david/zz-calendar-for-the-family/'];
+		const labels = menuLabels(paths.map((path) => ({ path, name: 'Family' }))).map((c) => c.label);
+		expect(new Set(labels).size).toBe(3);
+	});
+
 	it('keeps the other fields', () => {
 		expect(menuLabels([{ path: '/david/me/', name: 'Me', work: true }])[0]).toMatchObject({ work: true });
 	});

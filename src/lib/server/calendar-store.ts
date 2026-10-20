@@ -46,6 +46,23 @@ function davText(value: unknown): string | undefined {
 	return typeof inner === 'string' ? inner : undefined;
 }
 
+/** The calendar server answered and said no (an HTTP error status), so the change surely wasn't made.
+ * Any other failure (no answer in time, a dropped connection) leaves it unknown: the server may still do it. */
+export class RefusedError extends Error {
+	constructor(
+		message: string,
+		readonly status: number
+	) {
+		super(message);
+	}
+}
+
+/** The calendar server didn't answer in time. It may still have done what was asked, or do it later. */
+export class NoAnswerError extends Error {}
+
+/** Whether a failure leaves it unknown if the change was made: no answer in time, or the connection dropped. */
+export const unanswered = (e: unknown) => e instanceof NoAnswerError || (e instanceof TypeError && e.message === 'fetch failed');
+
 export class CalendarStore {
 	private client: DAVClient;
 	private davCalendars: DAVCalendar[] = [];
@@ -72,7 +89,7 @@ export class CalendarStore {
 	private timed<T>(work: Promise<T>, what: string): Promise<T> {
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const late = new Promise<never>((_, reject) => {
-			timer = setTimeout(() => reject(new Error(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
+			timer = setTimeout(() => reject(new NoAnswerError(`The calendar server did not answer in time (${what})`)), this.timeoutMs);
 			// Only the request itself should keep the planner running, not the wait for it.
 			timer.unref();
 		});
@@ -242,7 +259,7 @@ export class CalendarStore {
 			if (!response.ok) throw new Error(`The calendar server would not hand out "${name}" (${response.status})`);
 			return await response.text();
 		} catch (e) {
-			if (signal.aborted) throw new Error(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
+			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
 			throw e;
 		}
 	}
@@ -287,7 +304,7 @@ export class CalendarStore {
 		const filename = `${item.uid}.ics`;
 		const ics = itemToICS(item, previous);
 		const res = await this.timed(this.client.createCalendarObject({ calendar, filename, iCalString: ics }), `saving "${item.title}"`);
-		if (!res.ok) throw new Error(`Saving "${item.title}" failed (${res.status})`);
+		if (!res.ok) throw new RefusedError(`Saving "${item.title}" failed (${res.status})`, res.status);
 		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
 	}
 
@@ -309,7 +326,7 @@ export class CalendarStore {
 
 	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
 		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving "${stored.title}"`);
-		if (!res.ok) throw new Error(`Saving "${stored.title}" failed (${res.status}); reload and try again`);
+		if (!res.ok) throw new RefusedError(`Saving "${stored.title}" failed (${res.status}); reload and try again`, res.status);
 		return res.headers.get('etag') ?? undefined;
 	}
 
@@ -322,7 +339,7 @@ export class CalendarStore {
 
 	async remove(stored: StoredItem): Promise<void> {
 		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
-		if (!res.ok) throw new Error(`Deleting "${stored.title}" failed (${res.status})`);
+		if (!res.ok) throw new RefusedError(`Deleting "${stored.title}" failed (${res.status})`, res.status);
 	}
 
 	private authorization(): string {

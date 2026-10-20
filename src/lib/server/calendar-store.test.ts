@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CalendarStore } from './calendar-store';
+import { CalendarStore, NoAnswerError, RefusedError } from './calendar-store';
 import { occurrencesBetween } from './ical';
 
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
@@ -78,6 +78,18 @@ describe('CalendarStore without a server', () => {
 		const store = storeWith({ propfind: () => new Promise(() => {}), login: () => new Promise(() => {}) }, 50);
 		await expect(store.refreshCalendars()).rejects.toThrow(/did not answer/);
 		await expect(store.connect()).rejects.toThrow(/did not answer/);
+	});
+
+	it('tells a delete the server refused apart from one it never answered, which it may still carry out', async () => {
+		const item = { uid: 'x', kind: 'event' as const, title: 'X', state: 'open' as const, calendarUrl: 'http://127.0.0.1:5232/david/me/', url: 'http://127.0.0.1:5232/david/me/x.ics', ics: '' };
+		const refusing = storeWith({ deleteCalendarObject: async () => new Response(null, { status: 412 }) });
+		await expect(refusing.remove(item)).rejects.toMatchObject({ status: 412 });
+		await expect(refusing.remove(item)).rejects.toBeInstanceOf(RefusedError);
+		const silent = storeWith({ deleteCalendarObject: () => new Promise(() => {}) }, 50);
+		const late = await silent.remove(item).catch((e) => e);
+		expect(late).not.toBeInstanceOf(RefusedError);
+		expect(late).toBeInstanceOf(NoAnswerError);
+		expect(late.message).toMatch(/did not answer/);
 	});
 
 	/** A calendar called Slow whose address is a small local server answering with `respond`. */

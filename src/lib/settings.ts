@@ -1,3 +1,5 @@
+import { letters } from './format';
+
 /** David's choices from the settings page, stored as one JSON value on the Tasks collection. */
 export interface Settings {
 	/** Task categories, in the order the Future tasks panel and the List menu show them. */
@@ -54,30 +56,51 @@ export function calendarAtPath<T extends { url: string }>(calendars: T[], path: 
 /** Orders calendars by name as a person would (capitals and accents aside, "Me 9" before "Me 10"). */
 export const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
 
-/** What a person sees as letters: an emoji family or a letter with a separately typed accent counts as one. */
-const letters = (text: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
-
 /** Longest address ending shown in a menu; a phone's own addresses are long, and their ends tell them apart. */
 const HINT_LENGTH = 12;
+/** Longest address shown whole when the ends of two are the same. */
+const WHOLE_LENGTH = 24;
 
-/** The last part of a calendar's address, readable: /david/family-2/ → family-2. A long one keeps only its end. */
-function lastSegment(path: string): string {
-	const segment = path.split('/').filter(Boolean).pop() ?? path;
-	let readable = segment;
+/** A path segment as text, as letters: %C3%84rzte → Ärzte. */
+function readable(segment: string): string[] {
 	try {
-		readable = decodeURIComponent(segment);
+		return letters(decodeURIComponent(segment));
 	} catch {
 		// not percent-encoded text; show it as it is
+		return letters(segment);
 	}
-	const all = letters(readable);
-	return all.length > HINT_LENGTH ? `…${all.slice(-HINT_LENGTH).join('')}` : readable;
 }
 
-/** What each calendar is called in a menu: its name, plus the end of its address when another calendar
+const lastSegment = (path: string) => readable(path.split('/').filter(Boolean).pop() ?? path);
+const ending = (text: string[]) => (text.length > HINT_LENGTH ? `…${text.slice(-HINT_LENGTH).join('')}` : text.join(''));
+const allDiffer = (hints: string[]) => new Set(hints).size === hints.length;
+
+/** How each of a group of same-name calendars is told apart: the end of its address (/david/family-2/ → family-2),
+ * else the whole of a short address, else the part before the ending they share, else the whole path. */
+function hints(paths: string[]): string[] {
+	const segments = paths.map(lastSegment);
+	const ends = segments.map(ending);
+	if (allDiffer(ends)) return ends;
+	const whole = segments.map((s) => s.join(''));
+	if (segments.every((s) => s.length <= WHOLE_LENGTH) && allDiffer(whole)) return whole;
+	let shared = 0;
+	while (segments.every((s) => shared < s.length && s[s.length - 1 - shared] === segments[0][segments[0].length - 1 - shared])) shared++;
+	// An address that is all shared ending (one is the end of another) keeps its own ending.
+	const parts = segments.map((s) => (s.length > shared ? `${ending(s.slice(0, s.length - shared))}…` : ending(s)));
+	return allDiffer(parts) ? parts : paths.map((p) => readable(p).join(''));
+}
+
+/** What each calendar is called in a menu: its name, plus a piece of its address when another calendar
  * has the same name (made on a phone, say), so the two entries can be told apart. */
 export function menuLabels<T extends { path: string; name: string }>(calendars: T[]): (T & { label: string })[] {
-	const clashes = (c: T) => calendars.some((other) => other !== c && other.name.toLowerCase() === c.name.toLowerCase());
-	return calendars.map((c) => ({ ...c, label: clashes(c) ? `${c.name} (${lastSegment(c.path)})` : c.name }));
+	const label = new Map<T, string>();
+	for (const c of calendars) {
+		if (label.has(c)) continue;
+		const group = calendars.filter((other) => other.name.toLowerCase() === c.name.toLowerCase());
+		if (group.length === 1) label.set(c, c.name);
+		else hints(group.map((g) => g.path)).forEach((hint, i) => label.set(group[i], `${group[i].name} (${hint})`));
+	}
+	return calendars.map((c) => ({ ...c, label: label.get(c)! }));
 }
 
 /** Longest calendar name the settings page accepts. */

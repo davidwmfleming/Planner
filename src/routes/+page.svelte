@@ -4,7 +4,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
+	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick } from 'svelte';
@@ -38,6 +38,13 @@
 	/** Messages that ask for a reload get a Reload button: the installed app has no browser controls. */
 	const saysReload = (message: string) => /\breload\b/i.test(message);
 	let sheetTrouble = $state<HTMLElement>();
+	let saveButton = $state<HTMLButtonElement>();
+	/** Closing the sheet's message leaves focus on Save, ready to try again, not at the top of the page. */
+	async function closeSheetMessage() {
+		sheetMessage = '';
+		await tick();
+		saveButton?.focus();
+	}
 	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
 		sheetMessage = problemOf(result);
 		if (sheetMessage) {
@@ -52,13 +59,14 @@
 	// Tick, ✕, → and the other taps on a row: a problem is said under the page's header, like a line that didn't save.
 	// The same tap again while it is still saving (a double tap, a slow connection) is ignored: it would undo the first.
 	const tapsSaving = new Set<string>();
-	const reportProblems: SubmitFunction = ({ action, formData, cancel }) => {
+	const reportProblems: SubmitFunction = ({ action, formData, cancel, submitter }) => {
 		const tap = JSON.stringify([action.search, ...formData]);
 		if (tapsSaving.has(tap)) return cancel();
 		tapsSaving.add(tap);
 		return async ({ result, update }) => {
 			try {
 				gestureMessage = problemOf(result);
+				troubleAbout = submitter ?? undefined;
 				if (!gestureMessage) await update();
 			} finally {
 				tapsSaving.delete(tap);
@@ -94,6 +102,16 @@
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
 	let gestureMessage = $state('');
+	/** What the message under the header is about (the tapped button, the item, the line), for focus once it is closed. */
+	let troubleAbout: Element | undefined;
+	let pageTitle = $state<HTMLElement>();
+	/** Closing a message puts focus back where it was, rather than at the top of the page. */
+	async function closeGestureMessage() {
+		gestureMessage = '';
+		await tick();
+		const back = troubleAbout?.isConnected ? troubleAbout : pageTitle;
+		(back as HTMLElement | undefined)?.focus();
+	}
 	// Marks drawn on items, shown at once while they save.
 	let marking = $state<Record<string, 'done' | 'dropped'>>({});
 	// One row on the page. A UID alone isn't enough: a move between calendars that stopped halfway can leave
@@ -199,6 +217,8 @@
 		};
 	});
 
+	/** A pen mark has no button of its own: its item's first button stands for it. */
+	const itemButton = (uid?: string) => (uid ? (document.querySelector(`li[data-uid="${CSS.escape(uid)}"] button`) ?? undefined) : undefined);
 	async function send(action: string, fields: Record<string, string>) {
 		const body = new FormData();
 		for (const [k, v] of Object.entries(fields)) body.set(k, v);
@@ -208,9 +228,11 @@
 			result = deserialize(await response.text());
 		} catch {
 			gestureMessage = OFFLINE;
+			troubleAbout = itemButton(fields.uid);
 			return false;
 		}
 		gestureMessage = problemOf(result);
+		troubleAbout = itemButton(fields.uid);
 		// Only redraw after a change: with the calendar server down, redrawing would swap the page for an error screen.
 		if (!gestureMessage) await invalidateAll();
 		return result.type === 'success';
@@ -235,8 +257,9 @@
 				await update({ reset: false });
 			} else {
 				line.value = line.value.trim() ? `${written} ${line.value}` : written;
+				troubleAbout = line;
 				gestureMessage =
-					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${written}"; try again`) : `Couldn't save "${written}". Check the connection, then tap the line and try again.`;
+					result.type === 'failure' ? String(result.data?.message ?? `Couldn't save "${shortTitle(written)}"; try again`) : `Couldn't save "${shortTitle(written)}". Check the connection, then tap the line and try again.`;
 			}
 			saving.delete(formElement);
 			const next = tappedTo.get(formElement) ?? (left.has(formElement) ? undefined : line);
@@ -366,7 +389,7 @@
 
 <div class="wrap" bind:this={wrap}>
 	<header class="bar">
-		<h1>Planner <span>· {monthYear(data.start)}</span></h1>
+		<h1 tabindex="-1" bind:this={pageTitle}>Planner <span>· {monthYear(data.start)}</span></h1>
 		<nav aria-label="Pages">
 			<a class="btn" href={pageUrl(data.previous)} aria-label="Previous page">‹</a>
 			<a class="btn" href={pageUrl(data.todayPage)}>Today</a>
@@ -384,8 +407,11 @@
 		<!-- In the header, which stays at the top of the screen, so a message is seen however far down the page is scrolled. -->
 		{#if gestureMessage}
 			<div class="trouble">
+				<span class="trouble-buttons">
+					{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+					<button type="button" class="btn close" aria-label="Close the message" onclick={closeGestureMessage}>×</button>
+				</span>
 				<p class="error" role="alert">{gestureMessage}</p>
-				{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
 			</div>
 		{/if}
 	</header>
@@ -504,8 +530,11 @@
 					<!-- In the Save bar, which stays on screen on a phone while the rest of the sheet scrolls. -->
 					{#if sheetMessage}
 						<div class="trouble" bind:this={sheetTrouble}>
+							<span class="trouble-buttons">
+								{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+								<button type="button" class="btn close" aria-label="Close the message" onclick={closeSheetMessage}>×</button>
+							</span>
 							<p class="error" role="alert">{sheetMessage}</p>
-							{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
 						</div>
 					{/if}
 					{#if editing.occurrence}
@@ -518,7 +547,7 @@
 					{/if}
 					<span class="actions-right">
 						<button type="button" class="btn" onclick={() => sheet?.close()}>Cancel</button>
-						<button class="btn primary">Save</button>
+						<button class="btn primary" bind:this={saveButton}>Save</button>
 					</span>
 				</div>
 			</form>
@@ -682,6 +711,10 @@
 	.trouble { flex: 1 0 100%; order: 2; display: flex; gap: 0.5rem; align-items: center; }
 	.actions .trouble { order: -1; }
 	.trouble .error { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+	.trouble .close { font-size: 1.4rem; line-height: 1; padding-inline: 0.7rem; }
+	/* The buttons come first, for the phone layout below; beside the text they go after it. */
+	.trouble-buttons { display: contents; }
+	.trouble .error { order: -1; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
@@ -695,5 +728,10 @@
 		h1 { flex: 1; }
 		nav { flex-wrap: nowrap; width: 100%; order: 1; }
 		input[type='date'] { flex: 1; min-width: 0; font-size: 0.95rem; }
+		/* A message beside its buttons is squeezed into a narrow column many lines tall. Here Reload and × sit
+		   together in the top corner, and the text wraps round them, then runs the box's full width. */
+		.trouble { display: flow-root; border: 2px solid var(--ink); border-radius: 6px; padding: 0.15rem 0.15rem 0.15rem 0.5rem; }
+		.trouble .error { display: inline; border: 0; padding: 0; font-size: 0.95rem; }
+		.trouble-buttons { display: flex; gap: 0.3rem; float: right; margin-left: 0.3rem; }
 	}
 </style>

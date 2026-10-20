@@ -17,3 +17,12 @@ export function formatTime(time?: string): string {
 	const [h, m] = time.split(':').map(Number);
 	return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`;
 }
+
+/** What a person sees as letters: an emoji family, a flag or a letter with a separately typed accent counts as one. */
+export const letters = (text: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((s) => s.segment);
+
+/** A title as quoted in a message: long ones are cut to about 40 characters, so the message stays short on a phone. */
+export function shortTitle(title: string, most = 40): string {
+	const chars = letters(title.trim());
+	return chars.length <= most ? chars.join('') : `${chars.slice(0, most - 1).join('').trimEnd()}…`;
+}
