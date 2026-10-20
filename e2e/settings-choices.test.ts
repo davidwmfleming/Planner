@@ -113,7 +113,8 @@ test('a line still saves when the new-events calendar was deleted on another dev
 
 test('two calendars with the same name from another device are kept apart', async ({ page, request }, info) => {
 	const name = unique('Twin', info);
-	const stamp = `${info.project.name}-${Date.now()}`;
+	// Short, so the menus show the whole address ending (a long one shows only its last 12 letters).
+	const stamp = Math.random().toString(36).slice(2, 6);
 	const [first, second] = [await makeCalendar(request, `twin-a-${stamp}`, name), await makeCalendar(request, `twin-b-${stamp}`, name)];
 	const event = unique('Twin meeting', info);
 	try {
