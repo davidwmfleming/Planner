@@ -4,7 +4,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, shortTitle } from '$lib/format';
+	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick } from 'svelte';
@@ -35,8 +35,6 @@
 			: result.type === 'error'
 				? result.error instanceof TypeError ? OFFLINE : DID_NOT_WORK
 				: '';
-	/** Messages that ask for a reload get a Reload button: the installed app has no browser controls. */
-	const saysReload = (message: string) => /\breload\b/i.test(message);
 	/** The calendar server didn't answer in time: the change may be made after all, so sending it again could make two. */
 	const mayBeDone = (message: string) => /\bmay or may not\b/i.test(message);
 	let sheetTrouble = $state<HTMLElement>();
