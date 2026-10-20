@@ -8,6 +8,7 @@ export const load: PageServerLoad = async () => {
 	let store, settings;
 	try {
 		store = await getStore();
+		await store.refreshCalendars(); // show calendars added or deleted on a phone since the planner started
 		settings = await getSettings(store);
 	} catch (e) {
 		error(503, `The calendar server isn't answering. Check that it is running, then reload. (${(e as Error).message})`);

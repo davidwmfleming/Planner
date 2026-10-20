@@ -23,6 +23,9 @@ const pathOf = (calendars: { url: string; name: string }[], name: string) => {
 	return found ? new URL(found.url).pathname : null;
 };
 
+/** Keeps the first of names that differ only in case; the settings page lists categories keyed by name. */
+const withoutRepeats = (names: string[]) => names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
+
 const isPath = (value: unknown): value is string | null => value === null || (typeof value === 'string' && value !== '');
 
 /** Reads the stored value. Anything missing or damaged gets its default, so a bad value never stops the planner. */
@@ -37,7 +40,7 @@ export function parseSettings(raw: string | undefined, calendars: { url: string;
 	const categories = stored.categories;
 	const validCategories = Array.isArray(categories) && categories.every((c) => typeof c === 'string' && c.trim() !== '');
 	return {
-		categories: validCategories ? categories : DEFAULT_CATEGORIES,
+		categories: validCategories ? withoutRepeats(categories) : DEFAULT_CATEGORIES,
 		workCalendar: isPath(stored.workCalendar) ? stored.workCalendar : pathOf(calendars, seed.workCalendar),
 		defaultEventCalendar: isPath(stored.defaultEventCalendar) ? stored.defaultEventCalendar : pathOf(calendars, seed.defaultEventCalendar)
 	};

@@ -97,6 +97,33 @@ describe('starting the planner', () => {
 		expect(store.settingsOn('Tasks')).toEqual(mine);
 	});
 
+	it('does not treat stored settings as a first run, even with no event calendars listed', async () => {
+		const store = new FakeStore([['Tasks', ['task']]]);
+		await store.writeSettings(store.list[0].url, { categories: ['Errands'], workCalendar: null, defaultEventCalendar: null });
+		await prepareStore(store, options);
+		expect(store.made).toEqual([]);
+	});
+
+	it('neither writes settings nor makes calendars when reading the settings fails', async () => {
+		const store = new FakeStore([['Tasks', ['task']]]);
+		store.storedSettings = async () => {
+			throw new Error('500');
+		};
+		let wrote = false;
+		store.writeSettings = async () => {
+			wrote = true;
+		};
+		const logged = console.error;
+		console.error = () => {};
+		try {
+			await prepareStore(store, options);
+		} finally {
+			console.error = logged;
+		}
+		expect(wrote).toBe(false);
+		expect(store.made).toEqual([]);
+	});
+
 	it('keeps starting when the calendar server refuses a step', async () => {
 		const store = new FakeStore();
 		store.writeSettings = async () => {

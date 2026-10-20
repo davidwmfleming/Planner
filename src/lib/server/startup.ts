@@ -24,6 +24,17 @@ export function tasksCalendarUrl(store: Pick<CalendarStore, 'calendars'>, name: 
 export async function prepareStore(store: Store, options: StartOptions): Promise<void> {
 	// "Personal" was the first name for David's own calendar; it is now "Me".
 	if (!store.calendars().some((c) => c.name === 'Me')) await store.renameCalendar('Personal', 'Me').catch((e) => console.error('Could not rename Personal to Me', e));
+	// Settings stored on Tasks mean the planner has run before. If they can't be read, nothing is made or
+	// written: guessing "first run" could bring back deleted calendars or overwrite David's settings.
+	let stored: string | undefined;
+	const existingTasks = tasksCalendarUrl(store, options.tasksCalendar);
+	try {
+		stored = existingTasks ? await store.storedSettings(existingTasks) : undefined;
+	} catch (e) {
+		console.error('Could not read the settings; leaving the calendars and settings as they are', e);
+		return;
+	}
+	if (stored !== undefined) return;
 	// The starting calendars are made only on a first run (no event calendars at all), so one David deletes stays deleted.
 	if (!store.calendars().some((c) => c.accepts.includes('event'))) {
 		for (const name of [...options.startingCalendars, options.workCalendar]) {
@@ -37,7 +48,6 @@ export async function prepareStore(store: Store, options: StartOptions): Promise
 	const tasks = tasksCalendarUrl(store, options.tasksCalendar);
 	if (!tasks) return;
 	try {
-		if ((await store.storedSettings(tasks)) !== undefined) return;
 		const seed = { workCalendar: options.workCalendar, defaultEventCalendar: options.eventsCalendar };
 		await store.writeSettings(tasks, parseSettings(undefined, store.calendars(), seed));
 	} catch (e) {

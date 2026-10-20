@@ -59,8 +59,27 @@ export class CalendarStore {
 		await this.refreshCalendars();
 	}
 
-	private async refreshCalendars() {
-		this.davCalendars = await this.client.fetchCalendars();
+	/** Reads the calendar list again, so ones added or deleted elsewhere (on a phone) are noticed. */
+	async refreshCalendars(): Promise<void> {
+		// One request for just the names and kinds. The library's fetchCalendars also asks for each calendar's
+		// change tag, which Radicale works out by reading every item, and sends one more request per calendar.
+		const home = this.client.account?.homeUrl;
+		if (!home) throw new Error('The calendar server did not report a home folder for this user');
+		const responses = await this.client.propfind({
+			url: home,
+			props: { 'd:displayname': {}, 'd:resourcetype': {}, 'c:supported-calendar-component-set': {} },
+			depth: '1'
+		});
+		if (!responses.some((r) => r.ok)) throw new Error(`Listing the calendars failed (${responses[0]?.status ?? 'no answer'})`);
+		this.davCalendars = responses
+			.filter((r) => r.ok && r.href && 'calendar' in (r.props?.resourcetype ?? {}))
+			.map((r) => {
+				const comp = r.props?.supportedCalendarComponentSet?.comp;
+				const components = (Array.isArray(comp) ? comp : comp ? [comp] : [])
+					.map((x: { _attributes?: { name?: unknown } }) => x?._attributes?.name)
+					.filter((n): n is string => typeof n === 'string');
+				return { url: new URL(r.href!, home).href, displayName: davText(r.props?.displayname), components };
+			});
 	}
 
 	calendars(): Calendar[] {
@@ -111,15 +130,18 @@ export class CalendarStore {
 		return parseSettings(await this.storedSettings(calendarUrl), this.calendars(), seed);
 	}
 
-	/** The settings exactly as stored, or undefined if nothing is stored there yet. */
+	/** The settings exactly as stored, or undefined if nothing is stored there yet. Throws if the server
+	 * couldn't say, so a hiccup is never mistaken for "no settings" and the stored ones overwritten. */
 	async storedSettings(calendarUrl: string): Promise<string | undefined> {
 		const [response] = await this.client.propfind({
 			url: calendarUrl,
 			props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
 			depth: '0'
 		});
-		// A missing property (or collection) comes back as 404; that just means the defaults.
-		return response?.ok ? davText(response.props?.plannerSettings) : undefined;
+		if (response?.ok) return davText(response.props?.plannerSettings);
+		// A missing property (or collection) comes back as 404; that just means nothing is stored yet.
+		if (response?.status === 404) return undefined;
+		throw new Error(`The calendar server could not read the settings (${response?.status ?? 'no answer'})`);
 	}
 
 	async writeSettings(calendarUrl: string, settings: Settings): Promise<void> {
@@ -144,16 +166,24 @@ export class CalendarStore {
 	}
 
 	async listItems(): Promise<StoredItem[]> {
+		await this.refreshCalendars();
 		const all: StoredItem[] = [];
 		for (const calendar of this.davCalendars) {
 			// One query that returns everything, rather than a list followed by a fetch: an item added or
 			// deleted between the two (on a phone, or by another page load) would make the fetch fail.
-			const responses = await this.client.calendarQuery({
-				url: calendar.url,
-				props: { 'd:getetag': {}, 'c:calendar-data': {} },
-				filters: ALL_COMPONENTS,
-				depth: '1'
-			});
+			const responses = await this.client
+				.calendarQuery({
+					url: calendar.url,
+					props: { 'd:getetag': {}, 'c:calendar-data': {} },
+					filters: ALL_COMPONENTS,
+					depth: '1'
+				})
+				.catch(async (e) => {
+					// Deleted elsewhere since the list was read: skip it. Any other failure is real.
+					await this.refreshCalendars();
+					if (this.davCalendars.some((c) => c.url === calendar.url)) throw e;
+					return [];
+				});
 			for (const res of responses) {
 				const data = davText(res.props?.calendarData);
 				if (!res.href || !data?.trim()) continue;
