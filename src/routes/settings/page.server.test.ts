@@ -278,7 +278,7 @@ describe('moving the items, then deleting the calendar', () => {
 			refusal(502, {
 				message:
 					'Moved 1 of 7 items to Me, so Family is still there with the rest. "Swim" stayed in Family, because the calendar server wouldn\'t put it in Me. ' +
-					'"Yoga", "Piano" and 2 more stayed in Family, because Me already holds different items with the same file names. ' +
+					'"Yoga", "Piano" and 2 more stayed in Family, because Me already holds different items with the same file names; choose another calendar for them, or "Delete them too". ' +
 					'"Run" may now be in two calendars, and the copies may differ, because it was changed, moved or deleted on another device meanwhile; delete the copy you don\'t want. Reload the page to see.'
 			})
 		);

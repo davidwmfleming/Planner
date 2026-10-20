@@ -298,7 +298,10 @@ function unfinished(name: string, toName: string, total: number, tally: Record<M
 	];
 	const { kept, clash, both, unsure } = tally;
 	if (kept.length) parts.push(`${named(kept)} stayed in ${name}, because the calendar server wouldn't put ${one(kept, 'it', 'them')} in ${toName}.`);
-	if (clash.length) parts.push(`${named(clash)} stayed in ${name}, because ${toName} already holds ${one(clash, 'a different item with the same file name', 'different items with the same file names')}.`);
+	// Trying the same calendar again would meet the same clash, so say what else would work.
+	if (clash.length) {
+		parts.push(`${named(clash)} stayed in ${name}, because ${toName} already holds ${one(clash, 'a different item with the same file name', 'different items with the same file names')}; choose another calendar for ${one(clash, 'it', 'them')}, or "Delete them too".`);
+	}
 	if (both.length) parts.push(`${named(both)} may now be in two calendars, and the copies may differ, because ${one(both, 'it was', 'they were')} changed, moved or deleted on another device meanwhile; delete the copy you don't want.`);
 	// Running it again finishes the job: a copy already in place and the same only needs the old one removed.
 	if (unsure.length) parts.push(`The calendar server stopped answering, so ${named(unsure)} may now be in both calendars. Wait a minute, then reload the page and delete ${name} again to finish.`);
