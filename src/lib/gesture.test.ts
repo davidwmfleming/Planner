@@ -4,6 +4,9 @@ import { readStroke, reversals, type Point } from './gesture';
 const line = (from: Point, to: Point, steps = 10): Point[] =>
 	Array.from({ length: steps + 1 }, (_, i) => ({ x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps }));
 
+/** A stroke through the corners, in order. */
+const path = (...corners: [number, number][]): Point[] => corners.slice(1).flatMap(([x, y], i) => line({ x: corners[i][0], y: corners[i][1] }, { x, y }));
+
 /** A zig-zag across a line of text: right, left, right, left… */
 const scribble = (passes: number, width = 120, y = 300, drift = 4): Point[] =>
 	Array.from({ length: passes }, (_, i) => line({ x: i % 2 ? 100 + width : 100, y: y + i * drift }, { x: i % 2 ? 100 : 100 + width, y: y + (i + 1) * drift })).flat();
@@ -30,16 +33,23 @@ describe('readStroke', () => {
 		expect(readStroke(zigzag)).toBe('scratch');
 	});
 
-	it('a loopy squiggle along the line is a scratch-out', () => {
-		const loops = Array.from({ length: 80 }, (_, i) => {
-			const t = (i / 80) * Math.PI * 2 * 5;
-			return { x: 100 + i * 2 + 18 * Math.cos(t), y: 300 + 18 * Math.sin(t) };
-		});
-		expect(readStroke(loops)).toBe('scratch');
-	});
-
 	it('across and back again is a scratch-out', () => {
 		expect(readStroke(scribble(2))).toBe('scratch');
+		// Left-handed: to the right, then back most of the way, a little lower.
+		expect(readStroke(path([100, 300], [260, 304], [140, 318]))).toBe('scratch');
+	});
+
+	it('a page sweep that hooks back at the end still turns the page', () => {
+		expect(readStroke(path([600, 400], [350, 410], [450, 390]))).toBe('next');
+		expect(readStroke(path([300, 400], [100, 405], [190, 395]))).toBe('next');
+		expect(readStroke(path([100, 400], [300, 400], [210, 390]))).toBe('previous');
+	});
+
+	it('circling or starring an item, or a short drag there and back, is not a strike-out', () => {
+		const circle = Array.from({ length: 40 }, (_, i) => ({ x: 200 + 60 * Math.cos((i / 40) * 2 * Math.PI), y: 300 + 15 * Math.sin((i / 40) * 2 * Math.PI) }));
+		expect(readStroke(circle)).not.toBe('scratch');
+		expect(readStroke(path([200, 280], [200, 320], [200, 300], [180, 300], [220, 300]))).not.toBe('scratch');
+		expect(readStroke(path([200, 300], [260, 305], [205, 300]))).not.toBe('scratch');
 	});
 
 	it('a single pass is not a scratch-out', () => {

@@ -50,11 +50,14 @@
 
 	// Marks on the page, like on paper: sweep a finger sideways to turn the page; with the pen, draw ✓ on an item to tick it,
 	// scribble over it to strike it out, or drag it onto another day. The pen never scrolls; fingers do. The tap buttons all still work.
-	type Active = { id: number; points: Point[]; pen: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
+	type Active = { id: number; points: Point[]; pen: boolean; finger: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
 	let stroke: Active | null = null;
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
 	let gestureMessage = $state('');
+	// Marks drawn on items, shown at once while they save.
+	let marking = $state<Record<string, 'done' | 'dropped'>>({});
+	const markKey = (uid: string, occurrence?: string) => `${uid} ${occurrence ?? ''}`;
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -74,6 +77,7 @@
 			id: e.pointerId,
 			points: [{ x: e.clientX, y: e.clientY }],
 			pen: e.pointerType === 'pen',
+			finger: e.pointerType === 'touch',
 			row,
 			uid: row?.dataset.uid,
 			occurrence: row?.dataset.occurrence,
@@ -108,16 +112,16 @@
 		const read = readStroke(done.points);
 		// Fingers (and a mouse) turn pages; the pen only makes marks, so a sloppy scribble never flips the page.
 		if (read === 'next' || read === 'previous') return done.pen ? undefined : goto(pageUrl(read === 'next' ? data.next : data.previous));
-		if (!item) return;
-		const row = done.row;
-		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
+		// Only the pen (or a mouse) makes marks; a finger is for turning pages and scrolling.
+		if (!item || done.finger) return;
 		const mark = read === 'tick' ? 'done' : read === 'scratch' ? 'dropped' : undefined;
-		if (!mark || !row || row.classList.contains(mark)) return;
-		// Show the mark at once; the page redraws from the server when the save is done.
-		row.classList.add('marked', mark);
-		return send('mark', { ...item, state: mark }).then((ok) => {
-			row.classList.remove('marked');
-			if (!ok) row.classList.remove(mark);
+		if (!mark || done.row?.classList.contains(mark)) return;
+		// Show the mark at once; once saved, the page redraws from the server. A mark only ever sets a state,
+		// so drawing it again (on a slow save, or on a page that is out of date) never undoes it.
+		const key = markKey(item.uid, item.occurrence);
+		marking[key] = mark;
+		return send('mark', { ...item, state: mark, set: 'yes' }).finally(() => {
+			if (marking[key] === mark) delete marking[key];
 		});
 	}
 	function onStrokeCancel() {
@@ -249,7 +253,8 @@
 </script>
 
 {#snippet itemRow(item: Item, date: string)}
-	<li class={[item.state, item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
+	{@const mark = marking[markKey(item.uid, item.occurrence)]}
+	<li class={[mark ?? item.state, mark && 'marked', item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
@@ -367,7 +372,7 @@
 			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
 			<ul class="lines">
 				{#each data.unscheduled as item (item.uid)}
-					<li class={[item.state, dragging === item.uid && 'dragging']} data-uid={item.uid}>
+					<li class={[marking[markKey(item.uid)] ?? item.state, marking[markKey(item.uid)] && 'marked', dragging === item.uid && 'dragging']} data-uid={item.uid}>
 						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 						{@render pullButtons(item)}

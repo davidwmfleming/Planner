@@ -47,16 +47,13 @@ export function readStroke(points: Point[]): Stroke {
 	const height = Math.max(...ys) - Math.min(...ys);
 	const turns = reversals(points);
 	if (turns >= 3 && width >= 30 && height <= Math.max(60, width * 0.6)) return 'scratch';
-	// The simplest cross-out: across the item and back again, ending near where it started.
+	// The simplest cross-out: across the item and most of the way back again, staying flat on the line.
+	// (A page sweep that hooks back a little at the end, or a circle round an item, is not one.)
 	const back = Math.abs(points[points.length - 1].x - points[0].x);
-	if (turns >= 1 && width >= 40 && back <= width * 0.6 && height <= Math.max(50, width * 0.5)) return 'scratch';
+	if (turns >= 1 && width >= 80 && back <= width * 0.4 && height <= Math.max(24, width * 0.2)) return 'scratch';
 	// The other way to scratch out: a zig-zag up and down, moving along the line.
 	if (reversals(points, 'y') >= 4 && width >= 40 && height <= 80) return 'scratch';
 	if (isTick(points, width, height)) return 'tick';
-	// Any other scribble: lots of ink going back and forth in a small space (loops, curls, a messy cross-out).
-	let ink = 0;
-	for (let i = 1; i < points.length; i++) ink += Math.hypot(points[i].x - points[i - 1].x, points[i].y - points[i - 1].y);
-	if (width >= 30 && ink >= 3 * Math.max(width, height) && turns + reversals(points, 'y') >= 4) return 'scratch';
 	const dx = points[points.length - 1].x - points[0].x;
 	const dy = points[points.length - 1].y - points[0].y;
 	if (turns <= 1 && Math.abs(dx) > 80 && Math.abs(dy) < Math.abs(dx) * 0.6) return dx < 0 ? 'next' : 'previous';

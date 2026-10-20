@@ -86,7 +86,7 @@ export const actions: Actions = {
 		return { added: title };
 	},
 
-	/** Tick (done) or strike through (dropped); doing it again puts the item back to open. */
+	/** Tick (done) or strike through (dropped); doing it again puts the item back to open, unless asked only to set it (pen marks). */
 	mark: async ({ request }) => {
 		const form = await request.formData();
 		const state = form.get('state');
@@ -94,7 +94,8 @@ export const actions: Actions = {
 		const found = await findItem(String(form.get('uid') ?? ''));
 		if (!found) return fail(404, { message: 'That item is no longer on the calendar; reload the page' });
 		const { store, item } = found;
-		const toggle = (current: Item): Partial<Item> => ({ state: current.state === state ? 'open' : state });
+		const set = form.get('set') === 'yes';
+		const toggle = (current: Item): Partial<Item> => ({ state: current.state === state && !set ? 'open' : state });
 		const day = String(form.get('occurrence') ?? '');
 		if (item.recurrence && ISO.test(day)) await store.updateOccurrence(item, day, toggle);
 		else await store.update(item, toggle(item));
