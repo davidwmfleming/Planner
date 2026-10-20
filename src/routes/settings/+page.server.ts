@@ -42,8 +42,8 @@ export const load: PageServerLoad = async () => {
 	return {
 		eventCalendars: events.map((c) => ({ path: pathOf(c.url), name: c.name, work: c.url === work?.url, newEvents: c.url === newEvents })),
 		taskLists: calendars.filter((c) => !c.accepts.includes('event')).map((c) => ({ path: pathOf(c.url), name: c.name, newTasks: c.url === newTasks })),
-		workCalendar: work?.name,
-		defaultEventCalendar: events.find((c) => c.url === newEvents)?.name,
+		workPath: work && pathOf(work.url),
+		defaultEventPath: newEvents && pathOf(newEvents),
 		categories: settings.categories
 	};
 };
@@ -85,5 +85,27 @@ export const actions: Actions = {
 			return fail(502, { action: 'rename', path, name: asked, message: `The calendar server didn't rename "${calendar.name}". Try again in a moment.` });
 		}
 		return { action: 'rename', renamed: checked.name };
+	},
+
+	/** Which calendar is shaded as work (or none), and which one new events go in. Both stored by path. */
+	choose: async ({ request }) => {
+		const form = await request.formData();
+		const store = await connect();
+		if (!store) return fail(503, { action: 'choose', message: NOT_ANSWERING });
+		const events = store.calendars().filter((c) => c.accepts.includes('event'));
+		const work = String(form.get('work') ?? '');
+		const newEvents = String(form.get('newEvents') ?? '');
+		const gone = (path: string) => !calendarAtPath(events, path);
+		if ((work && gone(work)) || gone(newEvents)) return fail(404, { action: 'choose', message: "One of those calendars isn't there any more; reload the page" });
+		const tasks = tasksUrl(store);
+		if (!tasks) return fail(503, { action: 'choose', message: 'There is no Tasks list to keep the settings on; reload the page' });
+		try {
+			const settings = await getSettings(store);
+			await store.writeSettings(tasks, { ...settings, workCalendar: work || null, defaultEventCalendar: newEvents });
+		} catch (e) {
+			console.error('Settings: could not save the Work and new-event choices', e);
+			return fail(502, { action: 'choose', message: "The calendar server didn't save the choices. Try again in a moment." });
+		}
+		return { action: 'choose', saved: true };
 	}
 };

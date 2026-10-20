@@ -20,6 +20,13 @@
 		document.querySelector<HTMLInputElement>('#rename-field')?.select();
 	}
 
+	// "Saved" shows after the choices are stored, until one is changed again.
+	let saved = $state(false);
+	const chose: SubmitFunction = () => async ({ result, update }) => {
+		await update({ reset: false });
+		saved = result.type === 'success';
+	};
+
 	/** A rename that worked closes its field; one that didn't keeps it open with the reason. */
 	const renamed: SubmitFunction = () => async ({ result, update }) => {
 		await update({ reset: false });
@@ -69,10 +76,30 @@
 				</div>
 				{#if addError}<p class="error" role="alert">{addError}</p>{/if}
 			</form>
-			<dl class="choices">
-				<div><dt>Show as work (light red)</dt><dd>{data.workCalendar ?? 'None'}</dd></div>
-				<div><dt>New events go in</dt><dd>{data.defaultEventCalendar ?? 'No event calendar yet'}</dd></div>
-			</dl>
+			{#if data.eventCalendars.length}
+				<form method="POST" action="?/choose" use:enhance={chose} class="choices">
+					<div class="field">
+						<label for="work-calendar">Show as work (light red)</label>
+						<select id="work-calendar" name="work" value={data.workPath ?? ''} onchange={() => (saved = false)}>
+							<option value="">None</option>
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+						</select>
+					</div>
+					<div class="field">
+						<label for="new-events-calendar">New events go in</label>
+						<select id="new-events-calendar" name="newEvents" value={data.defaultEventPath} onchange={() => (saved = false)}>
+							{#each data.eventCalendars as calendar (calendar.path)}<option value={calendar.path}>{calendar.name}</option>{/each}
+						</select>
+					</div>
+					<div class="edit">
+						<button class="btn primary">Save choices</button>
+						{#if saved}<span role="status">Saved</span>{/if}
+					</div>
+					{#if form?.action === 'choose' && form.message}<p class="error" role="alert">{form.message}</p>{/if}
+				</form>
+			{:else}
+				<p class="hint">Add a calendar first; new events need somewhere to go.</p>
+			{/if}
 		</section>
 
 		<section aria-labelledby="h-tasks">
@@ -140,11 +167,22 @@
 	/* Work: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
-	.choices { margin: 0.7rem 0 0; display: grid; gap: 0.4rem; }
-	.choices div { display: flex; flex-wrap: wrap; gap: 0 0.5rem; }
-	.choices dt { color: var(--muted); }
-	.choices dt::after { content: ':'; }
-	.choices dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+	.choices { margin: 1rem 0 0; display: grid; gap: 0.6rem; }
+	.field { display: grid; gap: 0.25rem; font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+	.field select {
+		font: inherit;
+		font-size: 1rem;
+		font-weight: 400;
+		letter-spacing: 0;
+		color: var(--ink);
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 6px;
+		min-height: 44px;
+		max-width: 100%;
+		padding: 0.2rem 0.5rem;
+	}
+	[role='status'] { font-weight: 700; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
 	button.btn { cursor: pointer; }
 	.btn.primary { background: var(--ink); color: var(--paper); }

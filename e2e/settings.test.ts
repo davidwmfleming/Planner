@@ -15,8 +15,8 @@ test('the gear opens the settings, which list the calendars, the Tasks list and 
 	await expect(work).toHaveCount(1);
 	await expect(work).toContainText('Work');
 	await expect(work).toHaveCSS('background-color', 'rgb(253, 228, 228)');
-	await expect(calendars.getByText('Show as work (light red)').locator('..')).toContainText('Work');
-	await expect(calendars.getByText('New events go in').locator('..')).toContainText('Me');
+	await expect(calendars.getByLabel('Show as work (light red)').locator('option:checked')).toHaveText('Work');
+	await expect(calendars.getByLabel('New events go in').locator('option:checked')).toHaveText('Me');
 
 	const tasks = page.getByRole('region', { name: 'Task list' });
 	await expect(tasks.getByRole('listitem').filter({ hasText: 'Tasks' })).toBeVisible();
@@ -90,7 +90,7 @@ test('a calendar can be renamed on the settings page; the Tasks list cannot', as
 	await expect(field).toHaveValue(before);
 	await field.fill('Something else');
 	await calendars.getByRole('button', { name: 'Cancel' }).click();
-	await expect(calendars.getByText(before, { exact: true })).toBeVisible();
+	await expect(calendars.getByRole('list').getByText(before, { exact: true })).toBeVisible();
 
 	await calendars.getByRole('button', { name: `Rename ${before}` }).click();
 	await field.fill('ME');
@@ -100,12 +100,12 @@ test('a calendar can be renamed on the settings page; the Tasks list cannot', as
 
 	await field.fill(after);
 	await calendars.getByRole('button', { name: 'Save name' }).click();
-	await expect(calendars.getByText(after, { exact: true })).toBeVisible();
-	await expect(calendars.getByText(before, { exact: true })).toHaveCount(0);
+	await expect(calendars.getByRole('list').getByText(after, { exact: true })).toBeVisible();
+	await expect(calendars.getByRole('list').getByText(before, { exact: true })).toHaveCount(0);
 	await expect(calendars.getByRole('alert')).toHaveCount(0);
 
 	await page.reload();
-	await expect(calendars.getByText(after, { exact: true })).toBeVisible();
+	await expect(calendars.getByRole('list').getByText(after, { exact: true })).toBeVisible();
 	await expect(page.getByRole('region', { name: 'Task list' }).getByRole('button')).toHaveCount(0);
 });
 
