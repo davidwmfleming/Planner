@@ -289,13 +289,21 @@ async function alreadyDone({ item, day, wanted }: Wanted) {
 }
 
 /** The second half of moving an item to another calendar: remove the old copy. If the calendar server won't,
- * take the new copy back out, so the item isn't left in two calendars, and say what happened either way. */
+ * take the new copy back out, so the item isn't left in two calendars, and say what happened either way.
+ * A delete that timed out may still have been done, so the new copy only goes if the old one is surely still there. */
 async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {
 	try {
 		await store.remove(old);
 		return;
 	} catch (e) {
 		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
+	}
+	try {
+		if (!(await store.listItems()).some((i) => i.url === old.url)) return;
+	} catch (e) {
+		// Never take the new copy out without knowing the old one is there: that could leave the item nowhere.
+		console.error(`Planner: could not check whether the old copy of "${old.title}" is still there`, e);
+		return fail(502, { message: `"${old.title}" may now be in two calendars, because the calendar server didn't say whether the old one was removed. Reload the page and delete the one you don't want.` });
 	}
 	try {
 		await store.remove(copy);

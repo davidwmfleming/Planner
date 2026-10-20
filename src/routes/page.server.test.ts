@@ -276,6 +276,40 @@ describe('moving an item to another calendar from the details sheet', () => {
 		expect(removed).toEqual([`${family.url}dentist.ics`]);
 	});
 
+	it('keeps the new copy when the old one was in fact deleted but the answer was lost (a timeout)', async () => {
+		// The delete reached the calendar server and was done; only its answer never came back.
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) {
+				fake.items = fake.items.filter((i) => i.calendarUrl !== me.url);
+				throw new Error('The calendar server did not answer in time (deleting "Dentist")');
+			}
+			removed.push(stored.url);
+		};
+		// The move is done, so there is nothing to report.
+		expect(await act('save', toFamily)).toBeUndefined();
+		// Taking the new copy back out now would leave "Dentist" in no calendar at all.
+		expect(removed).toEqual([]);
+	});
+
+	it('keeps the new copy when it cannot tell whether the old one is still there', async () => {
+		fake.remove = async (stored: StoredItem) => {
+			if (stored.calendarUrl === me.url) throw new Error('The calendar server did not answer in time (deleting "Dentist")');
+			removed.push(stored.url);
+		};
+		let reads = 0;
+		const before = fake.items;
+		// The first read finds the item; the check after the failed delete gets no answer.
+		fake.listItems = async () => {
+			if (reads++ === 0) return before;
+			throw new Error('The calendar server did not answer in time (reading Me)');
+		};
+		expect(await act('save', toFamily)).toMatchObject({
+			status: 502,
+			data: { message: '"Dentist" may now be in two calendars, because the calendar server didn\'t say whether the old one was removed. Reload the page and delete the one you don\'t want.' }
+		});
+		expect(removed).toEqual([]);
+	});
+
 	it('says plainly when the item is left in both calendars', async () => {
 		fake.remove = async () => {
 			throw new Error('Deleting "Dentist" failed (403)');
