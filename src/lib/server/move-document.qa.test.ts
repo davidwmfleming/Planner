@@ -39,4 +39,16 @@ describe('moving a document (QA proposals)', () => {
 		}
 	});
 
+	it('says the item is in both calendars when a re-run finds its own earlier copy there, changed since (on a phone)', async () => {
+		// A first run copied Swim, then the old one was edited on the phone, so it was left ("both").
+		// Re-running finds the same event (same UID) under that name in To, with other details. It is in both calendars;
+		// "kept" makes the page say the server "wouldn't put it" there, which is untrue.
+		const s = await fromAndTo((m) => (m === 'PUT' ? { status: 412 } : m === 'GET' ? { status: 200, body: ics('a', 'Swim (older)') } : { status: 204 }));
+		try {
+			expect(await s.store.moveDocument(s.doc, s.to)).toBe('both');
+			expect(s.asked).not.toContain('DELETE /david/from/a.ics');
+		} finally {
+			await s.close();
+		}
+	});
 });

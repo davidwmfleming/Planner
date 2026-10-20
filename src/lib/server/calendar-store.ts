@@ -32,8 +32,12 @@ export interface StoredDocument {
 /** What became of a document asked to move to another calendar:
  * moved (only in the new calendar), kept (surely only in the old one), both (the new copy is there, but so is
  * another: the old copy changed since it was read, so it wasn't removed, or it had already gone, deleted or moved
- * elsewhere by another device), or unsure (the server didn't answer: it may be in both). */
-export type MoveOutcome = 'moved' | 'kept' | 'both' | 'unsure';
+ * elsewhere by another device, or the same item with other details was already there), clash (surely only in the old
+ * one: the new calendar holds a different item under that file name), or unsure (the server didn't answer: it may be in both). */
+export type MoveOutcome = 'moved' | 'kept' | 'both' | 'clash' | 'unsure';
+
+/** The UID of a stored document (its first one; one-off changes share it). */
+const uidOf = (ics: string) => /^UID:(.*)$/m.exec(ics.replace(/\r?\n[ \t]/g, ''))?.[1]?.trim();
 
 /** What the calendar server says about something that isn't there (any more). */
 const GONE = [404, 410];
@@ -348,7 +352,9 @@ export class CalendarStore {
 		}
 		if (copied.status >= 500) return 'unsure';
 		if (copied.status === 412) {
-			if (!(await this.holds(target, doc.ics))) return 'kept'; // something else has that name there
+			// Something already has that name there: this move cut short before (the same), or something else.
+			const there = await this.holds(target, doc.ics);
+			if (there !== 'same') return there;
 		} else if (!copied.ok) return 'kept';
 		// Without a version, a change made on a phone since it was read could be deleted unseen.
 		if (!doc.etag) return 'both';
@@ -365,15 +371,21 @@ export class CalendarStore {
 		return removed.status >= 500 ? 'unsure' : 'both';
 	}
 
-	/** Whether the document at this address is exactly this one. Anything but a clear yes is a no. */
-	private async holds(url: string, ics: string): Promise<boolean> {
+	/** What the document at this address is, next to this one: the same ('same'), the same item with other details
+	 * ('both': it is now in two calendars), or a different item ('clash'). If it can't be read, 'kept': the old copy stays. */
+	private async holds(url: string, ics: string): Promise<'same' | 'both' | 'clash' | 'kept'> {
+		let there: string;
 		try {
 			const response = await this.send('GET', url, { Accept: 'text/calendar' });
-			const same = (text: string) => text.replace(/\r\n/g, '\n').trim();
-			return response.ok && same(await response.text()) === same(ics);
+			if (!response.ok) return 'kept';
+			there = await response.text();
 		} catch {
-			return false;
+			return 'kept';
 		}
+		const plain = (text: string) => text.replace(/\r\n/g, '\n').trim();
+		if (plain(there) === plain(ics)) return 'same';
+		const uid = uidOf(ics);
+		return uid && uidOf(there) === uid ? 'both' : 'clash';
 	}
 
 	/** Deletes a whole calendar, only if it is still at the version given (from `documents`). The server refuses

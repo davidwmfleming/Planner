@@ -170,15 +170,15 @@ export const actions: Actions = {
 			return refuse(400, `${name} holds tasks, and ${toName} only takes events. Choose another calendar, or delete them too.`);
 		}
 
-		const tally: Record<MoveOutcome, number> = { moved: 0, kept: 0, both: 0, unsure: 0 };
+		const tally: Record<MoveOutcome, string[]> = { moved: [], kept: [], both: [], clash: [], unsure: [] };
 		for (const doc of held.documents) {
 			const outcome = await store.moveDocument(doc, to.url);
-			tally[outcome]++;
+			tally[outcome].push(icsToItems(doc.ics)[0]?.title ?? 'An item');
 			// The server has stopped answering: don't press on, and don't guess what it did.
 			if (outcome === 'unsure') break;
 		}
 		const total = held.documents.length;
-		if (tally.moved < total) {
+		if (tally.moved.length < total) {
 			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, tally);
 			return refuse(502, unfinished(name, toName, total, tally));
 		}
@@ -234,13 +234,23 @@ async function contents(store: CalendarStore, calendar: Calendar): Promise<{ ver
 	}
 }
 
-/** Why a move stopped before every item was moved. Nothing is deleted then: the calendar stays with what is left. */
-function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, number>): string {
-	const parts = [`Moved ${tally.moved} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`];
-	if (tally.kept) parts.push(`${tally.kept} stayed in ${name}, because the calendar server wouldn't put ${tally.kept === 1 ? 'it' : 'them'} in ${toName}.`);
-	if (tally.both) parts.push(`${tally.both} may now be in two calendars, because ${tally.both === 1 ? 'it was' : 'they were'} changed, moved or deleted on another device meanwhile; delete the copy you don't want.`);
+/** Items named in a message: "Swim", "Swim" and "Run", or "Swim", "Run" and 3 more. */
+function named(titles: string[]): string {
+	const quoted = titles.map((t) => `"${shortTitle(t)}"`);
+	if (quoted.length <= 3) return quoted.length === 1 ? quoted[0] : `${quoted.slice(0, -1).join(', ')} and ${quoted.at(-1)}`;
+	return `${quoted.slice(0, 2).join(', ')} and ${quoted.length - 2} more`;
+}
+
+/** Why a move stopped before every item was moved, naming the items. Nothing is deleted then: the calendar stays with what is left. */
+function unfinished(name: string, toName: string, total: number, tally: Record<MoveOutcome, string[]>): string {
+	const one = (list: string[], single: string, plural: string) => (list.length === 1 ? single : plural);
+	const parts = [`Moved ${tally.moved.length} of ${items(total)} to ${toName}, so ${name} is still there with the rest.`];
+	const { kept, clash, both, unsure } = tally;
+	if (kept.length) parts.push(`${named(kept)} stayed in ${name}, because the calendar server wouldn't put ${one(kept, 'it', 'them')} in ${toName}.`);
+	if (clash.length) parts.push(`${named(clash)} stayed in ${name}, because ${toName} already holds ${one(clash, 'a different item with the same file name', 'different items with the same file names')}.`);
+	if (both.length) parts.push(`${named(both)} may now be in two calendars, and the copies may differ, because ${one(both, 'it was', 'they were')} changed, moved or deleted on another device meanwhile; delete the copy you don't want.`);
 	// Running it again finishes the job: a copy already in place and the same only needs the old one removed.
-	if (tally.unsure) parts.push(`The calendar server stopped answering, so ${tally.unsure} may now be in both calendars. Wait a minute, then reload the page and delete ${name} again to finish.`);
+	if (unsure.length) parts.push(`The calendar server stopped answering, so ${named(unsure)} may now be in both calendars. Wait a minute, then reload the page and delete ${name} again to finish.`);
 	else parts.push('Reload the page to see.');
 	return parts.join(' ');
 }

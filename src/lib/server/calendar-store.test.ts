@@ -152,7 +152,8 @@ describe('CalendarStore without a server', () => {
 		['the copy is refused', (m: string) => (m === 'PUT' ? 403 : 200), 'kept', ['PUT /david/to/a.ics']],
 		['the copy gets no answer', (m: string) => (m === 'PUT' ? 'hang' : 200), 'unsure', ['PUT /david/to/a.ics']],
 		['the copy fails on the server', (m: string) => (m === 'PUT' ? 500 : 200), 'unsure', ['PUT /david/to/a.ics']],
-		['a different item has that name already', (m: string) => (m === 'PUT' ? 412 : 200), 'kept', ['PUT /david/to/a.ics', 'GET /david/to/a.ics']],
+		['a different item has that name already', (m: string) => (m === 'PUT' ? 412 : 200), 'clash', ['PUT /david/to/a.ics', 'GET /david/to/a.ics']],
+		['what has that name there can\'t be read', (m: string) => (m === 'PUT' ? 412 : m === 'GET' ? 500 : 200), 'kept', ['PUT /david/to/a.ics', 'GET /david/to/a.ics']],
 		['the old copy changed since it was read', (m: string) => (m === 'PUT' ? 201 : 412), 'both', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
 		['removing the old copy gets no answer', (m: string) => (m === 'PUT' ? 201 : 'hang'), 'unsure', ['PUT /david/to/a.ics', 'DELETE /david/from/a.ics']],
 		// Deleted on a phone (the copy brings it back) or moved elsewhere by another device (now in two): never "moved".
@@ -327,7 +328,7 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		]);
 	});
 
-	it('finishes a move whose old copy was left behind, but never removes it for a different item', async () => {
+	it('finishes a move whose old copy was left behind, but never removes it for a different version or item', async () => {
 		const from = await store.ensureCalendar('Half from', ['event']);
 		const to = await store.ensureCalendar('Half to', ['event']);
 		await store.create(from.url, { uid: 'hf-1', kind: 'event', title: 'Swim', date: '2026-10-21', state: 'open' });
@@ -339,8 +340,15 @@ describe.skipIf(!hasRadicale)('CalendarStore against Radicale', () => {
 		expect((await fetch(`${to.url}hf-1.ics`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'text/calendar' }, body: swim.ics })).ok).toBe(true);
 
 		expect(await store.moveDocument(swim, to.url)).toBe('moved');
-		expect(await store.moveDocument(run, to.url)).toBe('kept');
-		expect((await store.documents(from.url)).documents.map((d) => d.url)).toEqual([run.url]);
+		// The same event (same UID) is already there with other details: it is in both, and the old copy stays.
+		expect(await store.moveDocument(run, to.url)).toBe('both');
+		// A different event (another UID) under the same file name: a clash, and the old copy stays too.
+		await store.create(from.url, { uid: 'hf-3', kind: 'event', title: 'Yoga', date: '2026-10-23', state: 'open' });
+		const yoga = (await store.documents(from.url)).documents.find((d) => d.url.endsWith('hf-3.ics'))!;
+		const other = yoga.ics.replace('UID:hf-3', 'UID:someone-else').replace('SUMMARY:Yoga', 'SUMMARY:Not yoga');
+		expect((await fetch(`${to.url}hf-3.ics`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'text/calendar' }, body: other })).ok).toBe(true);
+		expect(await store.moveDocument(yoga, to.url)).toBe('clash');
+		expect((await store.documents(from.url)).documents.map((d) => d.url).sort()).toEqual([run.url, yoga.url]);
 		expect((await store.listItems()).filter((i) => i.uid === 'hf-2').map((i) => i.title).sort()).toEqual(['Run', 'Run, but changed']);
 	});
 

@@ -209,20 +209,23 @@ describe('moving the items, then deleting the calendar', () => {
 		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
 			refusal(502, {
 				message:
-					"Moved 1 of 3 items to Me, so Family is still there with the rest. The calendar server stopped answering, so 1 may now be in both calendars. Wait a minute, then reload the page and delete Family again to finish."
+					'Moved 1 of 3 items to Me, so Family is still there with the rest. The calendar server stopped answering, so "b" may now be in both calendars. Wait a minute, then reload the page and delete Family again to finish.'
 			})
 		);
 		expect(fake.moves).toHaveLength(2);
 		expect(fake.deleted).toEqual([]);
 	});
 
-	it('keeps the calendar, and says so, when items stayed or ended up in both', async () => {
-		fake = fakeStore([me, family, tasks], { [family.url]: ['a', 'b', 'c'].map((u) => doc(family, u)) });
-		fake.outcomes = ['kept', 'both', 'moved'];
+	it('keeps the calendar, and names the items that stayed or may be in both', async () => {
+		const titles = ['Swim', 'Run', 'Yoga', 'Piano', 'Chess', 'Bake', 'Walk'];
+		fake = fakeStore([me, family, tasks], { [family.url]: titles.map((u) => doc(family, u)) });
+		fake.outcomes = ['kept', 'both', 'clash', 'clash', 'clash', 'clash', 'moved'];
 		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
 			refusal(502, {
 				message:
-					"Moved 1 of 3 items to Me, so Family is still there with the rest. 1 stayed in Family, because the calendar server wouldn't put it in Me. 1 may now be in two calendars, because it was changed, moved or deleted on another device meanwhile; delete the copy you don't want. Reload the page to see."
+					'Moved 1 of 7 items to Me, so Family is still there with the rest. "Swim" stayed in Family, because the calendar server wouldn\'t put it in Me. ' +
+					'"Yoga", "Piano" and 2 more stayed in Family, because Me already holds different items with the same file names. ' +
+					'"Run" may now be in two calendars, and the copies may differ, because it was changed, moved or deleted on another device meanwhile; delete the copy you don\'t want. Reload the page to see.'
 			})
 		);
 		expect(fake.deleted).toEqual([]);
