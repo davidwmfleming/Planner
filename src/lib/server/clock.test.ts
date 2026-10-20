@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { pageToday } from './clock';
+import { describe, expect, it, vi } from 'vitest';
+import { pageToday, testClockOn } from './clock';
 
 const now = new Date(2026, 9, 21, 12, 0);
 
@@ -14,5 +14,20 @@ describe('pageToday', () => {
 	it('ignores anything but a date', () => {
 		expect(pageToday(now, { PLANNER_TEST_CLOCK: '1' }, 'tomorrow')).toBe('2026-10-21');
 		expect(pageToday(now, { PLANNER_TEST_CLOCK: '1' }, undefined)).toBe('2026-10-21');
+	});
+});
+
+describe('testClockOn', () => {
+	it('is refused on a production server, said once in the log', () => {
+		const log = vi.fn();
+		const env = { PLANNER_TEST_CLOCK: '1', NODE_ENV: 'production' };
+		expect(testClockOn(env, log)).toBe(false);
+		expect(testClockOn(env, log)).toBe(false);
+		expect(log).toHaveBeenCalledTimes(1);
+		expect(pageToday(now, env, '2031-01-15')).toBe('2026-10-21');
+	});
+	it('is on only when asked for, away from production', () => {
+		expect(testClockOn({ PLANNER_TEST_CLOCK: '1', NODE_ENV: 'test' })).toBe(true);
+		expect(testClockOn({ NODE_ENV: 'development' })).toBe(false);
 	});
 });

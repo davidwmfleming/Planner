@@ -6,7 +6,7 @@ import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
 import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
-import { pageToday, TEST_TODAY_COOKIE } from '$lib/server/clock';
+import { pageToday, TEST_TODAY_COOKIE, testClockOn } from '$lib/server/clock';
 import { env } from '$env/dynamic/private';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
 import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
@@ -41,7 +41,7 @@ const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: 
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
 	const now = new Date();
-	const today = pageToday(now, env, env.PLANNER_TEST_CLOCK === '1' ? cookies.get(TEST_TODAY_COOKIE) : undefined);
+	const today = pageToday(now, env, testClockOn(env) ? cookies.get(TEST_TODAY_COOKIE) : undefined);
 	const asked = url.searchParams.get('page');
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
