@@ -10,6 +10,11 @@ describe('events', () => {
 		expect(roundTrip(item)).toEqual({ ...item, endTime: '09:45' });
 	});
 
+	it('stamps an item with the time it was written, in UTC as the standard requires', () => {
+		const ics = itemToICS({ uid: 'e0', kind: 'event', title: 'Stamp', date: '2026-10-19', state: 'open' });
+		expect(ics).toMatch(/\r\nDTSTAMP:\d{8}T\d{6}Z\r\n/);
+	});
+
 	it('keeps a multi-day all-day event and writes the exclusive end date the standard expects', () => {
 		const item: Item = { uid: 'e2', kind: 'event', title: 'Cornwall Camp', date: '2026-10-19', endDate: '2026-10-21', state: 'open' };
 		const ics = itemToICS(item);

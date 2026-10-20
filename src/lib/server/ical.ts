@@ -53,7 +53,7 @@ export function itemToICS(item: Item, previous?: string): string {
 function itemComponent(item: Item): ICAL.Component {
 	const comp = new ICAL.Component(item.kind === 'event' ? 'vevent' : 'vtodo');
 	comp.addPropertyWithValue('uid', item.uid);
-	comp.addPropertyWithValue('dtstamp', ICAL.Time.now());
+	comp.addPropertyWithValue('dtstamp', ICAL.Time.fromJSDate(new Date(), true)); // in UTC, as the standard requires
 	comp.addPropertyWithValue('summary', item.title);
 	if (item.location) comp.addPropertyWithValue('location', item.location);
 	if (item.notes) comp.addPropertyWithValue('description', item.notes);
