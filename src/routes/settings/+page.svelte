@@ -16,6 +16,7 @@
 	let renaming = $state<string | undefined>();
 
 	async function startRename(path: string) {
+		if (busyPath) return; // a delete is under way; it redraws the list when done
 		closeDelete();
 		renaming = path;
 		renameError = undefined;
@@ -63,9 +64,13 @@
 	/** The calendar being deleted (by path), how many items it held when counted, and the version counted:
 	 * "Delete them too" deletes only that version, so nothing added on a phone since is deleted unseen. */
 	let deleting = $state<{ path: string; count: number; version: string } | undefined>();
-	/** The calendar whose Delete was last tapped, and why it can't be deleted (or not yet), shown next to it. */
+	/** The calendar whose Delete was last tapped. */
 	let deletePath = $state<string | undefined>();
-	let deleteError = $state<string | undefined>();
+	/** Why a calendar can't be deleted (or not yet), shown only next to the calendar it is about. */
+	let deleteError = $state<{ path: string; message: string } | undefined>();
+	/** The calendar whose delete is under way. It can't be stopped once sent, so until it is done there is no Cancel,
+	 * and Delete and Rename on the other calendars do nothing. */
+	let busyPath = $state<string | undefined>();
 	/** What happens to its items: nothing is chosen at first, so a hasty tap can't delete them. */
 	let mode = $state<'move' | 'delete' | undefined>();
 	let moveTo = $state('');
@@ -88,13 +93,16 @@
 	}
 
 	/** Delete asks the server how many items the calendar holds; the confirm then shows on the page. */
-	const counted: SubmitFunction = ({ formData }) => {
+	const counted: SubmitFunction = ({ formData, cancel }) => {
 		const path = String(formData.get('path'));
+		if (busyPath) return cancel();
 		renaming = undefined;
 		closeDelete();
 		deletedMessage = '';
 		deletePath = path;
 		return async ({ result }) => {
+			// Another calendar's Delete was tapped since: this answer is no longer wanted.
+			if (deletePath !== path) return;
 			if (result.type === 'success') {
 				const { count, version } = result.data as { count: number; version: string };
 				deleting = { path, count, version };
@@ -103,23 +111,27 @@
 				moveTo = (others.find((c) => c.path === data.defaultEventPath) ?? others[0])?.path ?? '';
 				await tick();
 				document.querySelector<HTMLElement>('#delete-count')?.focus();
-			} else deleteError = result.type === 'failure' ? String(result.data?.message) : SOMETHING_WRONG;
+			} else deleteError = { path, message: messageOf(result) };
 		};
 	};
+
+	const messageOf = (result: ActionResult) => (result.type === 'failure' ? String(result.data?.message) : SOMETHING_WRONG);
 
 	/** A delete that worked says what it did and redraws the list; one that didn't keeps the confirm open with the reason. */
-	let deletingNow = $state(false);
-	const deletedCalendar: SubmitFunction = ({ cancel }) => {
+	const deletedCalendar: SubmitFunction = ({ formData, cancel }) => {
 		// A second tap while the first is working would only repeat it.
-		if (deletingNow) return cancel();
-		deletingNow = true;
+		if (busyPath) return cancel();
+		const path = String(formData.get('path'));
+		busyPath = path;
+		deleteError = undefined;
 		return async ({ result, update }) => {
-			deletingNow = false;
-			await afterDelete(result, update);
+			busyPath = undefined;
+			await afterDelete(path, result, update);
 		};
 	};
 
-	async function afterDelete(result: ActionResult, update: () => Promise<void>) {
+	/** Every answer is about the calendar it was sent for, whatever is open now. */
+	async function afterDelete(path: string, result: ActionResult, update: () => Promise<void>) {
 		if (result.type === 'success') {
 			const { deleted, count, movedTo } = result.data as unknown as { deleted: string; count: number; movedTo?: string };
 			closeDelete();
@@ -131,10 +143,10 @@
 			document.querySelector<HTMLElement>('#deleted-message')?.focus();
 			return;
 		}
-		deleteError = result.type === 'failure' ? String(result.data?.message) : SOMETHING_WRONG;
+		deleteError = { path, message: messageOf(result) };
 		// The calendar changed since it was counted: show the new count, which a second tap then deletes.
 		const fresh = result.type === 'failure' ? (result.data as { count?: number; version?: string }) : {};
-		if (deleting && fresh.count !== undefined && fresh.version) deleting = { ...deleting, count: fresh.count, version: fresh.version };
+		if (deleting?.path === path && fresh.count !== undefined && fresh.version) deleting = { ...deleting, count: fresh.count, version: fresh.version };
 	}
 
 	// "Download everything": one export at a time; a failure is said here, on the page.
@@ -225,8 +237,8 @@
 			{#if calendar.work}<p class="hint">The Work shading goes to None.</p>{/if}
 			{#if calendar.newEvents}<p class="hint">New events will go in {others[0]?.label}.</p>{/if}
 			<!-- aria-disabled, not disabled: a disabled button drops keyboard and screen-reader focus to the page. -->
-			<div class="edit" aria-busy={deletingNow}>
-				{#if deletingNow}
+			<div class="edit" aria-busy={busyPath === calendar.path}>
+				{#if busyPath === calendar.path}
 					<button type="button" class="btn primary" aria-disabled="true">{mode === 'move' ? 'Moving and deleting…' : 'Deleting…'}</button>
 				{:else if !counted.count}
 					<button class="btn primary">Delete {calendar.label}</button>
@@ -235,9 +247,9 @@
 				{:else if mode === 'delete'}
 					<button class="btn primary">Delete {calendar.label} and its {items(counted.count)}</button>
 				{/if}
-				<button type="button" class="btn" onclick={cancelDelete}>Cancel</button>
+				{#if busyPath !== calendar.path}<button type="button" class="btn" onclick={cancelDelete}>Cancel</button>{/if}
 			</div>
-			{#if deleteError}{@render problem(deleteError)}{/if}
+			{#if deleteError?.path === calendar.path}{@render problem(deleteError.message)}{/if}
 		</div>
 	</form>
 {/snippet}
@@ -273,15 +285,15 @@
 							<span class="name">{calendar.label}</span>
 							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
 							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
-							<button type="button" class="btn small" aria-label="Rename {calendar.label}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
+							<button type="button" class="btn small" aria-label="Rename {calendar.label}" class:waiting={!!busyPath} data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
 							<form method="POST" action="?/check" use:enhance={counted} class="inline">
 								<input type="hidden" name="path" value={calendar.path} />
-								<button class="btn small" aria-label="Delete {calendar.label}" data-delete={calendar.path}>Delete</button>
+								<button class="btn small" aria-label="Delete {calendar.label}" class:waiting={!!busyPath} data-delete={calendar.path}>Delete</button>
 							</form>
 							{#if deleting?.path === calendar.path}
 								{@render confirmDelete(calendar, deleting)}
-							{:else if deletePath === calendar.path && deleteError}
-								{@render problem(deleteError)}
+							{:else if deleteError?.path === calendar.path}
+								{@render problem(deleteError.message)}
 							{/if}
 						{/if}
 					</li>
@@ -422,6 +434,8 @@
 	button.btn { cursor: pointer; }
 	button.btn:disabled,
 	button.btn[aria-disabled='true'] { color: var(--muted); border-color: var(--muted); cursor: progress; }
+	/* While a delete is under way, the other calendars' buttons look asleep, and a tap on them does nothing. */
+	button.btn.waiting { color: var(--muted); border-color: var(--muted); cursor: progress; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	.btn.small { font-size: 0.85rem; padding: 0 0.6rem; }
 	.lines li .btn { margin-block: 0.15rem; }
