@@ -7,7 +7,7 @@
 	import { dayLetter, dayNumber, formatTime, monthShort, monthYear } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -26,19 +26,44 @@
 		sheet?.showModal();
 	}
 	const DID_NOT_WORK = 'That did not work; try again';
-	/** A refusal or failure as a plain sentence. Never the error screen, which in the installed app has no way back. */
-	const problemOf = (result: { type: string; data?: Record<string, unknown> }) =>
-		result.type === 'failure' ? String(result.data?.message ?? DID_NOT_WORK) : result.type === 'error' ? DID_NOT_WORK : '';
+	const OFFLINE = 'That did not save. Check the connection and try again.';
+	/** A refusal or failure as a plain sentence. Never the error screen, which in the installed app has no way back.
+	 * A request that never reached the planner (no connection) fails with a TypeError, rather than an answer. */
+	const problemOf = (result: { type: string; data?: Record<string, unknown>; error?: unknown }) =>
+		result.type === 'failure'
+			? String(result.data?.message ?? DID_NOT_WORK)
+			: result.type === 'error'
+				? result.error instanceof TypeError ? OFFLINE : DID_NOT_WORK
+				: '';
+	/** Messages that ask for a reload get a Reload button: the installed app has no browser controls. */
+	const saysReload = (message: string) => /\breload\b/i.test(message);
+	let sheetTrouble = $state<HTMLElement>();
 	const closeOnSuccess: SubmitFunction = () => async ({ result, update }) => {
 		sheetMessage = problemOf(result);
-		if (sheetMessage) return;
+		if (sheetMessage) {
+			// The message sits in the sheet's Save bar, which a phone keeps on screen; make sure it is in view anyway.
+			await tick();
+			sheetTrouble?.scrollIntoView({ block: 'nearest' });
+			return;
+		}
 		await update();
 		sheet?.close();
 	};
-	// Tick, ✕, → and the other taps on a row: a problem is said at the top of the page, like a line that didn't save.
-	const reportProblems: SubmitFunction = () => async ({ result, update }) => {
-		gestureMessage = problemOf(result);
-		if (!gestureMessage) await update();
+	// Tick, ✕, → and the other taps on a row: a problem is said under the page's header, like a line that didn't save.
+	// The same tap again while it is still saving (a double tap, a slow connection) is ignored: it would undo the first.
+	const tapsSaving = new Set<string>();
+	const reportProblems: SubmitFunction = ({ action, formData, cancel }) => {
+		const tap = JSON.stringify([action.search, ...formData]);
+		if (tapsSaving.has(tap)) return cancel();
+		tapsSaving.add(tap);
+		return async ({ result, update }) => {
+			try {
+				gestureMessage = problemOf(result);
+				if (!gestureMessage) await update();
+			} finally {
+				tapsSaving.delete(tap);
+			}
+		};
 	};
 
 	// "Future tasks" stays out of the way until asked for; the choice is remembered on this device.
@@ -182,7 +207,7 @@
 			const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
 			result = deserialize(await response.text());
 		} catch {
-			gestureMessage = 'That did not save. Check the connection and try again.';
+			gestureMessage = OFFLINE;
 			return false;
 		}
 		gestureMessage = problemOf(result);
@@ -356,9 +381,15 @@
 				<circle cx="12" cy="12" r="2" stroke-width="2" />
 			</svg>
 		</a>
+		<!-- In the header, which stays at the top of the screen, so a message is seen however far down the page is scrolled. -->
+		{#if gestureMessage}
+			<div class="trouble">
+				<p class="error" role="alert">{gestureMessage}</p>
+				{#if saysReload(gestureMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+			</div>
+		{/if}
 	</header>
 
-	{#if gestureMessage}<p class="error" role="alert">{gestureMessage}</p>{/if}
 	{#if !data.eventCalendars.length}
 		<p class="notice">There are no event calendars, so new events have nowhere to go. <a href="/settings">Add one in Settings</a>.</p>
 	{/if}
@@ -465,12 +496,18 @@
 				</label>
 				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
 				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
-				{#if sheetMessage}<p class="error" role="alert">{sheetMessage}</p>{/if}
 				<p class="hint">
 					Leave the date empty to keep a task in Future tasks.
 					{#if editing.recurrence}Changes here apply to every day it repeats; tick, ✕ and → change just one day.{/if}
 				</p>
 				<div class="actions">
+					<!-- In the Save bar, which stays on screen on a phone while the rest of the sheet scrolls. -->
+					{#if sheetMessage}
+						<div class="trouble" bind:this={sheetTrouble}>
+							<p class="error" role="alert">{sheetMessage}</p>
+							{#if saysReload(sheetMessage)}<button type="button" class="btn" onclick={() => location.reload()}>Reload</button>{/if}
+						</div>
+					{/if}
 					{#if editing.occurrence}
 						<span class="actions-left">
 							<button class="btn" formaction="?page={data.start}&/deleteOne" formnovalidate>Delete this day</button>
@@ -641,6 +678,10 @@
 	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem 0 0; }
 	.notice a { color: var(--ink); font-weight: 700; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
+	/* A whole row of its own, under the header's buttons or above the sheet's. */
+	.trouble { flex: 1 0 100%; order: 2; display: flex; gap: 0.5rem; align-items: center; }
+	.actions .trouble { order: -1; }
+	.trouble .error { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
