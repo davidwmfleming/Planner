@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, calendarAtPath, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
+import { byName, calendarAtPath, calendarTags, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -193,5 +193,66 @@ describe('menuLabels', () => {
 
 	it('keeps the other fields', () => {
 		expect(menuLabels([{ path: '/david/me/', name: 'Me', work: true }])[0]).toMatchObject({ work: true });
+	});
+});
+
+describe('calendarTags', () => {
+	const tags = (...names: string[]) => Object.values(calendarTags(names.map((name, i) => ({ path: `/david/c${i}/`, name }))));
+
+	it('is the first 4 letters of the name, or all of a short one', () => {
+		expect(tags('Family', 'Me', 'Morgan Meals', 'Tasks', 'Trip')).toEqual(['Fami', 'Me', 'Morg', 'Task', 'Trip']);
+	});
+
+	it('is keyed by path', () => {
+		expect(calendarTags([{ path: '/david/family/', name: 'Family' }, { path: '/david/me/', name: 'Me' }])).toEqual({ '/david/family/': 'Fami', '/david/me/': 'Me' });
+	});
+
+	it('drops spaces at either end, so a cut at a space leaves no gap in the tag', () => {
+		expect(tags('The list', 'To do list', '  Kids  ')).toEqual(['The', 'To d', 'Kids']);
+	});
+
+	it('counts an emoji, a flag or an accented letter as one letter, and never cuts one in half', () => {
+		const family = '👨‍👩‍👧';
+		expect(tags('🎉 Party', `${family}${family} Home`, '🇬🇧🇫🇷 trips', '🏴󠁧󠁢󠁳󠁣󠁴󠁿 golf')).toEqual(['🎉 Pa', `${family}${family} H`, '🇬🇧🇫🇷 t', '🏴󠁧󠁢󠁳󠁣󠁴󠁿 go']);
+		// Accents typed as one character, and as a letter followed by a separate accent mark.
+		expect(tags('\u00c9v\u00e9nements', 'E\u0301te\u0301s camps')).toEqual(['\u00c9v\u00e9n', 'E\u0301te\u0301s']);
+		expect(tags('Ärzte', 'Ψυχαγωγία', '日本の休日')).toEqual(['Ärzt', 'Ψυχα', '日本の休']);
+	});
+
+	it('uses a few more letters when two tags would be the same', () => {
+		// David's own calendars: Work and Workouts.
+		expect(tags('Me', 'Family', 'Workouts', 'Morgan Meals', 'Work')).toEqual(['Me', 'Fami', 'Worko', 'Morg', 'Work']);
+		expect(tags('Kids A', 'Kids B', 'Kidstuff')).toEqual(['Kids A', 'Kids B', 'Kidst']);
+		// A name that is all of another's start is shown whole; the other gets letters up to where they differ.
+		expect(tags('Family', 'Family trips')).toEqual(['Family', 'Family t']);
+	});
+
+	it('treats tags that differ only in case as the same, since they are hard to tell apart', () => {
+		expect(tags('school', 'School trips')).toEqual(['school', 'School t']);
+	});
+
+	it('tells apart a cut that ends at a space from a short name', () => {
+		expect(tags('Ab   x', 'Ab')).toEqual(['Ab   x', 'Ab']);
+	});
+
+	it('adds the end of the address, as the menus do, when two calendars have the same name', () => {
+		const tagged = calendarTags([
+			{ path: '/david/family/', name: 'Family' },
+			{ path: '/david/family-2/', name: 'family' },
+			{ path: '/david/me/', name: 'Me' }
+		]);
+		expect(tagged).toEqual({ '/david/family/': 'Fami (family)', '/david/family-2/': 'fami (family-2)', '/david/me/': 'Me' });
+		// A third calendar that starts the same way still gets more letters.
+		expect(tags('Family', 'Family', 'Family trips')).toEqual(['Fami (c0)', 'Fami (c1)', 'Famil']);
+	});
+
+	it('never gives two calendars the same tag', () => {
+		const names = ['Work', 'Workouts', 'Work ', 'work', 'Wor', 'Worko', 'Workout', 'W o r k', 'Work trips', 'Work travel'];
+		const all = tags(...names).map((t) => t.toLowerCase());
+		expect(new Set(all).size).toBe(names.length);
+	});
+
+	it('is empty for a calendar with no name', () => {
+		expect(tags('', '   ')).toEqual(['', '']);
 	});
 });

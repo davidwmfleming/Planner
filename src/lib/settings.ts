@@ -103,6 +103,31 @@ export function menuLabels<T extends { path: string; name: string }>(calendars: 
 	return calendars.map((c) => ({ ...c, label: label.get(c)! }));
 }
 
+/** Letters a calendar's tag on the planner page shows, when no other calendar's tag starts the same way. */
+export const TAG_LETTERS = 4;
+
+/** Each calendar's tag on the planner page, by path: the first 4 letters of its name (an emoji or an accented letter
+ * counts as one), without spaces at the ends. When two tags would look the same, whatever the case, those calendars
+ * get more letters until they differ. Two calendars with the same name get the end of their address, as the menus do. */
+export function calendarTags(calendars: { path: string; name: string }[]): Record<string, string> {
+	type Tagged = { path: string; chars: string[]; shown: number };
+	const all: Tagged[] = calendars.map((c) => ({ path: c.path, chars: letters(c.name.trim()), shown: 0 }));
+	for (const c of all) c.shown = Math.min(TAG_LETTERS, c.chars.length);
+	const tagOf = (c: Tagged) => c.chars.slice(0, c.shown).join('').trimEnd();
+	const fullName = (c: Tagged) => c.chars.join('').toLowerCase();
+	// More letters can't tell apart two calendars with the same name, so those keep 4 letters and get the address.
+	const twin = (c: Tagged) => all.some((other) => other !== c && fullName(other) === fullName(c));
+	const clashing = () => [...Map.groupBy(all.filter((c) => c.chars.length), (c) => tagOf(c).toLowerCase()).values()].filter((group) => group.length > 1);
+	for (;;) {
+		const growing = clashing().flat().filter((c) => c.shown < c.chars.length && !twin(c));
+		if (!growing.length) break;
+		for (const c of growing) c.shown++;
+	}
+	const tag = new Map(all.map((c) => [c.path, tagOf(c)]));
+	for (const group of clashing()) for (const c of menuLabels(group.map((g) => ({ path: g.path, name: tagOf(g) })))) tag.set(c.path, c.label);
+	return Object.fromEntries(tag);
+}
+
 /** Longest calendar name the settings page accepts. */
 export const MAX_NAME = 40;
 
