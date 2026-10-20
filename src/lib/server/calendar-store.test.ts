@@ -13,9 +13,9 @@ const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status
 const PORT = 5299;
 
 /** A store whose calendar server is played by the test: each DAV call it makes goes to `client`. */
-function storeWith(client: Record<string, unknown>, timeoutMs?: number) {
+function storeWith(client: Record<string, unknown>, timeoutMs?: number, homeUrl = 'http://127.0.0.1:5232/david/') {
 	const store = new CalendarStore({ serverUrl: 'http://127.0.0.1:5232/', username: 'david', password: 'dev', timeoutMs });
-	(store as unknown as { client: unknown }).client = { account: { homeUrl: 'http://127.0.0.1:5232/david/' }, ...client };
+	(store as unknown as { client: unknown }).client = { account: { homeUrl }, ...client };
 	return store;
 }
 const listing = (href: string, name: string, comps = ['VEVENT']) => ({
@@ -39,6 +39,13 @@ describe('CalendarStore without a server', () => {
 		});
 		await store.refreshCalendars();
 		expect(store.calendars().map((c) => c.name)).toEqual(['Me']);
+	});
+
+	it('keeps to the home folder when the server gives it without a closing slash', async () => {
+		const store = storeWith({ propfind: async () => [listing('/david/me/', 'Me'), listing('/david-two/w/', 'Lookalike'), listing('/davidx/', 'Lookalike too')] }, undefined, 'http://127.0.0.1:5232/david');
+		await store.refreshCalendars();
+		expect(store.calendars().map((c) => c.name)).toEqual(['Me']);
+		expect(store.addressFor('Tasks')).toBe('http://127.0.0.1:5232/david/tasks/');
 	});
 
 	it('skips items whose address is outside their calendar', async () => {

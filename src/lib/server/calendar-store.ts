@@ -80,7 +80,8 @@ export class CalendarStore {
 	private home(): string {
 		const home = this.client.account?.homeUrl;
 		if (!home) throw new Error('The calendar server did not report a home folder for this user');
-		return home;
+		// Always a folder, so "/david" never matches "/david-two/" and new calendars go inside it, not beside it.
+		return home.endsWith('/') ? home : `${home}/`;
 	}
 
 	/** The address a calendar with this name is first made at. Tasks is found by it, since a phone can rename it. */
