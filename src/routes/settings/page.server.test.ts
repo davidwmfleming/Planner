@@ -325,6 +325,15 @@ describe('moving the items, then deleting the calendar', () => {
 		expect(text).toMatch(/kept.*1/);
 	});
 
+	it('names an item it cannot read as "An item", and carries on moving the rest', async () => {
+		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'bad', 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nDTSTART:not a date\r\n:::'), doc(family, 'b')] });
+		fake.outcomes = ['kept', 'moved'];
+		expect(await act('delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' })).toEqual(
+			refusal(502, { message: expect.stringContaining('Moved 1 of 2 items to Me, so Family is still there with the rest. "An item" stayed in Family') })
+		);
+		expect(fake.moves).toHaveLength(2);
+	});
+
 	it('keeps the calendar if an item arrives while the others are moved', async () => {
 		fake = fakeStore([me, family, tasks], { [family.url]: [doc(family, 'a')] });
 		const move = fake.moveDocument.bind(fake);

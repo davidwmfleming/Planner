@@ -163,7 +163,7 @@ export const actions: Actions = {
 		if (!to) return refuse(400, 'Choose a calendar to move the items to; if it was deleted elsewhere, reload the page');
 		if (to.url === calendar.url) return refuse(400, `Choose a calendar other than ${name} to move the items to`);
 		const toName = shortTitle(to.name);
-		const needs = new Set(held.documents.flatMap((d) => icsToItems(d.ics).map((i) => i.kind)));
+		const needs = new Set(held.documents.flatMap((d) => readable(d.ics).map((i) => i.kind)));
 		if (needs.has('task') && !to.accepts.includes('task')) {
 			return refuse(400, `${name} holds tasks, and ${toName} only takes events. Choose another calendar, or delete them too.`);
 		}
@@ -171,7 +171,7 @@ export const actions: Actions = {
 		const tally: Record<MoveOutcome, string[]> = { moved: [], kept: [], both: [], clash: [], unsure: [] };
 		for (const doc of held.documents) {
 			const outcome = await store.moveDocument(doc, to.url);
-			tally[outcome].push(icsToItems(doc.ics)[0]?.title ?? 'An item');
+			tally[outcome].push(readable(doc.ics)[0]?.title ?? 'An item');
 			// The server has stopped answering: don't press on, and don't guess what it did.
 			if (outcome === 'unsure') break;
 		}
@@ -212,6 +212,16 @@ type Refusal = ActionFailure<{ action: 'delete'; message: string }>;
 const refuse = (status: number, message: string): Refusal => fail(status, { action: 'delete' as const, message });
 /** A calendar deleted, with how many items went with it or were moved first. */
 type Deleted = { action: 'delete'; deleted: string; count: number; movedTo?: string };
+
+/** The items in a stored document, or none if it can't be read (written badly by another app, say). A move copies it
+ * byte for byte anyway, so a bad one must not stop the others or turn the move into an error page. */
+function readable(ics: string) {
+	try {
+		return icsToItems(ics);
+	} catch {
+		return [];
+	}
+}
 
 const items = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
 const eventCalendars = (store: CalendarStore) => store.calendars().filter((c) => c.accepts.includes('event') && c.url !== tasksUrl(store));
