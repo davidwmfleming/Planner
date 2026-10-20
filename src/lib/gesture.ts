@@ -47,6 +47,10 @@ export function readStroke(points: Point[]): Stroke {
 	const height = Math.max(...ys) - Math.min(...ys);
 	const turns = reversals(points);
 	if (turns >= 3 && width >= 30 && height <= Math.max(60, width * 0.6)) return 'scratch';
+	// The simplest cross-out: across the item and most of the way back again, staying flat on the line.
+	// (A page sweep that hooks back a little at the end, or a circle round an item, is not one.)
+	const back = Math.abs(points[points.length - 1].x - points[0].x);
+	if (turns >= 1 && width >= 80 && back <= width * 0.4 && height <= Math.max(24, width * 0.2)) return 'scratch';
 	// The other way to scratch out: a zig-zag up and down, moving along the line.
 	if (reversals(points, 'y') >= 4 && width >= 40 && height <= 80) return 'scratch';
 	if (isTick(points, width, height)) return 'tick';

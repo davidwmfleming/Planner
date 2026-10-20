@@ -50,11 +50,14 @@
 
 	// Marks on the page, like on paper: sweep a finger sideways to turn the page; with the pen, draw ✓ on an item to tick it,
 	// scribble over it to strike it out, or drag it onto another day. The pen never scrolls; fingers do. The tap buttons all still work.
-	type Active = { id: number; points: Point[]; pen: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
+	type Active = { id: number; points: Point[]; pen: boolean; finger: boolean; row?: HTMLElement; uid?: string; occurrence?: string; from?: string };
 	let stroke: Active | null = null;
 	let dropDay = $state<string | null>(null);
 	let dragging = $state<string | null>(null);
 	let gestureMessage = $state('');
+	// Marks drawn on items, shown at once while they save.
+	let marking = $state<Record<string, 'done' | 'dropped'>>({});
+	const markKey = (uid: string, occurrence?: string) => `${uid} ${occurrence ?? ''}`;
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -74,6 +77,7 @@
 			id: e.pointerId,
 			points: [{ x: e.clientX, y: e.clientY }],
 			pen: e.pointerType === 'pen',
+			finger: e.pointerType === 'touch',
 			row,
 			uid: row?.dataset.uid,
 			occurrence: row?.dataset.occurrence,
@@ -108,11 +112,17 @@
 		const read = readStroke(done.points);
 		// Fingers (and a mouse) turn pages; the pen only makes marks, so a sloppy scribble never flips the page.
 		if (read === 'next' || read === 'previous') return done.pen ? undefined : goto(pageUrl(read === 'next' ? data.next : data.previous));
-		if (!item) return;
-		const row = done.row;
-		// Marks only ever set a state; doing the same mark twice would undo it, as the buttons do.
-		if (read === 'tick' && !row?.classList.contains('done')) return send('mark', { ...item, state: 'done' });
-		if (read === 'scratch' && !row?.classList.contains('dropped')) return send('mark', { ...item, state: 'dropped' });
+		// Only the pen (or a mouse) makes marks; a finger is for turning pages and scrolling.
+		if (!item || done.finger) return;
+		const mark = read === 'tick' ? 'done' : read === 'scratch' ? 'dropped' : undefined;
+		if (!mark || done.row?.classList.contains(mark)) return;
+		// Show the mark at once; once saved, the page redraws from the server. A mark only ever sets a state,
+		// so drawing it again (on a slow save, or on a page that is out of date) never undoes it.
+		const key = markKey(item.uid, item.occurrence);
+		marking[key] = mark;
+		return send('mark', { ...item, state: mark, set: 'yes' }).finally(() => {
+			if (marking[key] === mark) delete marking[key];
+		});
 	}
 	function onStrokeCancel() {
 		stroke = null;
@@ -148,10 +158,17 @@
 	async function send(action: string, fields: Record<string, string>) {
 		const body = new FormData();
 		for (const [k, v] of Object.entries(fields)) body.set(k, v);
-		const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
-		const result = deserialize(await response.text());
+		let result;
+		try {
+			const response = await fetch(`?page=${data.start}&/${action}`, { method: 'POST', body, headers: { 'x-sveltekit-action': 'true' } });
+			result = deserialize(await response.text());
+		} catch {
+			gestureMessage = 'That did not save. Check the connection and try again.';
+			return false;
+		}
 		gestureMessage = result.type === 'failure' ? String(result.data?.message ?? 'That did not work; try again') : result.type === 'error' ? 'That did not work; try again' : '';
 		await invalidateAll();
+		return result.type === 'success';
 	}
 	// After saving a line, keep the cursor on the blank line so the next entry can follow straight away.
 	// Tapping away from a line saves it too, so handwriting needs no Enter. The cursor then stays where you tapped.
@@ -236,7 +253,8 @@
 </script>
 
 {#snippet itemRow(item: Item, date: string)}
-	<li class={[item.state, item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
+	{@const mark = marking[markKey(item.uid, item.occurrence)]}
+	<li class={[mark ?? item.state, mark && 'marked', item.calendar === data.workCalendar && 'work', dragging === item.uid && 'dragging']} data-uid={item.uid} data-occurrence={item.occurrence}>
 		<form method="POST" action="?page={data.start}&/mark" use:enhance class="inline">
 			<input type="hidden" name="uid" value={item.uid} />
 			{#if item.occurrence}<input type="hidden" name="occurrence" value={item.occurrence} />{/if}
@@ -354,7 +372,7 @@
 			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
 			<ul class="lines">
 				{#each data.unscheduled as item (item.uid)}
-					<li class={[item.state, dragging === item.uid && 'dragging']} data-uid={item.uid}>
+					<li class={[marking[markKey(item.uid)] ?? item.state, marking[markKey(item.uid)] && 'marked', dragging === item.uid && 'dragging']} data-uid={item.uid}>
 						<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
 						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
 						{@render pullButtons(item)}
@@ -513,6 +531,7 @@
 	.allday { color: var(--pen); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 4.4em; }
 	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
 	li.done .title, li.done .time { color: var(--muted); }
+	li.done.marked .sq::after { content: '✓'; }
 	li.dropped .title, li.dropped .time { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
 	.blank form { flex: 1; display: flex; }
 	.entry {

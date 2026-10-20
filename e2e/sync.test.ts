@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { DAVClient } from 'tsdav';
 import { futureWeek } from './dates';
 import { unique } from './unique';

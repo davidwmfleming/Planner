@@ -1,7 +1,10 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import '../app.css';
 
 	let { children } = $props();
+	// Marks the moment the page has started in the browser, so the browser tests can wait for it as a person would.
+	onMount(() => document.documentElement.setAttribute('data-started', ''));
 </script>
 
 <svelte:head>

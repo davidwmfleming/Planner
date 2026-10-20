@@ -1,4 +1,5 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+import { expect, test } from './fixtures';
 import { futureWeek, iso } from './dates';
 import { unique } from './unique';
 
@@ -108,4 +109,109 @@ test('a check mark works straight after writing on a line, away from that line',
 	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
 	await expect(row).toHaveClass(/done/);
 	await expect(page.locator(`section.day[data-date="${wed}"]`).getByText(`Next thing ${name}`)).toBeVisible();
+});
+
+test('one stroke across an item and back again strikes it out', async ({ page }, info) => {
+	const name = unique('Water the plants', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await onScreen(row);
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	// Left-handed, as David writes: to the right, then back to the left.
+	await draw(page, [[box.x + 60, y], [box.x + 180, y + 3], [box.x + 70, y + 6]]);
+	await expect(row).toHaveClass(/dropped/);
+});
+
+test('a ✓ shows at once, before a slow save finishes', async ({ page }, info) => {
+	const name = unique('Slow save', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await page.route('**/*&/mark', async (route) => {
+		await new Promise((done) => setTimeout(done, 3000));
+		await route.continue();
+	});
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await expect(row).toHaveClass(/done/, { timeout: 500 });
+	await expect(row).not.toHaveClass(/marked/, { timeout: 6000 });
+});
+
+test('ticking twice while the first save is on its way leaves the item ticked', async ({ page }, info) => {
+	const name = unique('Double tick', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await page.route('**/*&/mark', async (route) => {
+		await new Promise((done) => setTimeout(done, 1500));
+		await route.continue();
+	});
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	const tick = () => draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await tick();
+	await tick();
+	await page.waitForTimeout(4000);
+	await page.reload();
+	await expect(page.locator(`section.day[data-date="${mon}"] li`, { hasText: name })).toHaveClass(/done/);
+});
+
+test('if a mark cannot be saved, the item goes back as it was and says so', async ({ page }, info) => {
+	const name = unique('Offline mark', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	await page.route('**/*&/mark', (route) => route.abort());
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await expect(page.getByRole('alert')).toContainText('did not save');
+	await expect(row).not.toHaveClass(/done|marked/);
+});
+
+/** A finger stroke (pointerType 'touch'), sent straight to the browser. */
+async function fingerStroke(page: Page, points: [number, number][]) {
+	const cdp = await page.context().newCDPSession(page);
+	const at = (x: number, y: number) => [{ x, y, id: 1, radiusX: 5, radiusY: 5, force: 1 }];
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(...points[0]) });
+	for (let i = 1; i < points.length; i++) {
+		const [ax, ay] = points[i - 1];
+		const [bx, by] = points[i];
+		for (let s = 1; s <= 8; s++) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(ax + ((bx - ax) * s) / 8, ay + ((by - ay) * s) / 8) });
+	}
+	await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+test('a ✓ on a page that is out of date leaves an item ticked elsewhere ticked', async ({ page, context }, info) => {
+	const name = unique('Out of date', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	const other = await context.newPage();
+	await other.goto(`/?page=${mon}`);
+	await other.getByRole('button', { name: `Tick ${name}` }).click();
+	await expect(other.locator('li', { hasText: name })).toHaveClass(/done/);
+	const box = (await row.boundingBox())!;
+	const y = box.y + box.height / 2;
+	await draw(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await expect(row).toHaveClass(/done/);
+	await expect(row).not.toHaveClass(/marked/);
+	await page.reload();
+	await expect(page.locator(`section.day[data-date="${mon}"] li`, { hasText: name })).toHaveClass(/done/);
+});
+
+test('a finger drawing ✓ or a scribble on an item makes no mark', async ({ page }, info) => {
+	const name = unique('Finger', info);
+	await page.goto(`/?page=${mon}`);
+	const row = await addTask(page, mon, name);
+	const marks: string[] = [];
+	page.on('request', (r) => r.url().includes('/mark') && marks.push(r.url()));
+	let box = (await row.boundingBox())!;
+	let y = box.y + box.height / 2;
+	await fingerStroke(page, [[box.x + 60, y - 6], [box.x + 72, y + 8], [box.x + 100, y - 18]]);
+	await onScreen(row);
+	box = (await row.boundingBox())!;
+	y = box.y + box.height / 2;
+	await fingerStroke(page, [[box.x + 60, y], [box.x + 180, y + 3], [box.x + 70, y + 6]]);
+	await page.waitForTimeout(1000);
+	expect(marks).toEqual([]);
+	await expect(row).not.toHaveClass(/done|dropped/);
 });

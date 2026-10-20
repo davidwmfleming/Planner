@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 test('can be installed as an app, with its own name and icons', async ({ page, request }) => {
 	await page.goto('/');
