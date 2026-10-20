@@ -8,7 +8,7 @@ import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
 import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
-import { byName, calendarAtPath, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
+import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
@@ -56,6 +56,7 @@ export const load: PageServerLoad = async ({ url }) => {
 	}
 
 	const calendars = store.calendars();
+	const workCalendar = calendarAtPath(calendars, settings.workCalendar) ? settings.workCalendar : null;
 	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).sort(byName);
 	const newEvents = newItemsGoIn(store, 'event', settings);
 
@@ -63,11 +64,11 @@ export const load: PageServerLoad = async ({ url }) => {
 		today,
 		eventCalendars: menuLabels(eventCalendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
 		defaultEventCalendar: newEvents && pathOf(newEvents),
-		workCalendar: calendarAtPath(calendars, settings.workCalendar) && settings.workCalendar,
+		workCalendar,
 		// Every calendar's name, as messages name them: what an item's calendar tag says in full.
 		calendarLabels: calendarLabels(calendars),
 		// The few letters each item's calendar tag shows.
-		calendarTags: calendarTags(calendars.map((c) => ({ path: pathOf(c.url), name: c.name }))),
+		calendarTags: calendarTags(named(calendars), workCalendar),
 		// Tasks in the main list need no tag; those in a list made on a phone, say, get one.
 		tasksCalendar: tasksPath(store),
 		start,
@@ -347,9 +348,13 @@ const tasksPath = (store: Awaited<ReturnType<typeof getStore>>) => {
 	return url ? pathOf(url) : null;
 };
 
+/** Each calendar's path and its name, trimmed. A calendar with no name (the store then gives its address) or a blank
+ * one has the name "" here, which tags and labels show as Cal and Unnamed calendar. */
+const named = (calendars: { url: string; name: string }[]) => calendars.map((c) => ({ path: pathOf(c.url), name: c.name === c.url ? '' : c.name.trim() }));
+
 /** Each calendar's name by path, told apart as the menus do when two share a name. */
 const calendarLabels = (calendars: { url: string; name: string }[]) =>
-	Object.fromEntries(menuLabels(calendars.map((c) => ({ path: pathOf(c.url), name: c.name }))).map((c) => [c.path, c.label]));
+	Object.fromEntries(menuLabels(named(calendars).map((c) => ({ ...c, name: calendarName(c.name) }))).map((c) => [c.path, c.label]));
 
 /** After a delete that got no answer: it may still land, so deleting the other copy straight away could leave none.
  * Say to wait, and which copy to delete: the one whose delete is pending, named as the menus name its calendar. */

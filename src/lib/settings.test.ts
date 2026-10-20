@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, calendarAtPath, calendarTags, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
+import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -219,62 +219,83 @@ describe('calendarTags', () => {
 		expect(tags('Ärzte', 'Ψυχαγωγία', '日本の休日')).toEqual(['Ärzt', 'Ψυχα', '日本の休']);
 	});
 
-	it('uses a few more letters when two tags would be the same', () => {
+	it('uses a few more letters, up to 6, when two tags would be the same', () => {
 		// David's own calendars: Work and Workouts.
 		expect(tags('Me', 'Family', 'Workouts', 'Morgan Meals', 'Work')).toEqual(['Me', 'Fami', 'Worko', 'Morg', 'Work']);
 		expect(tags('Kids A', 'Kids B', 'Kidstuff')).toEqual(['Kids A', 'Kids B', 'Kidst']);
-		// A name that is all of another's start is shown whole; the other gets letters up to where they differ.
-		expect(tags('Family', 'Family trips')).toEqual(['Family', 'Family t']);
+		expect(tags('Kids art', 'Kids ball')).toEqual(['Kids a', 'Kids b']);
+	});
+
+	it('numbers calendars still alike after 6 letters, in the order of their addresses', () => {
+		expect(tags('Swimming lessons Mon', 'Swimming lessons Tue', 'Me')).toEqual(['Swim 1', 'Swim 2', 'Me']);
+		// A name that is all of another's start can't grow either.
+		expect(tags('Family', 'Family trips')).toEqual(['Fami 1', 'Fami 2']);
+		const tagged = calendarTags([
+			{ path: '/david/family-2/', name: 'Family' },
+			{ path: '/david/family/', name: 'Family' }
+		]);
+		expect(tagged).toEqual({ '/david/family/': 'Fami 1', '/david/family-2/': 'Fami 2' });
 	});
 
 	it('treats tags that differ only in case as the same, since they are hard to tell apart', () => {
-		expect(tags('school', 'School trips')).toEqual(['school', 'School t']);
+		expect(tags('school', 'School trips')).toEqual(['scho 1', 'Scho 2']);
+		expect(tags('Kids', 'kids')).toEqual(['Kids 1', 'kids 2']);
 	});
 
 	it('tells apart a cut that ends at a space from a short name', () => {
 		expect(tags('Ab   x', 'Ab')).toEqual(['Ab   x', 'Ab']);
 	});
 
-	it('adds the end of the address, as the menus do, when two calendars have the same name', () => {
+	it('never shows a piece of the calendar address', () => {
 		const tagged = calendarTags([
-			{ path: '/david/family/', name: 'Family' },
-			{ path: '/david/family-2/', name: 'family' },
-			{ path: '/david/me/', name: 'Me' }
+			{ path: '/david/kids-upper/', name: 'Kids' },
+			{ path: '/david/a-kids-lower/', name: 'kids' }
 		]);
-		expect(tagged).toEqual({ '/david/family/': 'Fami (family)', '/david/family-2/': 'fami (family-2)', '/david/me/': 'Me' });
-		// A third calendar that starts the same way still gets more letters.
-		expect(tags('Family', 'Family', 'Family trips')).toEqual(['Fami (c0)', 'Fami (c1)', 'Famil']);
+		expect(Object.values(tagged).join(' ')).not.toMatch(/upper|lower|\(/);
 	});
 
-	it('never gives two calendars the same tag', () => {
-		const names = ['Work', 'Workouts', 'Work ', 'work', 'Wor', 'Worko', 'Workout', 'W o r k', 'Work trips', 'Work travel'];
-		const all = tags(...names).map((t) => t.toLowerCase());
+	it('says Work for the work calendar, whatever it is called, and keeps other tags apart from it', () => {
+		const tagged = calendarTags(
+			[
+				{ path: '/david/work/', name: 'Job' },
+				{ path: '/david/workouts/', name: 'Workouts' },
+				{ path: '/david/work-2/', name: 'Work' },
+				{ path: '/david/me/', name: 'Me' }
+			],
+			'/david/work/'
+		);
+		expect(tagged).toEqual({ '/david/work/': 'Work', '/david/workouts/': 'Worko', '/david/work-2/': 'Work 2', '/david/me/': 'Me' });
+	});
+
+	it('never gives two calendars the same tag, numbers included', () => {
+		const names = ['Work', 'Workouts', 'Work ', 'work', 'Wor', 'Worko', 'Workout', 'W o r k', 'Work trips', 'Work travel', 'Work 1', 'Work 2', ''];
+		const all = Object.values(calendarTags(names.map((name, i) => ({ path: `/david/c${i}/`, name })), '/david/c0/')).map((t) => t.toLowerCase());
 		expect(new Set(all).size).toBe(names.length);
+		expect(tags('Swim 1', 'Swim 2', 'Swimming M', 'Swimming T')).toEqual(['Swim 1', 'Swim 2', 'Swim 3', 'Swim 4']);
 	});
 
 	// Names come from the calendar server, which doesn't limit their length (a phone or another app may set any name).
 	it('stays quick with very long names that differ only at the end, and still tells them apart', () => {
-		const calendars = Array.from({ length: 20 }, (_, i) => ({ path: `/david/c${i}/`, name: `${'x'.repeat(99_999)}${String.fromCharCode(97 + i)}` }));
+		const calendars = Array.from({ length: 20 }, (_, i) => ({ path: `/david/c${String(i).padStart(2, '0')}/`, name: `${'x'.repeat(99_999)}${String.fromCharCode(97 + i)}` }));
 		const started = performance.now();
 		const tagged = Object.values(calendarTags(calendars));
 		expect(performance.now() - started).toBeLessThan(50);
-		expect(new Set(tagged.map((t) => t.toLowerCase())).size).toBe(20);
-	});
-
-	it('grows a clashing tag up to 12 letters; names alike that far keep 4 letters and add the end of the address', () => {
-		const tagged = calendarTags([
-			{ path: '/david/a/', name: 'Kids activities this autumn' },
-			{ path: '/david/b/', name: 'Kids activities this winter' }
-		]);
-		expect(tagged).toEqual({ '/david/a/': 'Kids (a)', '/david/b/': 'Kids (b)' });
-		expect(tags('Kids activities', 'Kids actors')).toEqual(['Kids acti', 'Kids acto']);
+		expect(tagged).toEqual(Array.from({ length: 20 }, (_, i) => `xxxx ${i + 1}`));
 	});
 
 	it('gives a very long name a short tag', () => {
 		expect(tags('y'.repeat(100_000))).toEqual(['yyyy']);
 	});
 
-	it('is empty for a calendar with no name', () => {
-		expect(tags('', '   ')).toEqual(['', '']);
+	it('is Cal for a calendar with no name', () => {
+		expect(tags('', 'Me')).toEqual(['Cal', 'Me']);
+		expect(tags('', '   ')).toEqual(['Cal 1', 'Cal 2']);
+	});
+});
+
+describe('calendarName', () => {
+	it('is the name without spaces at the ends, or Unnamed calendar', () => {
+		expect(calendarName('  Gym  ')).toBe('Gym');
+		expect(calendarName('   ')).toBe('Unnamed calendar');
 	});
 });

@@ -293,6 +293,20 @@ describe('calendar tags on the page', () => {
 		});
 	});
 
+	it('tags the work calendar Work whatever it is called, and keeps Workouts apart from it', async () => {
+		fake = fakeStore([cal('job', 'Job'), cal('workouts', 'Workouts'), cal('tasks', 'Tasks', ['task'])], { categories: [], workCalendar: '/david/job/', defaultEventCalendar: null });
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarTags).toEqual({ '/david/job/': 'Work', '/david/workouts/': 'Worko', '/david/tasks/': 'Task' });
+	});
+
+	it('names a calendar with a blank name, or none, Unnamed calendar, tagged Cal; other names lose spaces at the ends', async () => {
+		fake = fakeStore([{ url: `${HOME}blank/`, name: '  ', accepts: ['event'] }, { url: `${HOME}none/`, name: `${HOME}none/`, accepts: ['event'] }, cal('gym', '  Gym  ')]);
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarTags).toEqual({ '/david/blank/': 'Cal 1', '/david/none/': 'Cal 2', '/david/gym/': 'Gym' });
+		expect(data.calendarLabels).toMatchObject({ '/david/gym/': 'Gym' });
+		expect((data.calendarLabels as Record<string, string>)['/david/blank/']).toMatch(/^Unnamed calendar/);
+	});
+
 	it('says which collection is the main Tasks list, whose items need no tag', async () => {
 		expect((await run('http://localhost/?page=2026-10-21')).tasksCalendar).toBe('/david/tasks/');
 	});
