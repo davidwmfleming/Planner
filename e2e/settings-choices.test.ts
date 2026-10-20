@@ -171,3 +171,22 @@ test('choosing a calendar deleted on another device since Settings opened says t
 	await expect(calendars.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
 	await expect(calendars.getByRole('status').filter({ hasText: 'Saved' })).toHaveCount(0);
 });
+
+test('deleting the Work and new-events calendar sets Work to none and new events to the first calendar left', async ({ page }, info) => {
+	const name = unique('Aaa office', info); // first by name, so the fallback is plainly not "the one after it"
+	await addCalendar(page, name);
+	await choose(page, { work: name, newEvents: name });
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByRole('button', { name: `Delete ${name}` }).click();
+	const confirm = calendars.getByRole('group', { name: `Delete ${name}` });
+	await expect(confirm).toContainText('Work shading goes to None');
+	await expect(confirm).toContainText('New events will go in');
+	await confirm.getByRole('button', { name: `Delete ${name}`, exact: true }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'Deleted' })).toHaveText(`Deleted ${name}.`);
+
+	await page.reload();
+	await expect(calendars.locator('li.work')).toHaveCount(0);
+	await expect(calendars.getByLabel('Show as work (light red)').locator('option:checked')).toHaveText('None');
+	const first = (await calendars.getByLabel('New events go in').locator('option').allInnerTexts())[0];
+	await expect(calendars.getByLabel('New events go in').locator('option:checked')).toHaveText(first);
+});

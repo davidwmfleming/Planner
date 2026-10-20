@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
-	import type { SubmitFunction } from '@sveltejs/kit';
+	import type { ActionResult, SubmitFunction } from '@sveltejs/kit';
 	import { tick } from 'svelte';
 	import { fetchExport } from '$lib/export-download';
 	import { saysReload } from '$lib/format';
@@ -16,6 +16,7 @@
 	let renaming = $state<string | undefined>();
 
 	async function startRename(path: string) {
+		closeDelete();
 		renaming = path;
 		renameError = undefined;
 		await tick();
@@ -58,6 +59,83 @@
 			await stopRename();
 		};
 	};
+
+	/** The calendar being deleted (by path), how many items it held when counted, and the version counted:
+	 * "Delete them too" deletes only that version, so nothing added on a phone since is deleted unseen. */
+	let deleting = $state<{ path: string; count: number; version: string } | undefined>();
+	/** The calendar whose Delete was last tapped, and why it can't be deleted (or not yet), shown next to it. */
+	let deletePath = $state<string | undefined>();
+	let deleteError = $state<string | undefined>();
+	/** What happens to its items: nothing is chosen at first, so a hasty tap can't delete them. */
+	let mode = $state<'move' | 'delete' | undefined>();
+	let moveTo = $state('');
+	/** What the last delete did, shown on the page until something else is done. */
+	let deletedMessage = $state('');
+
+	const items = (n: number) => `${n} ${n === 1 ? 'item' : 'items'}`;
+	const SOMETHING_WRONG = 'Something went wrong; reload the page and try again.';
+
+	function closeDelete() {
+		deleting = deletePath = deleteError = mode = undefined;
+	}
+
+	/** Closes the confirm and puts the keyboard back on that calendar's Delete button. */
+	async function cancelDelete() {
+		const path = deletePath;
+		closeDelete();
+		await tick();
+		document.querySelector<HTMLButtonElement>(`button[data-delete="${CSS.escape(path ?? '')}"]`)?.focus();
+	}
+
+	/** Delete asks the server how many items the calendar holds; the confirm then shows on the page. */
+	const counted: SubmitFunction = ({ formData }) => {
+		const path = String(formData.get('path'));
+		renaming = undefined;
+		closeDelete();
+		deletedMessage = '';
+		deletePath = path;
+		return async ({ result }) => {
+			if (result.type === 'success') {
+				const { count, version } = result.data as { count: number; version: string };
+				deleting = { path, count, version };
+				// The calendar new events go in is the likeliest home for the items; otherwise the first one left.
+				const others = data.eventCalendars.filter((c) => c.path !== path);
+				moveTo = (others.find((c) => c.path === data.defaultEventPath) ?? others[0])?.path ?? '';
+				await tick();
+				document.querySelector<HTMLElement>('#delete-count')?.focus();
+			} else deleteError = result.type === 'failure' ? String(result.data?.message) : SOMETHING_WRONG;
+		};
+	};
+
+	/** A delete that worked says what it did and redraws the list; one that didn't keeps the confirm open with the reason. */
+	let deletingNow = $state(false);
+	const deletedCalendar: SubmitFunction = ({ cancel }) => {
+		// A second tap while the first is working would only repeat it.
+		if (deletingNow) return cancel();
+		deletingNow = true;
+		return async ({ result, update }) => {
+			deletingNow = false;
+			await afterDelete(result, update);
+		};
+	};
+
+	async function afterDelete(result: ActionResult, update: () => Promise<void>) {
+		if (result.type === 'success') {
+			const { deleted, count, movedTo } = result.data as unknown as { deleted: string; count: number; movedTo?: string };
+			closeDelete();
+			await update();
+			deletedMessage = movedTo
+				? `Deleted ${deleted}. Its ${items(count)} ${count === 1 ? 'is' : 'are'} now in ${movedTo}.`
+				: count ? `Deleted ${deleted} and its ${items(count)}.` : `Deleted ${deleted}.`;
+			await tick();
+			document.querySelector<HTMLElement>('#deleted-message')?.focus();
+			return;
+		}
+		deleteError = result.type === 'failure' ? String(result.data?.message) : SOMETHING_WRONG;
+		// The calendar changed since it was counted: show the new count, which a second tap then deletes.
+		const fresh = result.type === 'failure' ? (result.data as { count?: number; version?: string }) : {};
+		if (deleting && fresh.count !== undefined && fresh.version) deleting = { ...deleting, count: fresh.count, version: fresh.version };
+	}
 
 	// "Download everything": one export at a time; a failure is said here, on the page.
 	let exporting = $state(false);
@@ -119,6 +197,51 @@
 	<p class="error" role="alert">{message}{#if saysReload(message)} <button type="button" class="btn small" onclick={() => location.reload()}>Reload</button>{/if}</p>
 {/snippet}
 
+<!-- Deleting a calendar: how many items it holds, where they go, and a confirm on the page itself
+     (the installed app and the e-ink viewer can't show the browser's confirm box). -->
+{#snippet confirmDelete(calendar: (typeof data.eventCalendars)[number], counted: { count: number; version: string })}
+	{@const others = data.eventCalendars.filter((c) => c.path !== calendar.path)}
+	{@const toLabel = others.find((c) => c.path === moveTo)?.label}
+	<form method="POST" action="?/delete" use:enhance={deletedCalendar} class="confirm">
+		<div role="group" aria-label="Delete {calendar.label}">
+			<input type="hidden" name="path" value={calendar.path} />
+			<input type="hidden" name="version" value={counted.version} />
+			<p id="delete-count" tabindex="-1"><strong>{calendar.label} {counted.count ? `holds ${items(counted.count)}.` : 'is empty.'}</strong></p>
+			{#if counted.count}
+				<fieldset>
+					<legend>What happens to {counted.count === 1 ? 'it' : 'them'}</legend>
+					<div class="move">
+						<label class="choice"><input type="radio" name="mode" value="move" bind:group={mode} /> Move them to</label>
+						<select name="to" aria-label="Calendar to move them to" bind:value={moveTo} onchange={() => (mode = 'move')}>
+							{#each others as other (other.path)}<option value={other.path}>{other.label}</option>{/each}
+						</select>
+					</div>
+					<label class="choice"><input type="radio" name="mode" value="delete" bind:group={mode} /> Delete them too</label>
+				</fieldset>
+			{:else}
+				<input type="hidden" name="mode" value="delete" />
+			{/if}
+			<p class="hint">{calendar.label} also disappears from every phone and computer that syncs it, including anyone it is shared with.</p>
+			{#if calendar.work}<p class="hint">The Work shading goes to None.</p>{/if}
+			{#if calendar.newEvents}<p class="hint">New events will go in {others[0]?.label}.</p>{/if}
+			<!-- aria-disabled, not disabled: a disabled button drops keyboard and screen-reader focus to the page. -->
+			<div class="edit" aria-busy={deletingNow}>
+				{#if deletingNow}
+					<button type="button" class="btn primary" aria-disabled="true">{mode === 'move' ? 'Moving and deleting…' : 'Deleting…'}</button>
+				{:else if !counted.count}
+					<button class="btn primary">Delete {calendar.label}</button>
+				{:else if mode === 'move' && toLabel}
+					<button class="btn primary">Move {items(counted.count)} to {toLabel} and delete {calendar.label}</button>
+				{:else if mode === 'delete'}
+					<button class="btn primary">Delete {calendar.label} and its {items(counted.count)}</button>
+				{/if}
+				<button type="button" class="btn" onclick={cancelDelete}>Cancel</button>
+			</div>
+			{#if deleteError}{@render problem(deleteError)}{/if}
+		</div>
+	</form>
+{/snippet}
+
 <svelte:head>
 	<title>Planner · Settings</title>
 </svelte:head>
@@ -151,6 +274,15 @@
 							{#if calendar.work}<span class="tag work-tag">Work</span>{/if}
 							{#if calendar.newEvents}<span class="tag">New events</span>{/if}
 							<button type="button" class="btn small" aria-label="Rename {calendar.label}" data-rename={calendar.path} onclick={() => startRename(calendar.path)}>Rename</button>
+							<form method="POST" action="?/check" use:enhance={counted} class="inline">
+								<input type="hidden" name="path" value={calendar.path} />
+								<button class="btn small" aria-label="Delete {calendar.label}" data-delete={calendar.path}>Delete</button>
+							</form>
+							{#if deleting?.path === calendar.path}
+								{@render confirmDelete(calendar, deleting)}
+							{:else if deletePath === calendar.path && deleteError}
+								{@render problem(deleteError)}
+							{/if}
 						{/if}
 					</li>
 				{/each}
@@ -187,6 +319,7 @@
 			{:else}
 				<p class="hint">Add a calendar first; new events need somewhere to go.</p>
 			{/if}
+			{#if deletedMessage}<p id="deleted-message" class="done" role="status" tabindex="-1">{deletedMessage}</p>{/if}
 		</section>
 
 		<section aria-labelledby="h-tasks">
@@ -259,7 +392,7 @@
 	section { border-bottom: 2px solid var(--ink); padding-block: 0.9rem; }
 	h2 { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; font-weight: 700; }
 	.lines { list-style: none; margin: 0; padding: 0; }
-	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 0.45rem; }
+	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; flex-wrap: wrap; align-items: center; gap: 0.45rem; }
 	.name { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
 	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
 	/* Work: light red shading, plus a word, since e-ink shows the shade only as grey. */
@@ -307,5 +440,31 @@
 	}
 	.add { margin-top: 0.7rem; }
 	.add label { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+	/* The Delete button's form sits in the row like a plain button. */
+	.inline { display: contents; }
+	/* The delete confirm takes the whole width under its calendar's row. */
+	.confirm { flex-basis: 100%; min-width: 0; padding-block: 0.3rem 0.6rem; }
+	.confirm p { margin: 0.3rem 0; overflow-wrap: anywhere; }
+	.confirm fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+	.confirm legend { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); padding: 0; }
+	.move { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.4rem; }
+	.choice { min-height: 44px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+	.choice input { width: 22px; height: 22px; margin: 0; accent-color: var(--ink); }
+	.move select {
+		flex: 1 1 10rem;
+		min-width: 0;
+		max-width: 100%;
+		font: inherit;
+		color: var(--ink);
+		background: var(--paper);
+		border: 2px solid var(--ink);
+		border-radius: 6px;
+		min-height: 44px;
+		padding: 0.2rem 0.5rem;
+	}
+	/* A long confirm ("Move 42 items to … and delete …") wraps rather than widening the page. */
+	.confirm .btn { max-width: 100%; overflow-wrap: anywhere; text-align: center; padding-block: 0.3rem; }
+	.confirm #delete-count:focus, .done:focus { outline: none; }
+	.done { margin: 0.7rem 0 0; }
 	.error { flex-basis: 100%; color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 </style>

@@ -22,3 +22,10 @@ export async function putEntry(request: APIRequestContext, path: string, filenam
 	const saved = await request.fetch(`/dav${path}${filename}`, { method: 'PUT', headers: { ...auth, 'Content-Type': 'text/calendar' }, data: ics });
 	if (!saved.ok()) throw new Error(`PUT ${path}${filename}: ${saved.status()}`);
 }
+
+/** Whether a calendar holds an entry under this file name, as a phone syncing it would see. */
+export async function hasEntry(request: APIRequestContext, path: string, filename: string) {
+	const read = await request.fetch(`/dav${path}${filename}`, { headers: auth });
+	if (read.status() !== 200 && read.status() !== 404) throw new Error(`GET ${path}${filename}: ${read.status()}`);
+	return read.status() === 200;
+}
