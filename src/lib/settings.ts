@@ -28,13 +28,21 @@ const pathOf = (calendars: { url: string; name: string }[], name: string) => {
 };
 
 /** Keeps the first of names that differ only in case; the settings page lists categories keyed by name. */
-const withoutRepeats = (names: string[]) => names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
+const withoutRepeats = (names: string[]) => {
+	const seen = new Set<string>();
+	return names.filter((n) => !seen.has(n.toLowerCase()) && !!seen.add(n.toLowerCase()));
+};
+
+/** Stored names looked at, and the characters of each: enough for 50 names of 40 letters, with room for repeats and
+ * accents, and no more, however much another app stored. */
+const STORED_LOOKED_AT = MAX_CATEGORIES * 4;
+const STORED_NAME_CHARS = 200;
 
 /** Category names as stored, cleaned as calendar names are. Names left empty, longer than 40 letters or with a comma
  * (which separates CATEGORIES values) are dropped, and at most 50 are kept: the stored value can be changed by any
  * calendar app, so it is not trusted to be what the settings page saved. */
 const storedCategories = (names: string[]) =>
-	withoutRepeats(names.map(cleanName).filter((n) => n && !n.includes(',') && letters(n).length <= MAX_NAME)).slice(0, MAX_CATEGORIES);
+	withoutRepeats(names.slice(0, STORED_LOOKED_AT).map((n) => cleanName(n.slice(0, STORED_NAME_CHARS))).filter((n) => n && !n.includes(',') && letters(n).length <= MAX_NAME)).slice(0, MAX_CATEGORIES);
 
 const isPath = (value: unknown): value is string | null => value === null || (typeof value === 'string' && value !== '');
 
