@@ -11,6 +11,8 @@ export interface Settings {
 }
 
 export const DEFAULT_CATEGORIES = ['This month', 'Waiting', 'Someday'];
+/** Most categories kept from the stored settings. */
+export const MAX_CATEGORIES = 50;
 
 /** Calendar names that fill in the Work and default choices when nothing is stored yet. */
 export interface SettingsSeed {
@@ -28,6 +30,12 @@ const pathOf = (calendars: { url: string; name: string }[], name: string) => {
 /** Keeps the first of names that differ only in case; the settings page lists categories keyed by name. */
 const withoutRepeats = (names: string[]) => names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
 
+/** Category names as stored, cleaned as calendar names are. Names left empty, longer than 40 letters or with a comma
+ * (which separates CATEGORIES values) are dropped, and at most 50 are kept: the stored value can be changed by any
+ * calendar app, so it is not trusted to be what the settings page saved. */
+const storedCategories = (names: string[]) =>
+	withoutRepeats(names.map(cleanName).filter((n) => n && !n.includes(',') && letters(n).length <= MAX_NAME)).slice(0, MAX_CATEGORIES);
+
 const isPath = (value: unknown): value is string | null => value === null || (typeof value === 'string' && value !== '');
 
 /** Reads the stored value. Anything missing or damaged gets its default, so a bad value never stops the planner. */
@@ -42,7 +50,7 @@ export function parseSettings(raw: string | undefined, calendars: { url: string;
 	const categories = stored.categories;
 	const validCategories = Array.isArray(categories) && categories.every((c) => typeof c === 'string' && c.trim() !== '');
 	return {
-		categories: validCategories ? withoutRepeats(categories) : DEFAULT_CATEGORIES,
+		categories: validCategories ? storedCategories(categories) : DEFAULT_CATEGORIES,
 		workCalendar: isPath(stored.workCalendar) ? stored.workCalendar : pathOf(calendars, seed.workCalendar),
 		defaultEventCalendar: isPath(stored.defaultEventCalendar) ? stored.defaultEventCalendar : pathOf(calendars, seed.defaultEventCalendar)
 	};
@@ -174,10 +182,12 @@ function withoutFormatCharacters(text: string): string {
 
 /** Checks a name for a new or renamed calendar: 1 to 40 letters, not used by any other collection (case ignored).
  * `current` is the URL of the calendar being renamed, which may keep its own name. */
+/** A name as the planner keeps it: line breaks and tabs become spaces; other control characters and invisible format
+ * characters (zero-width spaces, right-to-left overrides) are dropped, except those that spell an emoji or a word. */
+export const cleanName = (raw: string) => withoutFormatCharacters(raw.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '')).replace(/ {2,}/g, ' ').trim();
+
 export function checkCalendarName(raw: string, calendars: { url: string; name: string }[], current?: string): { name: string } | { error: string } {
-	// Line breaks and tabs become spaces; other control characters and invisible format characters
-	// (zero-width spaces, right-to-left overrides) are dropped, except those that spell an emoji or a word.
-	const name = withoutFormatCharacters(raw.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '')).replace(/ {2,}/g, ' ').trim();
+	const name = cleanName(raw);
 	if (!name) return { error: 'Give the calendar a name' };
 	if (letters(name).length > MAX_NAME) return { error: `Keep the name to ${MAX_NAME} letters or fewer` };
 	const taken = calendars.find((c) => c.url !== current && c.name.toLowerCase() === name.toLowerCase());
