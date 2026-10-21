@@ -9,7 +9,7 @@ import { rollover } from '$lib/server/rollover';
 import { pageToday, TEST_TODAY_COOKIE, testClockOn } from '$lib/server/clock';
 import { env } from '$env/dynamic/private';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
-import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
+import { logged, RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
@@ -26,6 +26,12 @@ const NOT_ANSWERING = "The calendar server isn't answering. Check that it is run
 
 /** Calendars are passed to the page by path, which stays the same through a rename and tells two of one name apart. */
 const pathOf = (url: string) => new URL(url).pathname;
+
+/** An item as the server's log names it: by where it is kept, never by its title (house rule 4: logs are kept). */
+const forLog = (item: StoredItem) => `item ${logged(item.url)}`;
+
+/** What a change does, said two ways: with the item's title for the page, by its address for the log. */
+const doing = (verb: string, item: StoredItem) => ({ say: `${verb} "${shortTitle(item.title)}"`, log: `${verb} ${forLog(item)}` });
 
 /** Where a new item goes, or undefined if no calendar takes that kind (every event calendar deleted, say). */
 function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event' | 'task', settings: Awaited<ReturnType<typeof getSettings>>) {
@@ -148,7 +154,7 @@ export const actions: Actions = {
 				...(date ? { date, time } : {})
 			});
 		} catch (e) {
-			console.error(`Planner: could not save "${title}"`, e);
+			console.error(`Planner: could not save a new ${kind} in ${logged(calendar)}`, e);
 			// No answer is not a no: the line may be saved, and writing it again could make two.
 			if (unanswered(e)) return fail(502, { message: `The calendar server didn't answer in time when asked to save "${shortTitle(title)}", so it may or may not be saved. Reload the page to see.` });
 			return fail(502, { message: `The calendar server didn't save "${shortTitle(title)}". Try again in a moment.` });
@@ -169,7 +175,7 @@ export const actions: Actions = {
 		const day = String(form.get('occurrence') ?? '');
 		const shown = shownOn(item, day);
 		return change(
-			`save the mark on "${shortTitle(item.title)}"`,
+			doing('save the mark on', item),
 			() => (item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, toggle) : store.update(item, toggle(item))),
 			shown && { item, day, wanted: toggle(shown) }
 		);
@@ -189,7 +195,7 @@ export const actions: Actions = {
 		const day = String(form.get('occurrence') ?? '');
 		const shown = shownOn(item, day);
 		return change(
-			`move "${shortTitle(item.title)}"`,
+			doing('move', item),
 			() => (item.recurrence && ISO.test(day) ? store.updateOccurrence(item, day, moveTo) : store.update(item, moveTo(item))),
 			shown && { item, day, wanted: moveTo(shown) }
 		);
@@ -203,7 +209,7 @@ export const actions: Actions = {
 		const { store, item } = found;
 		if (item.kind !== 'task' || item.recurrence) return fail(400, { message: 'Only a one-off task can go back to Future tasks' });
 		const { date, time, carriedFrom, ...rest } = item;
-		return change(`move "${shortTitle(item.title)}"`, () => store.replace(item, rest));
+		return change(doing('move', item), () => store.replace(item, rest));
 	},
 
 	/** The details sheet: edit any field, switch between event and task. */
@@ -224,7 +230,7 @@ export const actions: Actions = {
 		const newName = result.item.kind === 'event' && field('calendar') === NEW_CALENDAR ? checkCalendarName(field('newCalendar'), store.calendars()) : undefined;
 		if (newName && 'error' in newName) return fail(400, { message: newName.error });
 		let moved;
-		const saved = await change(`save "${shortTitle(item.title)}"`, async () => {
+		const saved = await change(doing('save', item), async () => {
 			const wanted = newName
 				? await store.ensureCalendar(newName.name, ['event'])
 				: result.item.kind === 'event'
@@ -250,7 +256,7 @@ export const actions: Actions = {
 		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
 		// Already gone (deleted on a phone, or an earlier delete that got no answer landed after all) is done, not a failure.
-		return change(`delete "${shortTitle(item.title)}"`, () =>
+		return change(doing('delete', item), () =>
 			store.remove(item).catch((e) => {
 				if (!(e instanceof RefusedError && GONE.includes(e.status))) throw e;
 			})
@@ -266,7 +272,7 @@ export const actions: Actions = {
 		if (!('item' in found)) return found.status === 404 ? undefined : found;
 		const { store, item } = found;
 		if (!item.recurrence) return fail(400, { message: 'This item does not repeat' });
-		return change(`delete that day of "${shortTitle(item.title)}"`, () => store.removeOccurrence(item, day));
+		return change(doing('delete that day of', item), () => store.removeOccurrence(item, day));
 	}
 };
 
@@ -311,12 +317,12 @@ function shownOn(item: StoredItem, day: string): Item | undefined {
  * message rather than an error screen. The item may have been changed on a phone meanwhile, hence the reload.
  * A change that got no answer in time may still be made, so the message says it may or may not be done.
  * A change refused because the item already looks as asked (a double tap: the first tap saved it) is not a failure. */
-async function change(what: string, work: () => Promise<unknown>, asked?: Wanted) {
+async function change({ say: what, log }: ReturnType<typeof doing>, work: () => Promise<unknown>, asked?: Wanted) {
 	try {
 		await work();
 	} catch (e) {
 		if (asked && (await alreadyDone(asked))) return;
-		console.error(`Planner: could not ${what}`, e);
+		console.error(`Planner: could not ${log}`, e);
 		// A late answer is not a refusal: the server may still carry the change out.
 		if (unanswered(e)) return fail(502, { message: `The calendar server didn't answer in time when asked to ${what}, so it may or may not be done. Reload the page to see.` });
 		return fail(502, { message: `The calendar server didn't ${what}. Reload the page and try again.` });
@@ -350,7 +356,7 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	try {
 		await store.remove(old);
 	} catch (e) {
-		console.error(`Planner: could not remove the old copy of "${old.title}" after copying it`, e);
+		console.error(`Planner: could not remove the old copy, ${forLog(old)}, after copying it to ${logged(copy.calendarUrl)}`, e);
 		if (refused(e) && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
 		answered = refused(e);
 	}
@@ -402,7 +408,7 @@ async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: Stored
 	} catch (e) {
 		// The new copy is gone already, so only the old one is left: the same as taking it back.
 		if (e instanceof RefusedError && GONE.includes(e.status)) return stayed;
-		console.error(`Planner: could not take back the new copy of "${old.title}"`, e);
+		console.error(`Planner: could not take back the new copy, ${forLog(copy)}, of ${forLog(old)}`, e);
 		// No answer: the new copy's delete may still land, so the old one must not be deleted straight away.
 		if (!refused(e)) return fail(502, { message: `The calendar server didn't move "${title}" to another calendar, and didn't confirm it took the new copy back out. ${waitThenDelete(store, copy)}` });
 		return fail(502, { message: `"${title}" is now in two calendars, because the calendar server wouldn't remove the old one. Reload the page and delete the one you don't want.` });
@@ -420,7 +426,7 @@ async function elsewhere(store: Awaited<ReturnType<typeof getStore>>, old: Store
 	try {
 		return (await store.listItems()).filter((i) => i.uid === old.uid && i.url !== copy.url).length;
 	} catch (e) {
-		console.error(`Planner: could not check where "${old.title}" is kept now`, e);
+		console.error(`Planner: could not check where the item with UID ${old.uid} is kept now`, e);
 		return undefined;
 	}
 }

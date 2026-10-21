@@ -1,7 +1,7 @@
 import { error, fail, type ActionFailure } from '@sveltejs/kit';
 import { shortTitle } from '$lib/format';
 import { byName, calendarAtPath, checkCalendarName, menuLabels, type Settings } from '$lib/settings';
-import { RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
+import { logged, RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
 import { icsToItems } from '$lib/server/ical';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
@@ -67,7 +67,7 @@ export const actions: Actions = {
 		try {
 			await store.ensureCalendar(checked.name, ['event']);
 		} catch (e) {
-			console.error(`Settings: could not create the calendar "${checked.name}"`, e);
+			console.error('Settings: could not create a new calendar', e);
 			return fail(502, { action: 'add', name: asked, message: `The calendar server didn't make "${checked.name}". Try again in a moment.` });
 		}
 		return { action: 'add', added: checked.name };
@@ -89,7 +89,7 @@ export const actions: Actions = {
 		try {
 			await store.renameCalendarAt(calendar.url, checked.name);
 		} catch (e) {
-			console.error(`Settings: could not rename "${calendar.name}" to "${checked.name}"`, e);
+			console.error(`Settings: could not rename ${logged(calendar.url)}`, e);
 			// Deleted on another device since this page was drawn: trying again can never work.
 			if (e instanceof RefusedError && GONE.includes(e.status)) return fail(404, { action: 'rename', path, name: asked, message: CALENDAR_GONE });
 			return fail(502, { action: 'rename', path, name: asked, message: `The calendar server didn't rename "${calendar.name}". Try again in a moment.` });
@@ -177,9 +177,9 @@ export const actions: Actions = {
 		}
 		const total = held.documents.length;
 		if (tally.moved.length < total) {
-			// Counts only: the titles are event names, other people's too in a shared calendar, and logs are kept.
+			// Counts and addresses only: titles and calendar names are personal (other people's too in a shared calendar), and logs are kept.
 			const counts = Object.fromEntries(Object.entries(tally).map(([outcome, titles]) => [outcome, titles.length]));
-			console.error(`Settings: moving the items of "${calendar.name}" to "${to.name}" stopped`, counts);
+			console.error(`Settings: moving the items of ${logged(calendar.url)} to ${logged(to.url)} stopped`, counts);
 			// Gone by now: another run of this delete (a second tab, or a tap after a refresh) finished it.
 			if (await isGone(store, calendar)) return refuse(502, unfinished(name, toName, total, tally, true));
 			return recounted(store, calendar, refuse(502, unfinished(name, toName, total, tally)));
@@ -291,7 +291,7 @@ async function contents(store: CalendarStore, calendar: Calendar): Promise<{ ver
 	try {
 		return await store.documents(calendar.url);
 	} catch (e) {
-		console.error(`Settings: could not read what "${calendar.name}" holds`, e);
+		console.error(`Settings: could not read what ${logged(calendar.url)} holds`, e);
 		if (await vanished(store, calendar, e)) return { refusal: refuse(404, CALENDAR_GONE) };
 		return { refusal: refuse(502, `The calendar server didn't say what's in ${shortTitle(calendar.name)}. Try again in a moment.`) };
 	}
@@ -348,7 +348,7 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 			await store.writeSettings(tasks, { ...settings, ...nulls(cleared) });
 		}
 	} catch (e) {
-		console.error(`Settings: could not change the choices before deleting "${calendar.name}"`, e);
+		console.error(`Settings: could not change the choices before deleting ${logged(calendar.url)}`, e);
 		return notDeleted("the calendar server didn't change the Work and new-event choices");
 	}
 	try {
@@ -356,7 +356,7 @@ async function finish(store: CalendarStore, calendar: Calendar, version: string 
 	} catch (e) {
 		// Deleted elsewhere meanwhile: a 404, or another tab's refresh has already dropped it from the list.
 		if (await vanished(store, calendar, e)) return done;
-		console.error(`Settings: could not delete "${calendar.name}"`, e);
+		console.error(`Settings: could not delete ${logged(calendar.url)}`, e);
 		// A late answer, or a server error, is not a refusal: the server may still delete it, or have done so.
 		if (unanswered(e)) return refuse(502, `The calendar server didn't answer in time when asked to delete ${name}, so it may or may not be gone. Reload the page to see.`);
 		if (e instanceof RefusedError && e.status >= 500) return refuse(502, `The calendar server had a problem deleting ${name}, so it may or may not be gone. Reload the page to see.`);
