@@ -140,6 +140,13 @@
 			}
 		return again;
 	});
+	/** What an item's calendar tag says, and the calendar's full name; none for a task in the main Tasks list. */
+	function calendarTagOf(item: Item, date: string) {
+		if (!item.calendar) return null;
+		const work = item.calendar === data.workCalendar;
+		if (!work && item.kind === 'task' && item.calendar === data.tasksCalendar && !twice.has(`${date} ${item.uid}`)) return null;
+		return { work, name: data.calendarLabels[item.calendar] ?? 'Unnamed calendar', shown: data.calendarTags[item.calendar] ?? 'Cal' };
+	}
 	let swallowClick = false;
 
 	const dayAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>('section.day')?.dataset.date;
@@ -360,7 +367,6 @@
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
 		{@render titleOf(item, date)}
 		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
-		{#if item.calendar === data.workCalendar}<span class="tag work-tag">Work</span>{/if}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
@@ -384,14 +390,16 @@
 	</li>
 {/snippet}
 
-<!-- An item's title, which opens its details. A copy of an item shown twice says which calendar it is in, under
-     the title when the row is narrow, so the title keeps most of the row. -->
+<!-- An item's title, which opens its details, and the calendar it is in, in a few letters ("Fami" for Family). Work
+     events say Work instead, since e-ink shows their shading only as grey. Tasks in the main Tasks list have no tag,
+     unless the same task is also in another list. The tag goes under the title when the row is narrow, so the title
+     keeps most of the row. Its full name is read out; a tap on it opens the details, like a tap on the title. -->
 {#snippet titleOf(item: Item, date: string)}
-	{#if twice.has(`${date} ${item.uid}`) && item.calendar}
-		{@const name = data.calendarLabels[item.calendar] ?? item.calendar}
+	{@const tag = calendarTagOf(item, date)}
+	{#if tag}
 		<span class="titled">
 			<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
-			<span class="tag cal-tag" title="In {name}">{name}</span>
+			<span class={['tag', 'cal-tag', tag.work && 'work-tag']} title="In {tag.name}"><span aria-hidden="true">{tag.shown}</span><span class="unseen">, in {tag.name}</span></span>
 		</span>
 	{:else}
 		<button type="button" class="title" onclick={() => openDetails(item)} aria-label="Details for {item.title}">{item.title}</button>
@@ -550,6 +558,9 @@
 						</select>
 					</label>
 				</div>
+				{#if editing.kind === 'task' && editing.calendar && editing.calendar !== data.tasksCalendar}
+					<p class="hint">In the list {data.calendarLabels[editing.calendar] ?? 'Unnamed calendar'}.</p>
+				{/if}
 				{#if editing.kind === 'event'}
 					<label class="field">Calendar
 						<select name="calendar" id="f-calendar" value={editing.calendar ?? data.defaultEventCalendar} onchange={(e) => (newCalendar = e.currentTarget.value === '+new')}>
@@ -772,12 +783,18 @@
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
-	/* The title and its calendar tag share the title's place. The title wants 8rem; when the tag doesn't fit beside it,
-	   the tag goes on the line below. A long name wraps rather than widening the row; all of it shows, so the copies
-	   can be told apart. */
+	/* The title and its calendar tag share the title's place. The title wants 6.5rem (about 100px); when the tag doesn't fit beside it,
+	   the tag goes on the line below. A long tag (two calendars of the same name) wraps rather than widening the row. */
 	.titled { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.1rem 0.45rem; }
-	.titled .title { flex: 1 1 8rem; }
-	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; }
+	.titled .title { flex: 1 1 6.5rem; }
+	/* The title's button reaches over its tag too, so a tap on the tag opens the details. */
+	.titled { position: relative; }
+	.titled .title::after { content: ''; position: absolute; inset: 0; }
+	/* Ink, not grey, and a firmer line, so the tag reads on e-ink. A tap on it goes to the title under it. */
+	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; color: var(--ink); border: 1.5px solid var(--ink); pointer-events: none; }
+	.cal-tag.work-tag { background: var(--ink); color: var(--paper); }
+	/* Read out, not shown. */
+	.unseen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }

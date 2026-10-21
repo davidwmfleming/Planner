@@ -276,6 +276,42 @@ describe('deleting an item that is already gone from the calendar server', () =>
 	});
 });
 
+describe('calendar tags on the page', () => {
+	beforeEach(() => {
+		fake = fakeStore([cal('me', 'Me'), cal('family', 'Family'), cal('workouts', 'Workouts'), cal('work', 'Work'), cal('tasks', 'Tasks', ['task']), cal('shopping', 'Shopping', ['task'])]);
+	});
+
+	it('gives each calendar its short tag, told apart from the others', async () => {
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarTags).toEqual({
+			'/david/me/': 'Me',
+			'/david/family/': 'Fami',
+			'/david/workouts/': 'Worko',
+			'/david/work/': 'Work',
+			'/david/tasks/': 'Task',
+			'/david/shopping/': 'Shop'
+		});
+	});
+
+	it('tags the work calendar Work whatever it is called, and keeps Workouts apart from it', async () => {
+		fake = fakeStore([cal('job', 'Job'), cal('workouts', 'Workouts'), cal('tasks', 'Tasks', ['task'])], { categories: [], workCalendar: '/david/job/', defaultEventCalendar: null });
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarTags).toEqual({ '/david/job/': 'Work', '/david/workouts/': 'Worko', '/david/tasks/': 'Task' });
+	});
+
+	it('names a calendar with a blank name, or none (Radicale stands in its path), Unnamed calendar, tagged Cal; other names lose spaces at the ends', async () => {
+		fake = fakeStore([{ url: `${HOME}blank/`, name: '  ', accepts: ['event'] }, { url: `${HOME}none/`, name: `${HOME}none/`, accepts: ['event'] }, { url: `${HOME}path/`, name: 'david/path', accepts: ['event'] }, cal('gym', '  Gym  ')]);
+		const data = await run('http://localhost/?page=2026-10-21');
+		expect(data.calendarTags).toEqual({ '/david/blank/': 'Cal 1', '/david/none/': 'Cal 2', '/david/path/': 'Cal 3', '/david/gym/': 'Gym' });
+		expect(data.calendarLabels).toMatchObject({ '/david/gym/': 'Gym' });
+		expect((data.calendarLabels as Record<string, string>)['/david/blank/']).toMatch(/^Unnamed calendar/);
+	});
+
+	it('says which collection is the main Tasks list, whose items need no tag', async () => {
+		expect((await run('http://localhost/?page=2026-10-21')).tasksCalendar).toBe('/david/tasks/');
+	});
+});
+
 describe('an item stored in two calendars under one UID (a move whose delete failed)', () => {
 	const me = cal('me', 'Me');
 	const family = cal('family', 'Family');

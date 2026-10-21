@@ -103,6 +103,57 @@ export function menuLabels<T extends { path: string; name: string }>(calendars: 
 	return calendars.map((c) => ({ ...c, label: label.get(c)! }));
 }
 
+/** A calendar's name as the planner shows it: without spaces at the ends, and "Unnamed calendar" when blank. */
+export const calendarName = (name: string) => name.trim() || 'Unnamed calendar';
+
+/** Letters a calendar's tag on the planner page shows, when no other calendar's tag starts the same way. */
+export const TAG_LETTERS = 4;
+/** Most letters a tag grows to when it clashes with another; beyond that the calendars are numbered. */
+const MOST_TAG_LETTERS = 6;
+/** Letters of a name looked at. Names come from the calendar server, which doesn't limit their length. */
+const NAME_LETTERS = 64;
+
+const trailingSlash = (path: string) => path.replace(/\/$/, '');
+/** Addresses in a steady order, /david/family/ before /david/family-2/. */
+const byAddress = (a: string, b: string) => (trailingSlash(a) < trailingSlash(b) ? -1 : trailingSlash(a) > trailingSlash(b) ? 1 : 0);
+
+/** Each calendar's tag on the planner page, by path: the first 4 letters of its name (an emoji or an accented letter
+ * counts as one), without spaces at the ends; "Cal" for a calendar with no name; "Work" for the work calendar.
+ * When two tags would look the same, whatever the case, those calendars get more letters until they differ, up to 6.
+ * Calendars still alike after that get their first 4 letters and a number, in the order of their addresses
+ * ("Swim 1", "Swim 2"); the work calendar keeps "Work". No two calendars get the same tag. */
+export function calendarTags(calendars: { path: string; name: string }[], workCalendar?: string | null): Record<string, string> {
+	type Tagged = { path: string; chars: string[]; shown: number; most: number; fixed?: string };
+	const all: Tagged[] = calendars.map((c) => {
+		// Cut the text before splitting it into letters, so a huge name costs no more than a short one.
+		const chars = letters(c.name.trim().slice(0, NAME_LETTERS * 4)).slice(0, NAME_LETTERS);
+		const fixed = c.path === workCalendar ? 'Work' : chars.length ? undefined : 'Cal';
+		const most = fixed ? 0 : Math.min(MOST_TAG_LETTERS, chars.length);
+		return { path: c.path, chars, most, shown: Math.min(TAG_LETTERS, most), fixed };
+	});
+	const tagOf = (c: Tagged, shown = c.shown) => c.fixed ?? c.chars.slice(0, shown).join('').trimEnd();
+	const clashing = () => [...Map.groupBy(all, (c) => tagOf(c).toLowerCase()).values()].filter((group) => group.length > 1);
+	for (;;) {
+		const growing = clashing().flat().filter((c) => c.shown < c.most);
+		if (!growing.length) break;
+		for (const c of growing) c.shown++;
+	}
+	const tag = new Map(all.map((c) => [c.path, tagOf(c)]));
+	const numbered = clashing().flat().filter((c) => c.path !== workCalendar).sort((a, b) => byAddress(a.path, b.path));
+	const used = new Set(all.filter((c) => !numbered.includes(c)).map((c) => tagOf(c).toLowerCase()));
+	const next = new Map<string, number>();
+	for (const c of numbered) {
+		const start = tagOf(c, Math.min(TAG_LETTERS, c.chars.length));
+		// After a calendar that shows just these letters (the work calendar's Work, say), numbers start at 2.
+		let n = next.get(start.toLowerCase()) ?? (used.has(start.toLowerCase()) ? 2 : 1);
+		while (used.has(`${start} ${n}`.toLowerCase())) n++;
+		tag.set(c.path, `${start} ${n}`);
+		used.add(`${start} ${n}`.toLowerCase());
+		next.set(start.toLowerCase(), n + 1);
+	}
+	return Object.fromEntries(tag);
+}
+
 /** Longest calendar name the settings page accepts. */
 export const MAX_NAME = 40;
 

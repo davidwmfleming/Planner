@@ -77,6 +77,48 @@ test('the Work shading follows the calendar chosen on the settings page, through
 	await expect(row).toHaveClass(/work/);
 });
 
+/** Each calendar's tag text on the page shown, so two calendars showing the same tag can be caught. */
+async function tagsByCalendar(page: Page) {
+	const rows = await page.locator('li[data-calendar]:has(.cal-tag)').evaluateAll((lis) =>
+		lis.map((li) => [li.getAttribute('data-calendar'), li.querySelector('.cal-tag [aria-hidden]')?.textContent] as const)
+	);
+	return new Map(rows);
+}
+
+test('the work calendar is tagged Work whatever its name, and no other calendar is', async ({ page }, info) => {
+	const job = unique('Job', info);
+	const gym = unique('Gym session', info);
+	const standup = unique('Standup', info);
+	await addCalendar(page, job);
+	await choose(page, { work: job });
+	await page.goto(`/?page=${day}`);
+	const sheet = page.getByRole('dialog', { name: 'Details' });
+	for (const [line, title, calendar] of [[`7am ${gym}`, gym, 'Workouts'], [`9am ${standup}`, standup, job]]) {
+		await page.locator(`#add-event-${day}`).fill(line);
+		await page.locator(`#add-event-${day}`).press('Enter');
+		await page.locator(`section.day[data-date="${day}"] li`, { hasText: title }).getByRole('button', { name: `Details for ${title}` }).click();
+		await sheet.locator('#f-calendar').selectOption({ label: calendar });
+		await sheet.getByRole('button', { name: 'Save' }).click();
+		await expect(sheet).toBeHidden();
+	}
+	const tag = (title: string) => page.locator(`section.day[data-date="${day}"] li`, { hasText: title }).locator('.cal-tag');
+	await expect(tag(standup).locator('[aria-hidden]')).toHaveText('Work');
+	await expect(tag(standup)).toHaveClass(/work-tag/);
+	await expect(tag(standup)).toHaveAttribute('title', `In ${job}`);
+	await expect(tag(gym).locator('[aria-hidden]')).toHaveText('Worko');
+	await expect(tag(gym)).not.toHaveClass(/work-tag/);
+	const onDay = await tagsByCalendar(page);
+	expect(new Set(onDay.values()).size, 'one tag text per calendar').toBe(onDay.size);
+
+	// The calendar still called Work is no longer the work calendar, so its tag must say something else.
+	await page.goto('/');
+	const econ = page.locator(`section.day[data-date="${iso(new Date())}"] li`, { hasText: 'Economic Modelling' }).locator('.cal-tag');
+	await expect(econ.locator('[aria-hidden]')).toHaveText('Work 2');
+	await expect(econ).not.toHaveClass(/work-tag/);
+	const today = await tagsByCalendar(page);
+	expect(new Set(today.values()).size, 'one tag text per calendar').toBe(today.size);
+});
+
 test('no calendar can be shaded as work', async ({ page }) => {
 	await choose(page, { work: 'None' });
 	await expect(page.getByRole('region', { name: 'Event calendars' }).locator('li.work')).toHaveCount(0);
