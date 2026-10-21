@@ -132,11 +132,44 @@ const dayCount = (from: string, to: string) =>
 	Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / 86_400_000);
 
 const MAX_REPEATS = 20_000;
+/** Most showings of one repeating item on a single day; more than this and it isn't something to plan around. */
+const MOST_A_DAY = 4;
+/** Repeats the planner shows: none more often than daily, since each showing is a line on a day. */
+const SHOWN_FREQS = ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'];
 
-/** Every showing of a repeating item that touches the days from..to (inclusive), with one-off changes applied. */
+/**
+ * Throws if any repeat rule of an event or task repeats more often than daily, or has an INTERVAL that isn't a
+ * positive whole number. Read from the text itself, because ical.js quietly reads a bad INTERVAL (-2, 0, 1.5) as 1.
+ */
+function checkRepeatRules(ics: string) {
+	const lines = ics.replace(/\r?\n[ \t]/g, '').split(/\r?\n/);
+	const within: string[] = [];
+	for (const line of lines) {
+		const [, begin] = /^BEGIN:(\S+)/i.exec(line) ?? [];
+		if (begin) within.push(begin.toUpperCase());
+		else if (/^END:/i.test(line)) within.pop();
+		else if (/^RRULE[;:]/i.test(line) && ['VEVENT', 'VTODO'].includes(within.at(-1) ?? '')) {
+			const rule = new Map(line.slice(line.indexOf(':') + 1).split(';').map((part) => {
+				const [key, value = ''] = part.split('=');
+				return [key.trim().toUpperCase(), value.trim().toUpperCase()] as const;
+			}));
+			const freq = rule.get('FREQ') ?? '';
+			if (!SHOWN_FREQS.includes(freq)) throw new Error(`Repeats ${freq.toLowerCase() || 'with no frequency'}, more often than the planner can show`);
+			const interval = rule.get('INTERVAL');
+			if (interval !== undefined && !/^\+?0*[1-9]\d*$/.test(interval)) throw new Error('Repeats at an interval that is not a positive whole number');
+		}
+	}
+}
+
+/**
+ * Every showing of a repeating item that touches the days from..to (inclusive), with one-off changes applied.
+ * Throws, without working them all out, for a repeat that would crowd the page: more often than daily, at a nonsense
+ * interval, or more than MOST_A_DAY times on any day.
+ */
 export function occurrencesBetween(ics: string, from: string, to: string): Item[] {
 	const { master, overrides } = parts(ics);
 	if (!master || !master.hasProperty('rrule')) return [];
+	checkRepeatRules(ics);
 	const series = componentToItem(master);
 	if (!series.date) return [];
 	const length = series.endDate ? dayCount(series.date, series.endDate) : 0;
@@ -144,11 +177,17 @@ export function occurrencesBetween(ics: string, from: string, to: string): Item[
 
 	const shown: Item[] = [];
 	const expansion = new ICAL.RecurExpansion({ component: master, dtstart: master.getFirstPropertyValue('dtstart') as ICAL.Time });
+	let lastDay = '';
+	let onLastDay = 0;
 	for (let n = 0; n < MAX_REPEATS; n++) {
 		const next = expansion.next();
 		if (!next) break;
 		const day = isoDate(next);
 		if (day > to) break;
+		// Showings come in order, so counting each day's as they come is enough; this also caps the page's total.
+		onLastDay = day === lastDay ? onLastDay + 1 : 1;
+		lastDay = day;
+		if (onLastDay > MOST_A_DAY) throw new Error(`Repeats more than ${MOST_A_DAY} times a day, more than the planner can show`);
 		if (addDays(day, length) < from || overrides.has(day)) continue;
 		shown.push(showing(series, day));
 	}

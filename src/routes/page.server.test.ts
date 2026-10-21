@@ -688,6 +688,33 @@ describe('an item that cannot be read', () => {
 		expect(warned.join('\n')).not.toContain('Piano');
 	});
 
+	it('counts and leaves out an item that repeats more often than daily, or at a nonsense interval, without slowing the page', async () => {
+		const rule = (uid: string, rrule: string) => ({
+			...readable(uid, `Odd ${uid}`),
+			recurrence: rrule,
+			ics: `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:20261001T120000Z\r\nSUMMARY:Odd ${uid}\r\nDTSTART:${today.replaceAll('-', '')}T090000\r\nRRULE:${rrule}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`
+		});
+		fake = fakeStore(calendars);
+		fake.items = [
+			readable('swim', 'Swim'),
+			rule('secondly', 'FREQ=SECONDLY'),
+			rule('minutely', 'FREQ=MINUTELY'),
+			rule('hourly', 'FREQ=HOURLY'),
+			rule('backwards', 'FREQ=DAILY;INTERVAL=-2'),
+			rule('never', 'FREQ=DAILY;INTERVAL=0'),
+			rule('stretch', 'FREQ=DAILY')
+		];
+		const started = performance.now();
+		const data = await run();
+		expect(performance.now() - started).toBeLessThan(1000);
+		expect(data.unreadable).toBe(5);
+		const page = JSON.stringify(data.days);
+		expect(page).toContain('Swim');
+		expect(page).not.toMatch(/Odd (secondly|minutely|hourly|backwards|never)/);
+		// A plain daily repeat still shows, once on each day from its start.
+		expect(page.match(/Odd stretch/g)?.length).toBe((data.days as { date: string }[]).filter((d) => d.date >= today).length);
+	});
+
 	it('says nothing when every item can be read', async () => {
 		fake = fakeStore(calendars);
 		fake.items = [readable('swim', 'Swim')];

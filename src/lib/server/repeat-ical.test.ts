@@ -111,3 +111,53 @@ describe('occurrenceOn', () => {
 		expect(occurrenceOn(ticked, '2026-10-08')).toMatchObject({ date: '2026-10-08', state: 'done', occurrence: '2026-10-08' });
 	});
 });
+
+/** An event as another app might save it, with whatever repeat rule (and extra lines) it chose. */
+const fromAnotherApp = (rule: string, extra = '') =>
+	`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//Some app//EN\r\nBEGIN:VEVENT\r\nUID:odd-1\r\nDTSTAMP:20261001T120000Z\r\nSUMMARY:Odd\r\nDTSTART:20261001T090000\r\nDTEND:20261001T093000\r\nRRULE:${rule}\r\n${extra}END:VEVENT\r\nEND:VCALENDAR\r\n`;
+
+describe('repeats the planner cannot sensibly show', () => {
+	// Each of these would fill a page with thousands of showings, or repeat in a way that makes no sense,
+	// so it is refused, and the page leaves the item out and counts it as one it couldn't read.
+	it.each(['FREQ=SECONDLY', 'FREQ=MINUTELY', 'FREQ=HOURLY', 'FREQ=HOURLY;INTERVAL=6', 'FREQ=DAILY;INTERVAL=-2', 'FREQ=DAILY;INTERVAL=0', 'FREQ=WEEKLY;INTERVAL=1.5'])(
+		'refuses %s',
+		(rule) => {
+			expect(() => occurrencesBetween(fromAnotherApp(rule), '2026-10-19', '2026-10-21')).toThrow();
+		}
+	);
+
+	it('refuses a rule folded over two lines too', () => {
+		const folded = fromAnotherApp('FREQ=DAILY;INTER\r\n VAL=-2');
+		expect(() => occurrencesBetween(folded, '2026-10-19', '2026-10-21')).toThrow();
+	});
+
+	it('refuses a daily repeat that falls many times on each day', () => {
+		const everyHour = 'FREQ=DAILY;BYHOUR=' + Array.from({ length: 24 }, (_, h) => h).join(',');
+		expect(() => occurrencesBetween(fromAnotherApp(everyHour), '2026-10-19', '2026-10-21')).toThrow();
+	});
+
+	it('refuses a long list of extra days that crowds the page', () => {
+		const rdates = Array.from({ length: 30 }, (_, m) => `20261020T${String(8 + Math.floor(m / 6)).padStart(2, '0')}${String((m % 6) * 10).padStart(2, '0')}00`).join(',');
+		expect(() => occurrencesBetween(fromAnotherApp('FREQ=YEARLY', `RDATE:${rdates}\r\n`), '2026-10-19', '2026-10-21')).toThrow();
+	});
+
+	it('works it out quickly, not after building every second of the year', () => {
+		const started = performance.now();
+		expect(() => occurrencesBetween(fromAnotherApp('FREQ=SECONDLY'), '2026-10-19', '2026-10-21')).toThrow();
+		expect(performance.now() - started).toBeLessThan(100);
+	});
+
+	it('still shows ordinary repeats: daily once a day, every other day, twice a day, monthly and yearly', () => {
+		const range = ['2026-10-19', '2026-10-21'] as const;
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY'), ...range))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY;INTERVAL=2'), ...range))).toEqual(['2026-10-19', '2026-10-21']);
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY;INTERVAL=+1'), ...range))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
+		expect(occurrencesBetween(fromAnotherApp('FREQ=DAILY;BYHOUR=9,17'), ...range)).toHaveLength(6);
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=MONTHLY'), '2026-11-01', '2026-11-03'))).toEqual(['2026-11-01']);
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=YEARLY'), '2027-10-01', '2027-10-01'))).toEqual(['2027-10-01']);
+	});
+
+	it('does not mind a time zone’s own yearly rules', () => {
+		expect(days(occurrencesBetween(FROM_PHONE, '2026-10-26', '2026-10-28'))).toEqual(['2026-10-27']);
+	});
+});
