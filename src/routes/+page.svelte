@@ -104,7 +104,6 @@
 			// not remembered, still works
 		}
 	}
-	const LIST_NAMES = { month: 'This month', waiting: 'Waiting', someday: 'Someday' } as const;
 
 	const pageUrl = (start: string) => `?page=${start}`;
 
@@ -479,7 +478,7 @@
 		</form>
 		{#if item.time}<span class="time">{formatTime(item.time)}</span>{:else if item.kind === 'event'}<span class="allday">All day</span>{/if}
 		{@render titleOf(item, date)}
-		{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+		{#if item.label}<span class="tag">{item.label}</span>{/if}
 		{#if item.recurrence}<span class="repeat" title="Repeats">⟳</span>{/if}
 		{#if item.carriedFrom && item.state === 'open'}<span class="carry" title="Carried over">↻ {dayLetter(item.carriedFrom)} {dayNumber(item.carriedFrom)}</span>{/if}
 		<form method="POST" action="?page={data.start}&/mark" use:enhance={reportProblems} class="inline">
@@ -630,12 +629,12 @@
 			{showUnscheduled ? 'Hide' : 'Show'} future tasks ({data.unscheduled.length})
 		</button>
 		{#if showUnscheduled}
-			<p class="hint">This month, waiting on and someday. Put any of them on today or the coming Saturday.</p>
+			<p class="hint">Tasks without a day, by list. Put any of them on today or the coming Saturday.</p>
 			<ul class="lines">
 				{#each data.unscheduled as item (rowKey(item))}
 					<li class={[marking[rowKey(item)] ?? item.state, marking[rowKey(item)] && 'marked', dragging === rowKey(item) && 'dragging']} data-uid={item.uid} data-calendar={item.calendar}>
 						{@render titleOf(item, '')}
-						{#if item.label}<span class="tag">{LIST_NAMES[item.label]}</span>{/if}
+						{#if item.label}<span class="tag">{item.label}</span>{/if}
 						{@render pullButtons(item)}
 					</li>
 				{/each}
@@ -667,14 +666,14 @@
 				</div>
 				<div class="row2">
 					<label class="field">Ends (events) <input type="time" name="endTime" id="f-end" value={editing.endTime ?? ''} /></label>
-					<label class="field">List
-						<select name="label" id="f-label" value={editing.label ?? ''}>
-							<option value="">None</option>
-							<option value="month">This month</option>
-							<option value="waiting">Waiting on</option>
-							<option value="someday">Someday</option>
-						</select>
-					</label>
+					{#if editing.kind === 'task'}
+						<label class="field">List
+							<select name="label" id="f-label" value={editing.label ?? ''}>
+								<option value="">None</option>
+								{#each data.categories as category (category)}<option value={category}>{category}</option>{/each}
+							</select>
+						</label>
+					{/if}
 				</div>
 				{#if editing.kind === 'task' && editing.calendar && editing.calendar !== data.tasksCalendar}
 					<p class="hint">In the list {data.calendarLabels[editing.calendar] ?? 'Unnamed calendar'}.</p>

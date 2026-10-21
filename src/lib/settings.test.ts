@@ -34,6 +34,41 @@ describe('parseSettings', () => {
 	});
 });
 
+describe('category names in the stored settings', () => {
+	const read = (categories: unknown[]) => parseSettings(JSON.stringify({ categories }), calendars).categories;
+
+	it('cleans them as calendar names are cleaned: line breaks and tabs become spaces, control characters go', () => {
+		expect(read(['This\r\nmonth', 'Wait\ting', 'Some\rday', 'Er\u0000ra\u0007nds\u007f', ' Kids  & school '])).toEqual(['This month', 'Wait ing', 'Some day', 'Errands', 'Kids & school']);
+		expect(read(['Sch\u200bool', '\u202eKrow\u202c', '👨\u200d👩\u200d👧 Home'])).toEqual(['School', 'Krow', '👨\u200d👩\u200d👧 Home']);
+	});
+
+	it('drops names left empty, longer than 40 letters, or with a comma (commas separate CATEGORIES values)', () => {
+		expect(read(['\u200b\u200d', '\u0001', 'x'.repeat(41), `${'é'.repeat(40)}`, 'Kids, school', 'Waiting'])).toEqual(['é'.repeat(40), 'Waiting']);
+	});
+
+	it('keeps names that are the same once cleaned only once', () => {
+		expect(read(['Waiting', 'waiting\n', 'Wait\u200bing'])).toEqual(['Waiting']);
+	});
+
+	it('reads 20,000 stored names (mostly repeats, some huge) quickly, keeping the first 50 different ones in order', () => {
+		const huge = 'x'.repeat(10_000);
+		const names = Array.from({ length: 20_000 }, (_, i) => (i % 7 === 3 ? huge : i % 3 === 0 && i < 300 ? `List ${i}` : 'waiting'));
+		const raw = JSON.stringify({ categories: names });
+		const started = performance.now();
+		const kept = parseSettings(raw, calendars).categories;
+		// Most of this is parsing ~28 MB of JSON; the old way took about 16 s, so 1 s still catches it without failing on a busy runner.
+		expect(performance.now() - started).toBeLessThan(1000);
+		const first50 = [...new Set(names.filter((n) => n !== huge))].slice(0, 50);
+		expect(first50.slice(0, 4)).toEqual(['List 0', 'waiting', 'List 6', 'List 9']);
+		expect(kept).toEqual(first50);
+	});
+
+	it('keeps at most 50', () => {
+		const many = Array.from({ length: 80 }, (_, i) => `List ${i + 1}`);
+		expect(read(many)).toEqual(many.slice(0, 50));
+	});
+});
+
 describe('filling in the Work and default choices', () => {
 	it('can use other calendar names than Work and Me', () => {
 		const chosen = parseSettings(undefined, calendars, { workCalendar: 'Family', defaultEventCalendar: 'Work' });
