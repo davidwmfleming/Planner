@@ -588,6 +588,10 @@
 	{#if !data.eventCalendars.length}
 		<p class="notice">There are no event calendars, so new events have nowhere to go. <a href="/settings">Add one in Settings</a>.</p>
 	{/if}
+	<!-- Saved by another app in a way the planner can't read; everything else is still shown. -->
+	{#if data.unreadable}
+		<p class="notice unreadable">{data.unreadable === 1 ? "1 item couldn't be read and isn't shown." : `${data.unreadable} items couldn't be read and aren't shown.`}</p>
+	{/if}
 	<main class="page">
 		{#each data.days as day (day.date)}
 			<section class="day" class:weekend={day.weekend} class:drop-target={dropDay === day.date} aria-label={day.date} data-date={day.date}>

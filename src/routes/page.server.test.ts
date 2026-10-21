@@ -35,6 +35,11 @@ function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar
 		async listItems() {
 			return this.items;
 		},
+		/** Addresses of documents the store couldn't read, and left out. */
+		unreadable: [] as string[],
+		async readItems() {
+			return { items: this.items, unreadable: this.unreadable };
+		},
 		async ensureCalendar(name: string, accepts: Calendar['accepts']) {
 			const made = { url: `${HOME}${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}/`, name, accepts };
 			this.made.push(name);
@@ -644,5 +649,57 @@ describe('deleting a copy that went away after the page was drawn', () => {
 		fake.remove = async (stored: StoredItem) => void removed.push(stored.calendarUrl);
 		await act('delete', { uid: 'dentist' });
 		expect(removed).toEqual([family.url]);
+	});
+});
+
+describe('an item that cannot be read', () => {
+	const calendars = [cal('me', 'Me'), cal('tasks', 'Tasks', ['task'])];
+	let warned: string[];
+	const warn = console.warn;
+	afterEach(() => {
+		console.warn = warn;
+	});
+	beforeEach(() => {
+		warned = [];
+		console.warn = console.error = (...args: unknown[]) => void warned.push(args.map(String).join(' '));
+	});
+	const today = new Date().toISOString().slice(0, 10);
+	const readable = (uid: string, title: string): StoredItem => ({ uid, kind: 'event', title, state: 'open', date: today, calendarUrl: `${HOME}me/`, url: `${HOME}me/${uid}.ics`, ics: '' });
+
+	it('is left out and counted, and the rest of the page still shows', async () => {
+		fake = fakeStore(calendars);
+		fake.items = [readable('swim', 'Swim')];
+		fake.unreadable = [`${HOME}me/from-a-phone.ics`];
+		const data = await run();
+		expect(data.unreadable).toBe(1);
+		expect(JSON.stringify(data.days)).toContain('Swim');
+		// The log says where it is, so it can be found and fixed; it has no title to give.
+		expect(warned.join('\n')).toContain('/david/me/from-a-phone.ics');
+	});
+
+	it('counts a repeating item whose repeats cannot be worked out, and logs where it is, not its title', async () => {
+		fake = fakeStore(calendars);
+		fake.items = [readable('swim', 'Swim'), { ...readable('piano', 'Piano with Ms Lund'), recurrence: 'FREQ=WEEKLY', ics: 'not iCalendar' }];
+		const data = await run();
+		expect(data.unreadable).toBe(1);
+		expect(JSON.stringify(data.days)).toContain('Swim');
+		expect(JSON.stringify(data.days)).not.toContain('Piano');
+		expect(warned.join('\n')).toContain('/david/me/piano.ics');
+		expect(warned.join('\n')).not.toContain('Piano');
+	});
+
+	it('says nothing when every item can be read', async () => {
+		fake = fakeStore(calendars);
+		fake.items = [readable('swim', 'Swim')];
+		expect((await run()).unreadable).toBe(0);
+		expect(warned).toEqual([]);
+	});
+
+	it('is not the calendar server failing: that still shows the error page', async () => {
+		fake = fakeStore(calendars);
+		fake.readItems = async () => {
+			throw new NoAnswerError('The calendar server did not answer in time (reading http://127.0.0.1:5232/david/me/)');
+		};
+		await expect(run()).rejects.toMatchObject({ status: 503, body: { message: "The calendar server isn't answering. Check that it is running, then reload." } });
 	});
 });
