@@ -1,15 +1,17 @@
 // House rule 4: the server's log is kept, so it must never hold an item's title or details, or a calendar's name.
 // Each failure the planner logs is staged here against the real calendar store, with a pretend calendar server
 // underneath, and everything written to the log is checked for the personal words.
+import { createHash, createHmac } from 'node:crypto';
 import { format } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CalendarStore, logged, type StoredItem } from '$lib/server/calendar-store';
+import { CalendarStore, logged, useLogKey, type StoredItem } from '$lib/server/calendar-store';
 import { itemToICS } from '$lib/server/ical';
 import type { Item } from '$lib/item';
 import type { Settings } from '$lib/settings';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
-vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
+vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0, scheduleNightlyRollover: () => {} }));
+vi.mock('$app/environment', () => ({ building: true }));
 
 const HOME = 'http://127.0.0.1:5232/david/';
 const FAMILY = `${HOME}secret-family-stuff/`;
@@ -70,6 +72,7 @@ vi.mock('$lib/server/store', async (original) => ({
 const planner = await import('./+page.server');
 const settingsPage = await import('./settings/+page.server');
 const exporter = await import('./export/+server');
+const hooks = await import('../hooks.server');
 
 const post = (actions: Record<string, unknown>, action: string, fields: Record<string, string>) => {
 	const body = new FormData();
@@ -113,13 +116,13 @@ describe('the planner page logs failures without titles or calendar names', () =
 		it(`ticking an item (${failure === 'silence' ? 'no answer' : 'refused'})`, async () => {
 			server.update = failure;
 			await post(planner.actions, 'mark', { uid: 'uid-1', keptIn: '/david/secret-family-stuff/', state: 'done' });
-			expect(expectPrivateLog()).toContain(`${logged(FAMILY)}uid-1.ics`);
+			expect(expectPrivateLog()).toContain(logged(`${FAMILY}uid-1.ics`));
 		});
 
 		it(`deleting an item (${failure === 'silence' ? 'no answer' : 'refused'})`, async () => {
 			server.remove = failure;
 			await post(planner.actions, 'delete', { uid: 'uid-1', keptIn: '/david/secret-family-stuff/' });
-			expect(expectPrivateLog()).toContain(`${logged(FAMILY)}uid-1.ics`);
+			expect(expectPrivateLog()).toContain(logged(`${FAMILY}uid-1.ics`));
 		});
 	}
 
@@ -195,8 +198,94 @@ describe('the export logs failures without calendar names', () => {
 	}
 });
 
-it('a logged address keeps the item file but hides the calendar name', () => {
-	expect(logged(`${FAMILY}uid-1.ics`)).toMatch(/^\/david\/[0-9a-f]{8}\/uid-1\.ics$/);
-	expect(logged(FAMILY)).toBe(logged('/david/secret-family-stuff/'));
-	expect(logged(FAMILY)).not.toBe(logged(ME));
+describe('a logged address', () => {
+	const KEY = '5e'.repeat(32);
+	beforeEach(() => useLogKey(KEY));
+
+	it("hides the calendar's name behind a fingerprint", () => {
+		expect(logged(FAMILY)).toMatch(/^\/david\/[0-9a-f]{8}\/$/);
+		expect(logged(FAMILY)).toBe(logged('/david/secret-family-stuff/'));
+		expect(logged(FAMILY)).not.toBe(logged(ME));
+	});
+
+	it("is fingerprinted with the install's own key, so likely names can't be tried against a shared log", () => {
+		const keyed = createHmac('sha256', Buffer.from(KEY, 'hex')).update('secret-family-stuff').digest('hex').slice(0, 8);
+		expect(logged(FAMILY)).toBe(`/david/${keyed}/`);
+		// Not the plain hash anyone could work out from a guess.
+		expect(logged(FAMILY)).not.toContain(createHash('sha256').update('secret-family-stuff').digest('hex').slice(0, 8));
+		// The same key gives the same fingerprint (after a restart, say); another install's key gives another.
+		const before = logged(FAMILY);
+		useLogKey('a1'.repeat(32));
+		expect(logged(FAMILY)).not.toBe(before);
+		useLogKey(KEY);
+		expect(logged(FAMILY)).toBe(before);
+	});
+
+	it('keeps an item file named by a UID, and fingerprints one named any other way', () => {
+		for (const uid of ['0F8FAD5B-D9CB-469F-A165-70867728950E', '0f8fad5bd9cb469fa16570867728950e', '7kukuqr4ed1m2f80u18cjm31j1']) {
+			expect(logged(`${FAMILY}${uid}.ics`)).toBe(`${logged(FAMILY)}${uid}.ics`);
+		}
+		for (const named of ['Biopsy results with Dr Okafor', 'biopsy-results-dr-okafor', 'okafor-2026-10-21', 'uid-1', 'appointment@okafor.example']) {
+			const shown = logged(`${FAMILY}${encodeURIComponent(named)}.ics`);
+			expect(shown).toMatch(/^\/david\/[0-9a-f]{8}\/[0-9a-f]{8}\.ics$/);
+			expect(shown.toLowerCase()).not.toContain('okafor');
+		}
+	});
+});
+
+describe("the install's key for fingerprints", () => {
+	/** A Tasks collection that holds whatever planner-log-key is written to it. */
+	function keeper(stored?: string) {
+		const kept = { value: stored, writes: 0 };
+		const s = new CalendarStore({ serverUrl: HOME, username: 'david', password: 'dev', timeoutMs: 30 });
+		(s as unknown as { client: unknown }).client = {
+			account: { homeUrl: HOME },
+			propfind: async () => [kept.value ? { ok: true, status: 207, props: { plannerLogKey: kept.value } } : { ok: false, status: 404, propStats: [{}] }]
+		};
+		vi.spyOn(globalThis, 'fetch').mockImplementation(async (_, init) => {
+			kept.writes++;
+			kept.value = /<p:planner-log-key[^>]*>([^<]*)</.exec(String(init?.body))?.[1];
+			return new Response('<d:multistatus xmlns:d="DAV:"><d:status>HTTP/1.1 200 OK</d:status></d:multistatus>', { status: 207 });
+		});
+		return { store: s, kept };
+	}
+
+	it('is made at random and stored on the Tasks collection the first time, then read back', async () => {
+		const { store: s, kept } = keeper();
+		const key = await s.logKey(TASKS);
+		expect(key).toMatch(/^[0-9a-f]{64}$/);
+		expect(kept.value).toBe(key);
+		expect(await s.logKey(TASKS)).toBe(key);
+		expect(kept.writes).toBe(1);
+	});
+
+	it('is kept as it is once stored', async () => {
+		const { store: s, kept } = keeper('c3'.repeat(32));
+		expect(await s.logKey(TASKS)).toBe('c3'.repeat(32));
+		expect(kept.writes).toBe(0);
+	});
+});
+
+describe('an unexpected error', () => {
+	const handle = (error: unknown, status = 500) => (hooks.handleError as (input: unknown) => unknown)({ error, status, message: 'Internal Error', event: {} });
+
+	it("is logged by its kind and where it happened, never by its message, which can quote an item's text", () => {
+		const parser = new Error(`Invalid parameters in 'SUMMARY;X-A:${TITLE}'\nat line 7: LOCATION:${LOCATION}`);
+		parser.name = 'ParserError';
+		expect(handle(parser)).toBeUndefined();
+		const written = expectPrivateLog();
+		expect(written).toContain('ParserError');
+		expect(written).toMatch(/\n\s+at /);
+	});
+
+	it('is logged even when it is not an Error, without its contents', () => {
+		handle({ title: TITLE });
+		handle(`could not read ${TITLE}`);
+		expectPrivateLog();
+	});
+
+	it('is not logged when it is only a page that is not there', () => {
+		handle(new Error(`Not found: /${TITLE}`), 404);
+		expect(log).toEqual([]);
+	});
 });
