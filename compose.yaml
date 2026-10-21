@@ -21,7 +21,7 @@ services:
       CALDAV_USER: ${CALDAV_USER:-david}
       CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
       ORIGIN: ${ORIGIN:?Set ORIGIN in .env to the planner's https address}
-      TZ: ${TZ:-America/Toronto}
+      TZ: ${TZ:-America/Halifax}
       # Used once, the first time the planner starts, to fill in its settings.
       WORK_CALENDAR: ${WORK_CALENDAR:-Work}
       EVENTS_CALENDAR: ${EVENTS_CALENDAR:-Me}

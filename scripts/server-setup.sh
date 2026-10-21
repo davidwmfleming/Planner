@@ -68,7 +68,7 @@ if [ ! -f .env ]; then
 CALDAV_USER=david
 CALDAV_PASSWORD=$(openssl rand -hex 16)
 ORIGIN=$ORIGIN
-TZ=America/Toronto
+TZ=America/Halifax
 PLANNER_PORT=$APP_PORT
 EOF
 	)
