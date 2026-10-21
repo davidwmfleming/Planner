@@ -3,11 +3,22 @@
 // Times are written as floating local times: the household lives in one time zone.
 import ICAL from 'ical.js';
 import { addDays } from '$lib/dates';
-import { LABELS, type Item, type ItemLabel, type ItemState } from '$lib/item';
+import type { Item, ItemState } from '$lib/item';
 
 const PRODID = '-//davidwmfleming//Planner//EN';
 /** Text a one-off change of a repeating item shares with its series unless it was changed for that day. */
 const SERIES_TEXT = ['summary', 'location', 'description', 'categories'];
+
+/** Keys older planners wrote in CATEGORIES, read as the names they stand for. Saving writes the name. */
+const OLD_KEYS: Record<string, string> = { month: 'This month', waiting: 'Waiting', someday: 'Someday' };
+
+/** Every CATEGORIES value of a component, over all its CATEGORIES lines, as text. */
+const categoriesOf = (comp: ICAL.Component) =>
+	comp.getAllProperties('categories').flatMap((p) => p.getValues().map(String)).filter((v) => v.trim() !== '');
+
+/** A property's value as text, to tell whether a one-off change has its own; CATEGORIES can hold several. */
+const textOf = (comp: ICAL.Component, name: string) =>
+	name === 'categories' ? categoriesOf(comp).join(',') : String(comp.getFirstPropertyValue(name) ?? '');
 
 const dateValue = (date: string) => ICAL.Time.fromDateString(date);
 const dateTimeValue = (date: string, time: string) => ICAL.Time.fromDateTimeString(`${date}T${time}:00`);
@@ -38,10 +49,9 @@ export function itemToICS(item: Item, previous?: string): string {
 			for (const one of oldParts.filter((p) => p.hasProperty('recurrence-id'))) {
 				// A day that was only ticked or moved takes the series' new title, place and notes too.
 				for (const name of SERIES_TEXT) {
-					if (String(one.getFirstPropertyValue(name) ?? '') !== String(oldMaster.getFirstPropertyValue(name) ?? '')) continue;
+					if (textOf(one, name) !== textOf(oldMaster, name)) continue;
 					one.removeAllProperties(name);
-					const value = comp.getFirstPropertyValue(name);
-					if (value != null) one.addPropertyWithValue(name, value);
+					for (const p of comp.getAllProperties(name)) one.addProperty(new ICAL.Property(p.toJSON()));
 				}
 				cal.addSubcomponent(one);
 			}
@@ -57,7 +67,11 @@ function itemComponent(item: Item): ICAL.Component {
 	comp.addPropertyWithValue('summary', item.title);
 	if (item.location) comp.addPropertyWithValue('location', item.location);
 	if (item.notes) comp.addPropertyWithValue('description', item.notes);
-	if (item.label) comp.addPropertyWithValue('categories', item.label);
+	if (item.categories?.length) {
+		const categories = new ICAL.Property('categories');
+		categories.setValues(item.categories);
+		comp.addProperty(categories);
+	}
 	if (item.carriedFrom) comp.addPropertyWithValue('x-planner-carried-from', item.carriedFrom);
 	if (item.recurrence) comp.addPropertyWithValue('rrule', ICAL.Recur.fromString(item.recurrence));
 
@@ -252,9 +266,8 @@ function componentToItem(comp: ICAL.Component): Item {
 	if (notes) item.notes = notes;
 	const carried = text('x-planner-carried-from');
 	if (carried) item.carriedFrom = carried;
-	const categories = comp.getAllProperties('categories').flatMap((p) => p.getValues().map(String));
-	const label = categories.map((c) => c.toLowerCase()).find((c): c is ItemLabel => (LABELS as string[]).includes(c));
-	if (label) item.label = label;
+	const categories = categoriesOf(comp).map((c) => OLD_KEYS[c.toLowerCase()] ?? c);
+	if (categories.length) item.categories = categories;
 	const rrule = comp.getFirstPropertyValue('rrule') as ICAL.Recur | null;
 	if (rrule) item.recurrence = rrule.toString();
 

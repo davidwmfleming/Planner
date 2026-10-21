@@ -22,7 +22,7 @@ describe('rolloverChanges', () => {
 		const items = [
 			item({ date: '2026-10-19', state: 'done' }),
 			item({ date: '2026-10-19', state: 'dropped' }),
-			item({ label: 'someday' }),
+			item({ categories: ['Someday'] }),
 			item({ date: TODAY }),
 			item({ date: '2026-10-22' }),
 			item({ date: '2026-10-19', recurrence: 'FREQ=WEEKLY' }),
