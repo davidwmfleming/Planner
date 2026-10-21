@@ -1,13 +1,15 @@
 <script lang="ts">
 	import { deserialize, enhance } from '$app/forms';
-	import { beforeNavigate, goto, invalidateAll } from '$app/navigation';
+	import { beforeNavigate, goto, invalidateAll, preloadData, replaceState } from '$app/navigation';
+	import { page } from '$app/state';
 	import type { SubmitFunction } from '@sveltejs/kit';
-	import { addDays } from '$lib/dates';
+	import { addDays, toISODate } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
+	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
+	import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
-	import { onMount, tick } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -350,6 +352,117 @@
 		Promise.all(lines.map((line) => sendLine(line))).finally(() => goto(to));
 	});
 
+	// A new day: a page left open overnight (the tablet asleep with the planner open) moves on by itself, at midnight
+	// and when the screen wakes. The server's today decides; this device's clock only says when to ask.
+	// A page showing today moves on to the new today's page; one flipped to on purpose stays, refreshed.
+	// Nothing changes under a line being written or saved, a mark or tap saving, a stroke or the details sheet: it waits.
+	const WHILE_WRITING = 10_000;
+	// The server's clock may be behind this one, or it can't be reached yet: ask again (see retryAfter), and don't
+	// let every wake or focus ask meanwhile (see mayAsk).
+	let lastAsked = 0;
+	// Said under the header while a line holds the page on the old day, so it isn't a mystery.
+	let dayNote = $state('');
+	const lineWritten = () => [...document.querySelectorAll<HTMLInputElement>('input.entry')].some((i) => i.value.trim());
+	let seen: { today: string; todayPage: string; start: string } | undefined;
+	let dayTimer: ReturnType<typeof setTimeout> | undefined;
+	let checking = false;
+	let tries = 0;
+	let gone = false;
+	const shown = () => ({ today: data.today, todayPage: data.todayPage, start: data.start });
+	const busy = () =>
+		saving.size > 0 || left.size > 0 || tapsSaving.size > 0 || sheetSaving || !!editing || !!stroke || Object.keys(marking).length > 0 || lineWritten();
+	// Reads go to addresses of their own (see freshAddress), numbered.
+	let reads = 0;
+	// When the server first didn't have the new day (or couldn't be reached), for retryAfter.
+	let troubleSince = 0;
+	/** Reads a page's data ahead, without showing it. A refresh or turn that failed would swap the planner for the error
+	 * screen (no Wi-Fi yet on waking, the calendar server down), so a page is only shown once read this way; showing
+	 * it then uses what was read, so it is read once and nothing can fail in between. */
+	async function readAhead(start: string) {
+		const address = freshAddress(start, ++reads);
+		try {
+			const result = await preloadData(address);
+			if (result.type === 'loaded' && result.status === 200) return { address, data: result.data as { today: string; todayPage: string; start: string } };
+		} catch {
+			// no connection: as if not answered
+		}
+		return undefined;
+	}
+	/** Shows a page read ahead, then puts its plain address back in the address bar. */
+	async function showRead(address: string, hadPage: boolean) {
+		await goto(address, { replaceState: true, noScroll: true, keepFocus: true });
+		replaceState(shownAddress(hadPage, shown()) || location.pathname, page.state);
+	}
+	/** The timer's own checks always ask; a wake, focus or new data may be held back by mayAsk. */
+	async function newDay(timed = false) {
+		if (checking) return;
+		seen ??= shown();
+		const waiting = busy();
+		const begun = dayBegun(new Date(), data.today);
+		// Asked too often already: leave it to the timer, which is set.
+		if (!timed && !waiting && begun && !pageForNewDay(seen, shown()) && !mayAsk(tries, Date.now() - lastAsked)) return;
+		checking = true;
+		clearTimeout(dayTimer);
+		let wait;
+		const before = seen;
+		const hadPage = new URL(location.href).searchParams.has('page');
+		try {
+			let failed = false;
+			if (!waiting && begun) {
+				lastAsked = Date.now();
+				const now = shown();
+				let read = await readAhead(pageToRead(now, new Date()));
+				// The server's new today is on another page than this device's (the clocks differ): read that one instead.
+				if (read && read.data.today !== now.today && now.start === now.todayPage && read.data.start !== read.data.todayPage)
+					read = await readAhead(read.data.todayPage);
+				if (!read) failed = true;
+				else if (read.data.today !== now.today && !busy()) await showRead(read.address, hadPage);
+			}
+			const to = pageForNewDay(seen, shown());
+			const held = waiting || busy();
+			if (to && !held) {
+				const read = await readAhead(to);
+				if (read) {
+					await showRead(read.address, hadPage);
+					seen = shown();
+				} else failed = true;
+			} else if (!to) seen = shown();
+			const behind = dayBegun(new Date(), data.today);
+			const trouble = (behind || failed) && !held;
+			if (trouble && !tries) troubleSince = Date.now();
+			tries = trouble ? tries + 1 : 0;
+			// A phone keeps where it was scrolled to, which could leave the new today off screen.
+			if (turnedToNewDay(before, shown())) scrollTo(0, 0);
+			const turns = to || (behind && seen.start === seen.todayPage);
+			dayNote = held && turns && lineWritten() ? `It's now ${dayName(to ? data.today : toISODate(new Date()))}. The page turns once this line is saved or cleared.` : '';
+			wait = held && (to || behind) ? WHILE_WRITING : trouble ? retryAfter(tries, Date.now() - troubleSince, new Date()) : untilMidnight(new Date());
+		} catch {
+			if (!tries) troubleSince = Date.now();
+			wait = retryAfter(++tries, Date.now() - troubleSince, new Date());
+		} finally {
+			checking = false;
+		}
+		if (!gone) dayTimer = setTimeout(() => newDay(true), wait);
+	}
+	// Any new data (a save, a turned page, a refresh) may bring a new today, or show where the viewer is now.
+	$effect(() => {
+		void [data.today, data.start];
+		untrack(() => void newDay());
+	});
+	onMount(() => {
+		const awake = () => document.visibilityState === 'visible' && newDay();
+		document.addEventListener('visibilitychange', awake);
+		addEventListener('focus', awake);
+		addEventListener('pageshow', awake);
+		return () => {
+			gone = true;
+			clearTimeout(dayTimer);
+			document.removeEventListener('visibilitychange', awake);
+			removeEventListener('focus', awake);
+			removeEventListener('pageshow', awake);
+		};
+	});
+
 	function onJump(e: Event) {
 		const value = (e.currentTarget as HTMLInputElement).value;
 		if (value) goto(pageUrl(value));
@@ -460,6 +573,7 @@
 			</svg>
 		</a>
 		<!-- In the header, which stays at the top of the screen, so a message is seen however far down the page is scrolled. -->
+		{#if dayNote}<p class="notice day-note" role="status">{dayNote}</p>{/if}
 		{#if gestureMessage}
 			<div class="trouble">
 				<span class="trouble-buttons">
@@ -769,6 +883,7 @@
 	button.btn { cursor: pointer; }
 	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem 0 0; }
 	.notice a { color: var(--ink); font-weight: 700; }
+	.day-note { flex: 1 0 100%; order: 3; margin: 0; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 	/* A whole row of its own, under the header's buttons or above the sheet's. */
 	.trouble { flex: 1 0 100%; order: 2; display: flex; gap: 0.5rem; align-items: center; }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { saysReload, shortTitle } from './format';
+import { dayName, saysReload, shortTitle } from './format';
 
 describe('titles quoted in messages', () => {
 	it('leaves a short title as it is', () => {
@@ -42,5 +42,12 @@ describe('messages that ask for a reload (they get a Reload button: the installe
 	it('leaves out messages that do not', () => {
 		expect(saysReload('There is no calendar for events yet. Add one in Settings.')).toBe(false);
 		expect(saysReload('Check the connection, then tap the line and try again.')).toBe(false);
+	});
+});
+
+describe('dayName', () => {
+	it('names the day of the week in full', () => {
+		expect(dayName('2026-10-22')).toBe('Thursday');
+		expect(dayName('2026-10-25')).toBe('Sunday');
 	});
 });

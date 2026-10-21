@@ -17,9 +17,10 @@ export default defineConfig({
 			reuseExistingServer: false
 		},
 		{
-			command: 'npm run build && npm run preview -- --port 4173',
+			// Not NODE_ENV=production while serving (only while building), or the planner would refuse PLANNER_TEST_CLOCK.
+			command: 'npm run build && NODE_ENV=test npm run preview -- --port 4173',
 			port: 4173,
-			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev' }
+			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev', PLANNER_TEST_CLOCK: '1' }
 		}
 	],
 	projects: [
