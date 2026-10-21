@@ -24,7 +24,7 @@ test('the gear opens the settings, which list the calendars, the Tasks list and 
 	await expect(tasks).toContainText("can't be renamed or deleted");
 
 	const categories = page.getByRole('region', { name: 'Task categories' });
-	expect(await categories.getByRole('listitem').allInnerTexts()).toEqual(['This month', 'Waiting', 'Someday']);
+	expect(await categories.getByRole('listitem').locator('.name').allInnerTexts()).toEqual(['This month', 'Waiting', 'Someday']);
 });
 
 test('the settings page leads back to the planner, which matters in the installed app with no browser buttons', async ({ page }) => {

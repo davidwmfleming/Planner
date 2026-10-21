@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
-import { icsToItems, itemToICS, occurrenceOn, withOccurrence } from './ical';
+import { carriesCategory, icsToItems, itemToICS, occurrenceOn, withCategoryChanged, withOccurrence } from './ical';
 
 const roundTrip = (item: Item) => icsToItems(itemToICS(item))[0];
 
@@ -130,5 +130,47 @@ describe('reading other apps\' data', () => {
 		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r2', 'DTSTAMP:20261019T000000Z',
 			'SUMMARY:Sheets', 'DUE;VALUE=DATE:20261021', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
 		expect(icsToItems(ics)[0]).toMatchObject({ date: '2026-10-21', state: 'open' });
+	});
+});
+
+describe('changing a category on a stored task (rename or delete of a category)', () => {
+	const doc = (...lines: string[]) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//phone//EN', ...lines, 'END:VCALENDAR', ''].join('\r\n');
+	const series = doc('BEGIN:VTIMEZONE', 'TZID:America/Toronto', 'BEGIN:STANDARD', 'DTSTART:20071104T020000', 'TZOFFSETFROM:-0400', 'TZOFFSETTO:-0500', 'END:STANDARD', 'END:VTIMEZONE',
+		'BEGIN:VTODO', 'UID:s1', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins', 'DTSTART;TZID=America/Toronto:20261019T080000', 'RRULE:FREQ=DAILY;COUNT=5',
+		'CATEGORIES:Home,waiting', 'X-PHONE-THING:kept', 'END:VTODO',
+		'BEGIN:VTODO', 'UID:s1', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins (late)', 'RECURRENCE-ID;TZID=America/Toronto:20261020T080000', 'DTSTART;TZID=America/Toronto:20261020T090000',
+		'CATEGORIES:WAITING', 'CATEGORIES:Errands', 'END:VTODO');
+
+	it('tells which tasks carry a category, old keys and any case included', () => {
+		expect(carriesCategory(series, 'Waiting')).toBe(true);
+		expect(carriesCategory(series, 'errands')).toBe(true);
+		expect(carriesCategory(series, 'Someday')).toBe(false);
+		expect(carriesCategory('not a calendar', 'Waiting')).toBe(false);
+		const event = doc('BEGIN:VEVENT', 'UID:e1', 'DTSTAMP:20261019T000000Z', 'DTSTART:20261019T100000', 'SUMMARY:Board', 'CATEGORIES:Waiting', 'END:VEVENT');
+		expect(carriesCategory(event, 'Waiting')).toBe(false);
+	});
+
+	it('renames it on the whole series, one-off changes included, and leaves everything else as it was', () => {
+		const renamed = withCategoryChanged(series, 'Waiting', 'Waiting for')!;
+		expect(renamed.replace(/\r\n /g, '').match(/^CATEGORIES:.*$/gm)).toEqual(['CATEGORIES:Home,Waiting for', 'CATEGORIES:Waiting for', 'CATEGORIES:Errands']);
+		for (const kept of ['X-PHONE-THING:kept', 'TZID:America/Toronto', 'RRULE:FREQ=DAILY;COUNT=5', 'SUMMARY:Bins (late)', 'DTSTAMP:20261019T000000Z']) expect(renamed).toContain(kept);
+		expect(occurrenceOn(renamed, '2026-10-20')).toMatchObject({ title: 'Bins (late)', categories: ['Waiting for', 'Errands'] });
+	});
+
+	it('moves it to another category without repeating that one, or takes it off', () => {
+		const moved = withCategoryChanged(series, 'Waiting', 'errands')!;
+		expect(moved.match(/^CATEGORIES:.*$/gm)).toEqual(['CATEGORIES:Home,errands', 'CATEGORIES:Errands']);
+		expect(withCategoryChanged(doc('BEGIN:VTODO', 'UID:t', 'DTSTAMP:20261019T000000Z', 'SUMMARY:x', 'CATEGORIES:Waiting,waiting,Home', 'END:VTODO'), 'Waiting', 'Later')!.match(/^CATEGORIES:.*$/gm)).toEqual(['CATEGORIES:Later,Home']);
+		const off = withCategoryChanged(series, 'waiting', undefined)!;
+		expect(off.match(/^CATEGORIES:.*$/gm)).toEqual(['CATEGORIES:Home', 'CATEGORIES:Errands']);
+	});
+
+	it('changes only the spelling when a category changes its case', () => {
+		expect(withCategoryChanged(series, 'Waiting', 'WAITING')!.match(/^CATEGORIES:.*$/gm)).toEqual(['CATEGORIES:Home,WAITING', 'CATEGORIES:WAITING', 'CATEGORIES:Errands']);
+	});
+
+	it('gives nothing back when no task carries the category, so nothing is saved', () => {
+		expect(withCategoryChanged(series, 'Someday', 'Later')).toBeUndefined();
+		expect(withCategoryChanged(doc('BEGIN:VTODO', 'UID:t', 'DTSTAMP:20261019T000000Z', 'SUMMARY:x', 'CATEGORIES:Later', 'END:VTODO'), 'Someday', 'Later')).toBeUndefined();
 	});
 });

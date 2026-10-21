@@ -29,3 +29,27 @@ export async function hasEntry(request: APIRequestContext, path: string, filenam
 	if (read.status() !== 200 && read.status() !== 404) throw new Error(`GET ${path}${filename}: ${read.status()}`);
 	return read.status() === 200;
 }
+
+const SETTINGS_PROP = '<p:planner-settings xmlns:p="urn:planner:ns"/>';
+
+/** The planner's settings as stored on the Tasks list, as any calendar app could read them. */
+export async function readSettings(request: APIRequestContext): Promise<Record<string, unknown>> {
+	const read = await request.fetch('/dav/david/tasks/', {
+		method: 'PROPFIND',
+		headers: { ...auth, Depth: '0', 'Content-Type': 'application/xml' },
+		data: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>${SETTINGS_PROP}</d:prop></d:propfind>`
+	});
+	const text = /<(?:\w+:)?planner-settings[^>]*>([^<]*)</.exec(await read.text())?.[1] ?? '{}';
+	return JSON.parse(text.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+}
+
+/** Stores the planner's settings on the Tasks list, as any calendar app could. */
+export async function writeSettings(request: APIRequestContext, settings: Record<string, unknown>) {
+	const value = JSON.stringify(settings).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const saved = await request.fetch('/dav/david/tasks/', {
+		method: 'PROPPATCH',
+		headers: { ...auth, 'Content-Type': 'application/xml; charset=utf-8' },
+		data: `<?xml version="1.0" encoding="utf-8"?><d:propertyupdate xmlns:d="DAV:"><d:set><d:prop><p:planner-settings xmlns:p="urn:planner:ns">${value}</p:planner-settings></d:prop></d:set></d:propertyupdate>`
+	});
+	if (!saved.ok()) throw new Error(`PROPPATCH settings: ${saved.status()}`);
+}

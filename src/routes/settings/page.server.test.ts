@@ -59,6 +59,15 @@ function fakeStore(calendars: Calendar[], held: Record<string, StoredDocument[]>
 			if (this.readError) throw this.readError;
 			return { version: this.versions[url], documents: [...(this.held[url] ?? [])] };
 		},
+		/** Failures for the next document saves, in turn (undefined: that save works). */
+		saveErrors: [] as (Error | undefined)[],
+		saved: [] as string[],
+		async saveDocument(d: StoredDocument, ics: string) {
+			const error = this.saveErrors.shift();
+			if (error) throw error;
+			this.held[d.calendarUrl] = this.held[d.calendarUrl].map((x) => (x.url === d.url ? { ...x, ics } : x));
+			this.saved.push(d.url);
+		},
 		async moveDocument(d: StoredDocument, to: string): Promise<MoveOutcome> {
 			const outcome = this.outcomes.shift() ?? 'moved';
 			this.moves.push(`${d.url} → ${to}: ${outcome}`);
@@ -346,5 +355,84 @@ describe('moving the items, then deleting the calendar', () => {
 			refusal(409, { message: 'Moved 1 item to Me, but 1 more arrived in Family meanwhile, so it is still there. Reload the page and delete it again to move those too.' })
 		);
 		expect(fake.deleted).toEqual([]);
+	});
+});
+
+describe('task categories', () => {
+	const LISTS = ['This month', 'Waiting', 'Someday'];
+	const tagged = (uid: string, ...categories: string[]) =>
+		doc(tasks, uid, task(uid).replace('END:VTODO', `${categories.map((c) => `CATEGORIES:${c}`).join('\r\n')}\r\nEND:VTODO`));
+	const categoriesIn = (uid: string) => fake.held[tasks.url].find((d) => d.url.endsWith(`/${uid}.ics`))!.ics.match(/^CATEGORIES:.*$/gm);
+	const settingsNow = () => ({ categories: fake.settings.categories, renaming: fake.settings.renaming });
+
+	it('adds one at the end, cleaned as calendar names are', async () => {
+		fake = fakeStore([me, tasks], {}, { categories: LISTS });
+		expect(await act('addCategory', { name: '  Kids\t& school ' })).toEqual({ action: 'addCategory', added: 'Kids & school' });
+		expect(fake.settings.categories).toEqual([...LISTS, 'Kids & school']);
+	});
+
+	it('refuses a name already on the list (whatever its case), one with a comma, and a 51st', async () => {
+		fake = fakeStore([me, tasks], {}, { categories: LISTS });
+		expect(await act('addCategory', { name: 'someday' })).toEqual(refusal(400, { message: 'There is already a category called "Someday"', name: 'someday' }));
+		expect(await act('addCategory', { name: 'Kids, school' })).toEqual(refusal(400, { message: expect.stringContaining("can't have a comma") }));
+		fake.settings.categories = Array.from({ length: 50 }, (_, i) => `List ${i}`);
+		expect(await act('addCategory', { name: 'One more' })).toEqual(refusal(400, { message: expect.stringContaining('50 categories already') }));
+		expect(fake.written).toEqual([]);
+	});
+
+	it('renames one on the list, in its place, and on every task that has it', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'waiting', 'Home'), tagged('b', 'Someday'), tagged('c', 'WAITING')] }, { categories: LISTS });
+		expect(await act('renameCategory', { category: 'Waiting', name: ' Waiting for ' })).toEqual({ action: 'renameCategory', renamed: 'Waiting for', from: 'Waiting', count: 2 });
+		expect(settingsNow()).toEqual({ categories: ['This month', 'Waiting for', 'Someday'], renaming: undefined });
+		expect([categoriesIn('a'), categoriesIn('b'), categoriesIn('c')]).toEqual([['CATEGORIES:Waiting for', 'CATEGORIES:Home'], ['CATEGORIES:Someday'], ['CATEGORIES:Waiting for']]);
+		// First the new name went on the list, beside the old one, and only then did the old one come off.
+		expect(fake.written[0]).toMatchObject({ categories: ['This month', 'Waiting', 'Waiting for', 'Someday'], renaming: { from: 'Waiting', to: 'Waiting for' } });
+	});
+
+	it('keeps both names when the calendar server stops answering, and "Finish renaming" finishes it', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting'), tagged('b', 'Waiting'), tagged('c', 'Waiting')] }, { categories: LISTS });
+		fake.saveErrors = [undefined, new NoAnswerError('no answer')];
+		expect(await act('renameCategory', { category: 'Waiting', name: 'Later' })).toEqual(
+			refusal(502, { category: 'Waiting', message: '1 task now has "Later". The calendar server stopped answering, so the rest may still say "Waiting", and both names stay on the list for now. Wait a minute, then tap "Finish renaming" to finish.' })
+		);
+		expect(settingsNow()).toEqual({ categories: ['This month', 'Waiting', 'Later', 'Someday'], renaming: { from: 'Waiting', to: 'Later' } });
+		// Meanwhile only that rename may run, to that name.
+		expect(await act('renameCategory', { category: 'Someday', name: 'One day' })).toEqual(refusal(409, { message: expect.stringContaining('Renaming "Waiting" to "Later" didn\'t finish') }));
+		expect(await act('renameCategory', { category: 'Waiting', name: 'Soon' })).toEqual(refusal(409, { message: expect.stringContaining('Renaming "Waiting" to "Later" didn\'t finish') }));
+		expect(await act('renameCategory', { category: 'Waiting', name: 'later' })).toEqual({ action: 'renameCategory', renamed: 'Later', from: 'Waiting', count: 2 });
+		expect(settingsNow()).toEqual({ categories: ['This month', 'Later', 'Someday'], renaming: undefined });
+		expect(['a', 'b', 'c'].map(categoriesIn)).toEqual([['CATEGORIES:Later'], ['CATEGORIES:Later'], ['CATEGORIES:Later']]);
+	});
+
+	it('keeps both names when a task changed on another device meanwhile', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting'), tagged('b', 'Waiting')] }, { categories: LISTS });
+		fake.saveErrors = [new RefusedError('changed', 412)];
+		expect(await act('renameCategory', { category: 'Waiting', name: 'Later' })).toEqual(
+			refusal(502, { message: expect.stringContaining('1 task changed on another device meanwhile, so it still says "Waiting"') })
+		);
+		expect(fake.settings.categories).toEqual(['This month', 'Waiting', 'Later', 'Someday']);
+	});
+
+	it('changes only the spelling of the list and the tasks when only the case changes', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Someday')] }, { categories: LISTS });
+		expect(await act('renameCategory', { category: 'Someday', name: 'SOMEDAY' })).toMatchObject({ renamed: 'SOMEDAY', count: 1 });
+		expect(settingsNow()).toEqual({ categories: ['This month', 'Waiting', 'SOMEDAY'], renaming: undefined });
+	});
+
+	it('refuses a category that is no longer on the list, and a name another one has', async () => {
+		fake = fakeStore([me, tasks], {}, { categories: LISTS });
+		expect(await act('renameCategory', { category: 'Errands', name: 'Jobs' })).toEqual(refusal(404, { message: "That category isn't on the list any more; reload the page" }));
+		expect(await act('renameCategory', { category: 'Waiting', name: 'someday' })).toEqual(refusal(400, { message: 'There is already a category called "Someday"' }));
+		expect(fake.written).toEqual([]);
+	});
+
+	it('keeps category names out of the log', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting')] }, { categories: ['Waiting', 'Private thing'] });
+		fake.saveErrors = [new NoAnswerError('no answer')];
+		const lines: unknown[] = [];
+		console.error = (...args: unknown[]) => lines.push(args);
+		await act('renameCategory', { category: 'Waiting', name: 'Secret plan' });
+		expect(lines.length).toBeGreaterThan(0);
+		expect(JSON.stringify(lines)).not.toMatch(/Secret|Private|Waiting/);
 	});
 });
