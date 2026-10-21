@@ -286,8 +286,15 @@ export class CalendarStore {
 	}
 
 	async listItems(): Promise<StoredItem[]> {
+		return (await this.readItems()).items;
+	}
+
+	/** Every item, and the address of each stored document that couldn't be read (written badly by another app, say).
+	 * One bad document is left out rather than failing them all, so the planner still shows everything else. */
+	async readItems(): Promise<{ items: StoredItem[]; unreadable: string[] }> {
 		await this.refreshCalendars();
 		const all: StoredItem[] = [];
+		const unreadable: string[] = [];
 		for (const calendar of this.davCalendars) {
 			const documents = await this.query(calendar).catch(async (e) => {
 				// Deleted elsewhere since the list was read: skip it. Any other failure is real.
@@ -296,10 +303,17 @@ export class CalendarStore {
 				return [];
 			});
 			for (const doc of documents) {
-				for (const item of icsToItems(doc.ics)) all.push({ ...item, ...doc });
+				let items;
+				try {
+					items = icsToItems(doc.ics);
+				} catch {
+					unreadable.push(doc.url);
+					continue;
+				}
+				for (const item of items) all.push({ ...item, ...doc });
 			}
 		}
-		return all;
+		return { items: all, unreadable };
 	}
 
 	/** Every document in one calendar, and the calendar's version (its ETag) read just before them.

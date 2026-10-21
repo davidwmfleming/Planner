@@ -49,16 +49,35 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	const start = pageStart(asked && ISO.test(asked) ? asked : today);
 	const dates = pageDays(start);
 
-	let items, store, settings;
+	let read, store, settings;
 	try {
 		await rollover(toISODate(now));
 		store = await getStore();
-		items = await store.listItems();
+		read = await store.readItems();
 		settings = await getSettings(store);
 	} catch (e) {
 		// The details go to the server's log; the page gets a plain message.
 		console.error('Planner: could not read the calendars or settings', e);
 		error(503, NOT_ANSWERING);
+	}
+
+	const { items } = read;
+	// Documents that couldn't be read (written badly by another app, say) are left out, so the rest still shows.
+	const unreadable = new Set(read.unreadable);
+	// A repeating item shows on each day of the page it falls on; one whose repeats can't be worked out is left out too.
+	const shown = items.flatMap((i) => {
+		let showings: Item[];
+		try {
+			showings = i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i];
+		} catch {
+			unreadable.add(i.url);
+			return [];
+		}
+		return showings.map((one) => ({ ...one, calendar: pathOf(i.calendarUrl) }));
+	});
+	if (unreadable.size) {
+		// Where each one is, so it can be found and fixed; never its title or details (house rule 4).
+		console.warn(`Planner: left out ${unreadable.size} item(s) that couldn't be read:`, [...unreadable].map(pathOf).join(', '));
 	}
 
 	const calendars = store.calendars();
@@ -86,17 +105,13 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
 			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
 			.map((i) => plain({ ...i, calendar: pathOf(i.calendarUrl) })),
-		// A repeating item shows on each day of the page it falls on.
-		days: buildDays(
-			dates,
-			items.flatMap((i) =>
-				(i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i]).map((shown) => ({ ...shown, calendar: pathOf(i.calendarUrl) }))
-			)
-		).map((d) => ({
+		days: buildDays(dates, shown).map((d) => ({
 			...d,
 			events: d.events.map(plain),
 			tasks: d.tasks.map(plain)
-		}))
+		})),
+		// How many items are left out because they couldn't be read; the page says so.
+		unreadable: unreadable.size
 	};
 };
 
