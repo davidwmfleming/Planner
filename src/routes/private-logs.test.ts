@@ -3,7 +3,7 @@
 // underneath, and everything written to the log is checked for the personal words.
 import { format } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CalendarStore, type StoredItem } from '$lib/server/calendar-store';
+import { CalendarStore, logged, type StoredItem } from '$lib/server/calendar-store';
 import { itemToICS } from '$lib/server/ical';
 import type { Item } from '$lib/item';
 import type { Settings } from '$lib/settings';
@@ -12,8 +12,8 @@ vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
 
 const HOME = 'http://127.0.0.1:5232/david/';
-const FAMILY = `${HOME}family/`;
-const ME = `${HOME}me/`;
+const FAMILY = `${HOME}secret-family-stuff/`;
+const ME = `${HOME}private-me/`;
 const TASKS = `${HOME}tasks/`;
 // The words that must never reach the log.
 const TITLE = 'Biopsy results with Dr Okafor';
@@ -22,7 +22,8 @@ const NOTES = 'Bring Sam';
 const CALENDAR = 'Secret Family Stuff';
 const OTHER_CALENDAR = 'Private Me';
 const NEW_CALENDAR = 'Divorce lawyer';
-const PERSONAL = [TITLE, LOCATION, NOTES, CALENDAR, OTHER_CALENDAR, NEW_CALENDAR];
+// A calendar's address is made from its name, so the address forms must stay out too.
+const PERSONAL = [TITLE, LOCATION, NOTES, CALENDAR, OTHER_CALENDAR, NEW_CALENDAR, 'secret-family-stuff', 'private-me', 'divorce-lawyer'];
 
 const item: Item = { uid: 'uid-1', kind: 'event', title: TITLE, state: 'open', date: '2026-10-21', location: LOCATION, notes: NOTES };
 const stored = (calendarUrl: string): StoredItem => ({ ...item, calendarUrl, url: `${calendarUrl}uid-1.ics`, etag: '"e1"', ics: itemToICS(item) });
@@ -80,7 +81,7 @@ const post = (actions: Record<string, unknown>, action: string, fields: Record<s
 let log: string[];
 beforeEach(() => {
 	log = [];
-	server = { create: 201, update: 204, remove: 204, fetch: 500, propfind: 207, query: 'items', settings: { categories: [], workCalendar: null, defaultEventCalendar: '/david/family/' } };
+	server = { create: 201, update: 204, remove: 204, fetch: 500, propfind: 207, query: 'items', settings: { categories: [], workCalendar: null, defaultEventCalendar: '/david/secret-family-stuff/' } };
 	store = makeStore();
 	for (const level of ['error', 'warn', 'log', 'info'] as const) {
 		vi.spyOn(console, level).mockImplementation((...args: unknown[]) => void log.push(format(...args)));
@@ -106,30 +107,30 @@ describe('the planner page logs failures without titles or calendar names', () =
 		it(`adding a line (${failure === 'silence' ? 'no answer' : 'refused'})`, async () => {
 			server.create = failure;
 			await post(planner.actions, 'add', { kind: 'event', date: '2026-10-21', text: TITLE });
-			expect(expectPrivateLog()).toContain('/david/family/');
+			expect(expectPrivateLog()).toContain(`${logged(FAMILY)}`);
 		});
 
 		it(`ticking an item (${failure === 'silence' ? 'no answer' : 'refused'})`, async () => {
 			server.update = failure;
-			await post(planner.actions, 'mark', { uid: 'uid-1', keptIn: '/david/family/', state: 'done' });
-			expect(expectPrivateLog()).toContain('/david/family/uid-1.ics');
+			await post(planner.actions, 'mark', { uid: 'uid-1', keptIn: '/david/secret-family-stuff/', state: 'done' });
+			expect(expectPrivateLog()).toContain(`${logged(FAMILY)}uid-1.ics`);
 		});
 
 		it(`deleting an item (${failure === 'silence' ? 'no answer' : 'refused'})`, async () => {
 			server.remove = failure;
-			await post(planner.actions, 'delete', { uid: 'uid-1', keptIn: '/david/family/' });
-			expect(expectPrivateLog()).toContain('/david/family/uid-1.ics');
+			await post(planner.actions, 'delete', { uid: 'uid-1', keptIn: '/david/secret-family-stuff/' });
+			expect(expectPrivateLog()).toContain(`${logged(FAMILY)}uid-1.ics`);
 		});
 	}
 
-	const moveToMe = { uid: 'uid-1', keptIn: '/david/family/', title: TITLE, kind: 'event', date: '2026-10-21', time: '', endTime: '', location: LOCATION, label: '', notes: NOTES, repeat: '', calendar: '/david/me/' };
+	const moveToMe = { uid: 'uid-1', keptIn: '/david/secret-family-stuff/', title: TITLE, kind: 'event', date: '2026-10-21', time: '', endTime: '', location: LOCATION, label: '', notes: NOTES, repeat: '', calendar: '/david/private-me/' };
 
 	it('moving an item whose old copy, and then its new one, the server will not remove', async () => {
 		server.remove = 403;
 		await post(planner.actions, 'save', moveToMe);
 		const written = expectPrivateLog();
-		expect(written).toContain('could not remove the old copy');
-		expect(written).toContain('could not take back the new copy');
+		expect(written).toContain(`could not remove the old copy`);
+		expect(written).toContain(`could not take back the new copy`);
 	});
 
 	it('moving an item when the server stops answering before saying where it is', async () => {
@@ -142,7 +143,7 @@ describe('the planner page logs failures without titles or calendar names', () =
 		};
 		server.remove = 'silence';
 		await post(planner.actions, 'save', moveToMe);
-		expect(expectPrivateLog()).toContain('could not check where the item with UID uid-1 is kept now');
+		expect(expectPrivateLog()).toContain(`could not check where the item with UID uid-1 is kept now`);
 	});
 });
 
@@ -153,34 +154,34 @@ describe('the settings page logs failures without calendar or item names', () =>
 	});
 
 	it('renaming a calendar the server will not rename', async () => {
-		await post(settingsPage.actions, 'rename', { path: '/david/family/', name: NEW_CALENDAR });
-		expect(expectPrivateLog()).toContain('/david/family/');
+		await post(settingsPage.actions, 'rename', { path: '/david/secret-family-stuff/', name: NEW_CALENDAR });
+		expect(expectPrivateLog()).toContain(`${logged(FAMILY)}`);
 	});
 
 	it('deleting a calendar whose contents cannot be read', async () => {
 		server.propfind = 500;
-		await post(settingsPage.actions, 'check', { path: '/david/family/' });
-		expect(expectPrivateLog()).toContain('/david/family/');
+		await post(settingsPage.actions, 'check', { path: '/david/secret-family-stuff/' });
+		expect(expectPrivateLog()).toContain(`${logged(FAMILY)}`);
 	});
 
 	it('deleting a calendar after its items would not all move', async () => {
 		// The copy to the other calendar is refused, so the item stays where it was.
-		await post(settingsPage.actions, 'delete', { path: '/david/family/', mode: 'move', to: '/david/me/', version: '"v1"' });
+		await post(settingsPage.actions, 'delete', { path: '/david/secret-family-stuff/', mode: 'move', to: '/david/private-me/', version: '"v1"' });
 		const written = expectPrivateLog();
-		expect(written).toContain('/david/family/ to /david/me/ stopped');
+		expect(written).toContain(`${logged(FAMILY)} to ${logged(ME)} stopped`);
 	});
 
 	it('deleting a calendar the server will not delete', async () => {
 		server.query = 204;
-		server.settings = { ...server.settings, defaultEventCalendar: '/david/me/' };
-		await post(settingsPage.actions, 'delete', { path: '/david/family/', mode: 'delete', version: '"v1"' });
-		expect(expectPrivateLog()).toContain('could not delete /david/family/');
+		server.settings = { ...server.settings, defaultEventCalendar: '/david/private-me/' };
+		await post(settingsPage.actions, 'delete', { path: '/david/secret-family-stuff/', mode: 'delete', version: '"v1"' });
+		expect(expectPrivateLog()).toContain(`could not delete ${logged(FAMILY)}`);
 	});
 
 	it('deleting the Work calendar when the choices cannot be changed first', async () => {
-		server.settings = { ...server.settings, workCalendar: '/david/family/' };
-		await post(settingsPage.actions, 'delete', { path: '/david/family/', mode: 'delete', version: '"v1"' });
-		expect(expectPrivateLog()).toContain('before deleting /david/family/');
+		server.settings = { ...server.settings, workCalendar: '/david/secret-family-stuff/' };
+		await post(settingsPage.actions, 'delete', { path: '/david/secret-family-stuff/', mode: 'delete', version: '"v1"' });
+		expect(expectPrivateLog()).toContain(`before deleting ${logged(FAMILY)}`);
 	});
 });
 
@@ -192,4 +193,10 @@ describe('the export logs failures without calendar names', () => {
 			expectPrivateLog();
 		});
 	}
+});
+
+it('a logged address keeps the item file but hides the calendar name', () => {
+	expect(logged(`${FAMILY}uid-1.ics`)).toMatch(/^\/david\/[0-9a-f]{8}\/uid-1\.ics$/);
+	expect(logged(FAMILY)).toBe(logged('/david/secret-family-stuff/'));
+	expect(logged(FAMILY)).not.toBe(logged(ME));
 });

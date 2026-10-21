@@ -9,7 +9,7 @@ import { rollover } from '$lib/server/rollover';
 import { pageToday, TEST_TODAY_COOKIE, testClockOn } from '$lib/server/clock';
 import { env } from '$env/dynamic/private';
 import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
-import { RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
+import { logged, RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
@@ -28,7 +28,7 @@ const NOT_ANSWERING = "The calendar server isn't answering. Check that it is run
 const pathOf = (url: string) => new URL(url).pathname;
 
 /** An item as the server's log names it: by where it is kept, never by its title (house rule 4: logs are kept). */
-const forLog = (item: StoredItem) => `item ${pathOf(item.url)}`;
+const forLog = (item: StoredItem) => `item ${logged(item.url)}`;
 
 /** What a change does, said two ways: with the item's title for the page, by its address for the log. */
 const doing = (verb: string, item: StoredItem) => ({ say: `${verb} "${shortTitle(item.title)}"`, log: `${verb} ${forLog(item)}` });
@@ -139,7 +139,7 @@ export const actions: Actions = {
 				...(date ? { date, time } : {})
 			});
 		} catch (e) {
-			console.error(`Planner: could not save a new ${kind} in ${pathOf(calendar)}`, e);
+			console.error(`Planner: could not save a new ${kind} in ${logged(calendar)}`, e);
 			// No answer is not a no: the line may be saved, and writing it again could make two.
 			if (unanswered(e)) return fail(502, { message: `The calendar server didn't answer in time when asked to save "${shortTitle(title)}", so it may or may not be saved. Reload the page to see.` });
 			return fail(502, { message: `The calendar server didn't save "${shortTitle(title)}". Try again in a moment.` });
@@ -341,7 +341,7 @@ async function removeOrUndo(store: Awaited<ReturnType<typeof getStore>>, old: St
 	try {
 		await store.remove(old);
 	} catch (e) {
-		console.error(`Planner: could not remove the old copy, ${forLog(old)}, after copying it to ${pathOf(copy.calendarUrl)}`, e);
+		console.error(`Planner: could not remove the old copy, ${forLog(old)}, after copying it to ${logged(copy.calendarUrl)}`, e);
 		if (refused(e) && !GONE.includes(e.status)) return takeBack(store, old, copy, edited);
 		answered = refused(e);
 	}

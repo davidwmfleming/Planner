@@ -139,13 +139,13 @@ describe('CalendarStore without a server', () => {
 		};
 	}
 
-	it('gives up on a calendar file the server never finishes sending, naming the calendar by its address', async () => {
+	it('gives up on a calendar file the server never finishes sending, naming the calendar by a fingerprint of its address', async () => {
 		const { store, url, close } = await calendarServedBy((_, res) => res.writeHead(200, { 'Content-Type': 'text/calendar' }).write('BEGIN:VCALENDAR\r\n'), 100);
 		try {
-			// The address, not the name: the message goes to the server's log, which keeps no personal names.
+			// A fingerprint, not the name or the address made from it: the message goes to the server's log.
 			const late = await store.calendarFile(url).catch((e: Error) => e);
-			expect(String(late)).toMatch(/in time.*\/david\/slow\//);
-			expect(String(late)).not.toContain('Slow');
+			expect(String(late)).toMatch(/in time.*\/david\/[0-9a-f]{8}\//);
+			expect(String(late)).not.toMatch(/slow/i);
 		} finally {
 			await close();
 		}
