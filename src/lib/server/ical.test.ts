@@ -108,6 +108,24 @@ describe('reading other apps\' data', () => {
 		expect(occurrenceOn(recategorised, '2026-10-26')).toMatchObject({ state: 'done', categories: ['Waiting', 'Home'] });
 	});
 
+	it("gives the ticked and moved days of an older repeating task (with keys, not names) the series' new category", () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r6', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins',
+			'DTSTART;VALUE=DATE:20261019', 'RRULE:FREQ=DAILY;COUNT=5', 'CATEGORIES:month', 'CATEGORIES:Home', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		const ticked = withOccurrence(ics, '2026-10-20', () => ({ state: 'done' }));
+		const moved = withOccurrence(ticked, '2026-10-21', () => ({ date: '2026-10-22' }));
+		const [series] = icsToItems(moved);
+		const changed = itemToICS({ ...series, categories: ['Someday', 'Home'] }, moved);
+		expect(occurrenceOn(changed, '2026-10-20')).toMatchObject({ state: 'done', categories: ['Someday', 'Home'] });
+		expect(occurrenceOn(changed, '2026-10-21')).toMatchObject({ date: '2026-10-22', categories: ['Someday', 'Home'] });
+	});
+
+	it('keeps a category a day was given for itself when the series changes', () => {
+		const series: Item = { uid: 'r7', kind: 'task', title: 'Bins', date: '2026-10-19', categories: ['This month'], state: 'open', recurrence: 'FREQ=DAILY;COUNT=5' };
+		const own = withOccurrence(itemToICS(series), '2026-10-20', () => ({ categories: ['Waiting'] }));
+		const changed = itemToICS({ ...series, categories: ['Someday'] }, own);
+		expect(occurrenceOn(changed, '2026-10-20')?.categories).toEqual(['Waiting']);
+	});
+
 	it('uses DUE as the day when a task has no start, as Apple Reminders writes it', () => {
 		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r2', 'DTSTAMP:20261019T000000Z',
 			'SUMMARY:Sheets', 'DUE;VALUE=DATE:20261021', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');

@@ -16,9 +16,13 @@ const OLD_KEYS: Record<string, string> = { month: 'This month', waiting: 'Waitin
 const categoriesOf = (comp: ICAL.Component) =>
 	comp.getAllProperties('categories').flatMap((p) => p.getValues().map(String)).filter((v) => v.trim() !== '');
 
-/** A property's value as text, to tell whether a one-off change has its own; CATEGORIES can hold several. */
+/** A component's categories as the planner reads them: old keys as their names. */
+const namesOf = (comp: ICAL.Component) => categoriesOf(comp).map((c) => OLD_KEYS[c.toLowerCase()] ?? c);
+
+/** A property's value as text, to tell whether a one-off change has its own. CATEGORIES can hold several, and are
+ * compared as names without regard to case, so a day written with "This month" still matches a series with "month". */
 const textOf = (comp: ICAL.Component, name: string) =>
-	name === 'categories' ? categoriesOf(comp).join(',') : String(comp.getFirstPropertyValue(name) ?? '');
+	name === 'categories' ? namesOf(comp).join(',').toLowerCase() : String(comp.getFirstPropertyValue(name) ?? '');
 
 const dateValue = (date: string) => ICAL.Time.fromDateString(date);
 const dateTimeValue = (date: string, time: string) => ICAL.Time.fromDateTimeString(`${date}T${time}:00`);
@@ -266,7 +270,7 @@ function componentToItem(comp: ICAL.Component): Item {
 	if (notes) item.notes = notes;
 	const carried = text('x-planner-carried-from');
 	if (carried) item.carriedFrom = carried;
-	const categories = categoriesOf(comp).map((c) => OLD_KEYS[c.toLowerCase()] ?? c);
+	const categories = namesOf(comp);
 	if (categories.length) item.categories = categories;
 	const rrule = comp.getFirstPropertyValue('rrule') as ICAL.Recur | null;
 	if (rrule) item.recurrence = rrule.toString();
