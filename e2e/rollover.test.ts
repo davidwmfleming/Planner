@@ -11,7 +11,12 @@ test('an unfinished task on an earlier day is carried to today, marked with wher
 	await page.goto(`/?page=${past}`);
 	const line = page.locator(`#add-task-${past}`);
 	await line.fill(title);
+	// First make sure the task was saved: "gone from the past day" also holds for a save still on its way.
+	const saved = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().includes('/add'));
 	await line.press('Enter');
+	const response = await saved;
+	expect(response.ok()).toBe(true);
+	expect((await response.json()).type).toBe('success');
 	// The page reloads its data after saving, and rollover runs then: the task leaves the past day.
 	await expect(page.locator(`section.day[data-date="${past}"]`).getByText(title)).toHaveCount(0);
 

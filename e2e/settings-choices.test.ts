@@ -213,3 +213,40 @@ test('choosing a calendar deleted on another device since Settings opened says t
 	await expect(calendars.getByRole('button', { name: 'Reload', exact: true })).toBeVisible();
 	await expect(calendars.getByRole('status').filter({ hasText: 'Saved' })).toHaveCount(0);
 });
+
+test('deleting the Work and new-events calendar sets Work to none and new events to the first calendar left', async ({ page }, info) => {
+	const name = unique('Aaa office', info); // first by name, so the fallback is plainly not "the one after it"
+	await addCalendar(page, name);
+	await choose(page, { work: name, newEvents: name });
+	const calendars = page.getByRole('region', { name: 'Event calendars' });
+	await calendars.getByRole('button', { name: `Delete ${name}` }).click();
+	const confirm = calendars.getByRole('group', { name: `Delete ${name}` });
+	await expect(confirm).toContainText('Work shading goes to None');
+	await expect(confirm).toContainText('New events will go in');
+	await confirm.getByRole('button', { name: `Delete ${name}`, exact: true }).click();
+	await expect(page.getByRole('status').filter({ hasText: 'Deleted' })).toHaveText(`Deleted ${name}.`);
+
+	await page.reload();
+	await expect(calendars.locator('li.work')).toHaveCount(0);
+	await expect(calendars.getByLabel('Show as work (light red)').locator('option:checked')).toHaveText('None');
+	const first = (await calendars.getByLabel('New events go in').locator('option').allInnerTexts())[0];
+	await expect(calendars.getByLabel('New events go in').locator('option:checked')).toHaveText(first);
+});
+
+test('at 320 wide, a calendar tagged "New events" keeps its words whole', async ({ page }) => {
+	await choose(page, { newEvents: 'Morgan Meals' });
+	await page.setViewportSize({ width: 320, height: 700 });
+	const row = page.getByRole('region', { name: 'Event calendars' }).getByRole('listitem').filter({ hasText: 'New events' });
+	await expect(row).toContainText('Morgan Meals');
+	// Each word of the name fits on its line: the name is at least as wide as its longest word.
+	const [shown, longestWord] = await row.locator('.name').evaluate((el) => {
+		const probe = Object.assign(document.createElement('span'), { textContent: 'Morgan' });
+		el.append(probe);
+		const word = probe.getBoundingClientRect().width;
+		probe.remove();
+		return [el.getBoundingClientRect().width, word];
+	});
+	expect(shown).toBeGreaterThanOrEqual(longestWord);
+	const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+	expect(overflow).toBe(0);
+});

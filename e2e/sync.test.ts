@@ -17,9 +17,20 @@ async function calendarApp(baseURL: string, password = 'dev') {
 	return client;
 }
 
+/** The calendar list, as a calendar app reads it. Radicale answers 500 to a listing when a calendar is deleted while
+ * it lists (other tests running alongside delete theirs), so a server error is retried once, as a calendar app would. */
+async function listCalendars(client: DAVClient) {
+	try {
+		return await client.fetchCalendars();
+	} catch (e) {
+		if (!/failed: 5\d\d\b/.test(e instanceof Error ? e.message : '')) throw e;
+		return client.fetchCalendars();
+	}
+}
+
 test('another calendar app finds the calendars, and events flow both ways', async ({ page, baseURL }, info) => {
 	const client = await calendarApp(baseURL!);
-	const calendars = await client.fetchCalendars();
+	const calendars = await listCalendars(client);
 	const work = calendars.find((c) => c.displayName === 'Work');
 	expect(work, 'the Work calendar is offered to other apps').toBeTruthy();
 	expect(new URL(work!.url).pathname).toMatch(/^\/dav\//);
@@ -42,11 +53,15 @@ test('another calendar app finds the calendars, and events flow both ways', asyn
 	const fromPlanner = unique('Haircut from planner', info);
 	await page.locator(`#add-event-${tue}`).fill(`5pm ${fromPlanner}`);
 	await page.locator(`#add-event-${tue}`).press('Enter');
-	await expect(page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner })).toBeVisible();
-	// Only the starting calendars: others are made and deleted by tests running alongside, and may be gone by now.
-	const starting = calendars.filter((c) => ['Me', 'Family', 'Workouts', 'Morgan Meals', 'Work'].includes(String(c.displayName)));
-	const everywhere = (await Promise.all(starting.map((c) => client.fetchCalendarObjects({ calendar: c })))).flat();
-	expect(everywhere.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
+	const line = page.locator(`section.day[data-date="${tue}"] li`, { hasText: fromPlanner });
+	await expect(line).toBeVisible();
+	// Only the calendar it was saved in is read: other tests running alongside add and delete calendars of their own,
+	// so one listed a moment ago may be gone by the time it is read.
+	const savedIn = await line.getAttribute('data-calendar');
+	const calendar = calendars.find((c) => new URL(c.url).pathname === `/dav${savedIn}`);
+	expect(calendar, `the planner's calendar ${savedIn} is offered to other apps`).toBeTruthy();
+	const objects = await client.fetchCalendarObjects({ calendar: calendar! });
+	expect(objects.some((o) => String(o.data).includes(fromPlanner))).toBe(true);
 });
 
 test('calendar apps need the calendar password, and the usual address leads them in', async ({ request, baseURL }) => {
