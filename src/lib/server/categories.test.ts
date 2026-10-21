@@ -6,14 +6,14 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
 import { CalendarStore, NoAnswerError, type Calendar, type StoredDocument } from './calendar-store';
-import { renameCategory, type SettingsPlace } from './categories';
+import { deleteCategory, renameCategory, tasksWith, type SettingsPlace } from './categories';
 import { icsToItems, occurrenceOn } from './ical';
 
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
 const PORT = 5294;
 const auth = { Authorization: `Basic ${Buffer.from('david:dev').toString('base64')}` };
 
-describe.skipIf(!hasRadicale)('renaming a category against Radicale', () => {
+describe.skipIf(!hasRadicale)('renaming and deleting a category against Radicale', () => {
 	let server: ChildProcess;
 	let dir: string;
 	let store: CalendarStore;
@@ -138,5 +138,46 @@ describe.skipIf(!hasRadicale)('renaming a category against Radicale', () => {
 		expect((await place.read()).categories).toEqual(['This month', 'Waiting', 'Later']);
 		expect(await stored(tasks, uid)).toContain('SUMMARY:After');
 		expect(await categoriesOf(tasks, uid)).toEqual(['Later']);
+	});
+
+	it('deletes one by moving its tasks to another category, never deleting a task', async () => {
+		const plain = await put(tasks, ['SUMMARY:a', 'CATEGORIES:waiting,Home']);
+		const both = await put(phoneList, ['SUMMARY:b', 'CATEGORIES:Waiting', 'CATEGORIES:Someday']);
+		const series = await put(tasks, ['SUMMARY:c', 'DTSTART;VALUE=DATE:20261019', 'RRULE:FREQ=DAILY;COUNT=3', 'CATEGORIES:Waiting',
+			'END:VTODO', 'BEGIN:VTODO', 'UID:{uid}', 'DTSTAMP:20261019T000000Z', 'SUMMARY:c', 'RECURRENCE-ID;VALUE=DATE:20261020', 'DTSTART;VALUE=DATE:20261020', 'CATEGORIES:WAITING']);
+		expect((await tasksWith(store, 'Waiting')).length).toBe(3);
+
+		expect(await deleteCategory(store, place, 'Waiting', 'Someday')).toEqual({ changed: 3, refused: 0, unsure: false });
+		expect((await place.read()).categories).toEqual(['This month', 'Someday']);
+		expect(await categoriesOf(tasks, plain)).toEqual(['Someday', 'Home']);
+		expect(await categoriesOf(phoneList, both)).toEqual(['Someday']);
+		expect(occurrenceOn(await stored(tasks, series), '2026-10-20')?.categories).toEqual(['Someday']);
+		expect((await tasksWith(store, 'Waiting')).length).toBe(0);
+	});
+
+	it('deletes one with "No list": its tasks stay, with no category of the planner\'s', async () => {
+		const uid = await put(tasks, ['SUMMARY:a', 'DTSTART;VALUE=DATE:20261021', 'CATEGORIES:Home,This month']);
+		expect(await deleteCategory(store, place, 'This month', undefined)).toMatchObject({ changed: 1 });
+		expect((await place.read()).categories).toEqual(['Waiting', 'Someday']);
+		expect(icsToItems(await stored(tasks, uid))[0]).toMatchObject({ title: 'a', date: '2026-10-21', categories: ['Home'] });
+	});
+
+	it('keeps the category on the list when it stops partway, and finishes when deleted again', async () => {
+		const uids = [await put(tasks, ['SUMMARY:a', 'CATEGORIES:Someday']), await put(tasks, ['SUMMARY:b', 'CATEGORIES:Someday'])];
+		const save = store.saveDocument.bind(store);
+		let saves = 0;
+		store.saveDocument = async (doc: StoredDocument, ics: string) => {
+			if (++saves === 2) throw new NoAnswerError('The calendar server did not answer in time');
+			return save(doc, ics);
+		};
+		try {
+			expect(await deleteCategory(store, place, 'Someday', 'Waiting')).toEqual({ changed: 1, refused: 0, unsure: true });
+		} finally {
+			store.saveDocument = save;
+		}
+		expect((await place.read()).categories).toEqual(['This month', 'Waiting', 'Someday']);
+		expect(await deleteCategory(store, place, 'Someday', 'Waiting')).toMatchObject({ unsure: false, refused: 0 });
+		expect((await place.read()).categories).toEqual(['This month', 'Waiting']);
+		expect([await categoriesOf(tasks, uids[0]), await categoriesOf(tasks, uids[1])]).toEqual([['Waiting'], ['Waiting']]);
 	});
 });

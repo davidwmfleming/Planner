@@ -92,3 +92,17 @@ export async function renameCategory(store: CalendarStore, settings: SettingsPla
 	await settings.write(next);
 	return done;
 }
+
+/**
+ * Deletes a category. A category is only a label, so no task is ever deleted: each task with it is given `to` instead,
+ * or no category at all when `to` is undefined (it stays on Future tasks, or on its day). The name comes off the list
+ * only when every task is done; if it stops partway, it stays, and deleting it again finishes the job.
+ */
+export async function deleteCategory(store: CalendarStore, settings: SettingsPlace, name: string, to: string | undefined): Promise<Recategorised> {
+	const done = await recategorise(store, name, to);
+	if (!finished(done)) return done;
+	// Read again, so a change saved meanwhile (on another device) is kept.
+	const now = await settings.read();
+	await settings.write({ ...now, categories: now.categories.filter((c) => c !== name) });
+	return done;
+}

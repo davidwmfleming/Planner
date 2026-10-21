@@ -1,7 +1,7 @@
 import { error, fail, type ActionFailure } from '@sveltejs/kit';
 import { shortTitle } from '$lib/format';
 import { byName, calendarAtPath, checkCalendarName, checkCategoryName, MAX_CATEGORIES, menuLabels, type Settings } from '$lib/settings';
-import { renameCategory, type Recategorised, type SettingsPlace } from '$lib/server/categories';
+import { deleteCategory, renameCategory, tasksWith, type Recategorised, type SettingsPlace } from '$lib/server/categories';
 import { logged, RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
 import { icsToItems } from '$lib/server/ical';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
@@ -77,6 +77,52 @@ export const actions: Actions = {
 			return refuse(502, `The calendar server didn't add "${checked.name}". Try again in a moment.`);
 		}
 		return { action: 'addCategory' as const, added: checked.name };
+	},
+
+	/** Before deleting a category: how many tasks have it (a repeating task counts once), for the confirm. */
+	checkCategory: async ({ request }) => {
+		const category = String((await request.formData()).get('category') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'checkCategory' as const, category, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { store, settings } = found;
+		if (!settings.categories.includes(category)) return refuse(404, CATEGORY_GONE);
+		if (settings.renaming && [settings.renaming.from, settings.renaming.to].includes(category)) return refuse(409, unfinishedRename(settings.renaming));
+		try {
+			return { action: 'checkCategory' as const, category, count: (await tasksWith(store, category)).length };
+		} catch (e) {
+			console.error('Settings: could not count the tasks in a category', e);
+			return refuse(502, `The calendar server didn't say which tasks are in ${category}. Try again in a moment.`);
+		}
+	},
+
+	/** Deletes a category. Its tasks are never deleted: they move to another category (`to`), or have none ("No list"). */
+	deleteCategory: async ({ request }) => {
+		const form = await request.formData();
+		const category = String(form.get('category') ?? '');
+		const to = String(form.get('to') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'deleteCategory' as const, category, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { store, place, settings } = found;
+		if (!settings.categories.includes(category)) return refuse(404, CATEGORY_GONE);
+		const pending = settings.renaming;
+		if (pending && [pending.from, pending.to].some((c) => c === category || c === to)) return refuse(409, unfinishedRename(pending));
+		if (to && !settings.categories.includes(to)) return refuse(404, `${to} isn't on the list any more; reload the page`);
+		if (to === category) return refuse(400, `Choose a category other than ${category} for its tasks`);
+		let done: Recategorised;
+		try {
+			done = await deleteCategory(store, place, category, to || undefined);
+		} catch (e) {
+			console.error('Settings: could not delete a category', e);
+			return refuse(502, `The calendar server didn't finish deleting ${category}. Try again in a moment: no task is lost, and deleting it again carries on where it stopped.`);
+		}
+		if (done.unsure || done.refused) {
+			// Counts only: category names may say what the tasks are about, and logs are kept.
+			console.error('Settings: a category delete stopped before every task was changed', done);
+			return refuse(502, stoppedDelete(category, to, done));
+		}
+		return { action: 'deleteCategory' as const, deleted: category, count: done.changed, movedTo: to || undefined };
 	},
 
 	/** A new name for a task category, on the list and on every task that has it (see renameCategory). */
@@ -281,6 +327,15 @@ function stoppedRename(from: string, to: string, done: Recategorised): string {
 		? 'The calendar server stopped answering, so the rest may still say'
 		: `${tasksCount(done.refused)} changed on another device meanwhile, so ${done.refused === 1 ? 'it still says' : 'they still say'}`;
 	return `${sofar} ${why} "${from}", and both names stay on the list for now. Wait a minute, then tap "Finish renaming" to finish.`;
+}
+
+/** Why a delete stopped before every task was changed. The category stays on the list, so no task loses it unseen. */
+function stoppedDelete(category: string, to: string, done: Recategorised): string {
+	const sofar = to ? `${tasksCount(done.changed)} moved to ${to}.` : `${tasksCount(done.changed)} no longer ${done.changed === 1 ? 'has' : 'have'} a list.`;
+	const why = done.unsure
+		? `The calendar server stopped answering, so the rest may still be in ${category}`
+		: `${tasksCount(done.refused)} changed on another device meanwhile, so ${done.refused === 1 ? 'it is' : 'they are'} still in ${category}`;
+	return `${sofar} ${why}, and ${category} stays on the list for now. Wait a minute, then delete it again to finish.`;
 }
 
 const nulls = (fields: object) => Object.fromEntries(Object.keys(fields).map((k) => [k, null]));

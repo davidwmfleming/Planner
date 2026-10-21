@@ -435,4 +435,49 @@ describe('task categories', () => {
 		expect(lines.length).toBeGreaterThan(0);
 		expect(JSON.stringify(lines)).not.toMatch(/Secret|Private|Waiting/);
 	});
+
+	it('says how many tasks a category holds before it is deleted, a repeating one once', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'waiting'), tagged('b', 'Someday'), tagged('c', 'Waiting', 'Home')] }, { categories: LISTS });
+		expect(await act('checkCategory', { category: 'Waiting' })).toEqual({ action: 'checkCategory', category: 'Waiting', count: 2 });
+		expect(await act('checkCategory', { category: 'Errands' })).toEqual(refusal(404, { message: "That category isn't on the list any more; reload the page" }));
+	});
+
+	it('deletes one by moving its tasks to another category, then takes it off the list', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting', 'Home'), tagged('b', 'Someday', 'waiting'), tagged('c', 'This month')] }, { categories: LISTS });
+		expect(await act('deleteCategory', { category: 'Waiting', to: 'Someday' })).toEqual({ action: 'deleteCategory', deleted: 'Waiting', count: 2, movedTo: 'Someday' });
+		expect(settingsNow()).toEqual({ categories: ['This month', 'Someday'], renaming: undefined });
+		expect(['a', 'b', 'c'].map(categoriesIn)).toEqual([['CATEGORIES:Someday', 'CATEGORIES:Home'], ['CATEGORIES:Someday'], ['CATEGORIES:This month']]);
+		// Every task is still there.
+		expect(fake.held[tasks.url]).toHaveLength(3);
+	});
+
+	it('deletes one with "No list": its tasks lose only that category', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting', 'Home'), tagged('b', 'Waiting')] }, { categories: LISTS });
+		expect(await act('deleteCategory', { category: 'Waiting', to: '' })).toEqual({ action: 'deleteCategory', deleted: 'Waiting', count: 2, movedTo: undefined });
+		expect(['a', 'b'].map(categoriesIn)).toEqual([['CATEGORIES:Home'], null]);
+		expect(fake.held[tasks.url]).toHaveLength(2);
+	});
+
+	it('keeps the category on the list when it stops partway, and deleting it again finishes', async () => {
+		fake = fakeStore([me, tasks], { [tasks.url]: [tagged('a', 'Waiting'), tagged('b', 'Waiting')] }, { categories: LISTS });
+		fake.saveErrors = [undefined, new NoAnswerError('no answer')];
+		expect(await act('deleteCategory', { category: 'Waiting', to: 'Someday' })).toEqual(
+			refusal(502, { category: 'Waiting', message: '1 task moved to Someday. The calendar server stopped answering, so the rest may still be in Waiting, and Waiting stays on the list for now. Wait a minute, then delete it again to finish.' })
+		);
+		expect(fake.settings.categories).toEqual(LISTS);
+		expect(await act('deleteCategory', { category: 'Waiting', to: 'Someday' })).toMatchObject({ deleted: 'Waiting', count: 1 });
+		expect(fake.settings.categories).toEqual(['This month', 'Someday']);
+	});
+
+	it('refuses a move to itself or to a category that is gone, and a delete in the middle of a rename', async () => {
+		fake = fakeStore([me, tasks], {}, { categories: LISTS });
+		expect(await act('deleteCategory', { category: 'Waiting', to: 'Waiting' })).toEqual(refusal(400, { message: 'Choose a category other than Waiting for its tasks' }));
+		expect(await act('deleteCategory', { category: 'Waiting', to: 'Errands' })).toEqual(refusal(404, { message: "Errands isn't on the list any more; reload the page" }));
+		fake.settings = { ...fake.settings, categories: ['Waiting', 'Later', 'Someday'], renaming: { from: 'Waiting', to: 'Later' } };
+		for (const fields of [{ category: 'Later', to: '' }, { category: 'Someday', to: 'Waiting' }]) {
+			expect(await act('deleteCategory', fields)).toEqual(refusal(409, { message: expect.stringContaining("didn't finish") }));
+		}
+		expect(await act('checkCategory', { category: 'Waiting' })).toEqual(refusal(409, { message: expect.stringContaining("didn't finish") }));
+		expect(fake.written).toEqual([]);
+	});
 });

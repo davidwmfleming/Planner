@@ -105,3 +105,66 @@ test('a rename that stopped halfway shows both names, and "Finish renaming" fini
 	expect(await storedCategories(request, uids[1])).toEqual([`CATEGORIES:${to}`]);
 	expect(await readSettings(request)).not.toHaveProperty('renaming');
 });
+
+test('deleting a category moves its tasks to another one, and never deletes a task', async ({ page, request }, info) => {
+	const name = unique('Errands', info);
+	const titles = [unique('Bank', info), unique('Library', info)];
+	await writeSettings(request, { ...(await readSettings(request)), categories: [...USUAL, name] });
+	const uids = [await taskWith(request, titles[0], `${name},Home`), await taskWith(request, titles[1], name.toLowerCase())];
+
+	await page.goto('/settings');
+	const categories = categoriesRegion(page);
+	await categories.getByRole('button', { name: `Delete ${name}` }).click();
+	const confirm = categories.getByRole('group', { name: `Delete ${name}` });
+	await expect(page.locator('#category-delete-count')).toBeFocused();
+	await expect(page.locator('#category-delete-count')).toHaveText(`${name} holds 2 tasks.`);
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	expect(await confirm.getByLabel('Move them to').locator('option').allInnerTexts()).toEqual([...USUAL, 'No list']);
+	await confirm.getByLabel('Move them to').selectOption({ label: 'Someday' });
+	await confirm.getByRole('button', { name: `Move 2 tasks to Someday and delete ${name}` }).click();
+	await expect(categories.getByRole('status')).toHaveText(`Deleted ${name}. Its 2 tasks are now in Someday.`);
+	await expect(categories.getByRole('status')).toBeFocused();
+	await expect.poll(() => listed(page)).toEqual(USUAL);
+	expect(await storedCategories(request, uids[0])).toEqual(['CATEGORIES:Someday,Home']);
+	expect(await storedCategories(request, uids[1])).toEqual(['CATEGORIES:Someday']);
+	await expect(await futureTag(page, titles[0])).toHaveText('Someday');
+});
+
+test('deleting a category with "No list" keeps its tasks, without a category; Escape or Cancel closes the confirm', async ({ page, request }, info) => {
+	const name = unique('Errands', info);
+	const empty = unique('Empty', info);
+	const title = unique('Bank', info);
+	await writeSettings(request, { ...(await readSettings(request)), categories: [...USUAL, name, empty] });
+	const uid = await taskWith(request, title, `Home,${name}`);
+
+	await page.goto('/settings');
+	const categories = categoriesRegion(page);
+	await categories.getByRole('button', { name: `Delete ${name}` }).click();
+	await expect(page.locator('#category-delete-count')).toBeFocused();
+	await expect(page.locator('#category-delete-count')).toHaveText(`${name} holds 1 task.`);
+	await page.keyboard.press('Escape');
+	await expect(categories.getByRole('group', { name: `Delete ${name}` })).toHaveCount(0);
+	await expect(categories.getByRole('button', { name: `Delete ${name}` })).toBeFocused();
+
+	await categories.getByRole('button', { name: `Delete ${name}` }).click();
+	const confirm = categories.getByRole('group', { name: `Delete ${name}` });
+	await confirm.getByLabel('Move them to').selectOption({ label: 'No list' });
+	await expect(confirm.getByText(/stay on Future tasks, or on their day, without a category/)).toBeVisible();
+	await confirm.getByRole('button', { name: `Delete ${name}, keeping its 1 task` }).click();
+	await expect(categories.getByRole('status')).toHaveText(`Deleted ${name}. Its 1 task is now without a list.`);
+	expect(await storedCategories(request, uid)).toEqual(['CATEGORIES:Home']);
+	const tag = await futureTag(page, title);
+	await expect(page.locator('li', { hasText: title })).toBeVisible();
+	await expect(tag).toHaveCount(0);
+
+	await page.goto('/settings');
+	await categories.getByRole('button', { name: `Delete ${empty}` }).click();
+	await expect(page.locator('#category-delete-count')).toBeFocused();
+	await expect(page.locator('#category-delete-count')).toHaveText(`${empty} holds no tasks.`);
+	await categories.getByRole('group', { name: `Delete ${empty}` }).getByRole('button', { name: 'Cancel' }).click();
+	await expect(categories.getByRole('button', { name: `Delete ${empty}` })).toBeFocused();
+	await categories.getByRole('button', { name: `Delete ${empty}` }).click();
+	await categories.getByRole('group', { name: `Delete ${empty}` }).getByRole('button', { name: `Delete ${empty}` }).click();
+	await expect(categories.getByRole('status')).toHaveText(`Deleted ${empty}.`);
+	await expect.poll(() => listed(page)).toEqual(USUAL);
+});
