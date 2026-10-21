@@ -20,17 +20,28 @@ const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Category names are matched without regard to case (or spaces at the ends). */
-const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+const key = (name: string) => name.trim().toLowerCase();
+const sameName = (a: string, b: string) => key(a) === key(b);
 
-/** A task's category: the first of its CATEGORIES values that is one of David's categories, spelled as the
- * settings spell it. Values from other apps that aren't one of his are not shown. */
-export const categoryOf = (values: string[] | undefined, categories: string[]): string | undefined => {
-	for (const value of values ?? []) {
-		const found = categories.find((c) => sameName(c, value));
-		if (found) return found;
-	}
-	return undefined;
-};
+/** Values of a task looked at for its category. Another app could store any number; David's comes first when the planner saves it. */
+const LOOKED_AT = 100;
+
+/** Finds a task's category: the first of its CATEGORIES values (among the first 100) that is one of David's
+ * categories, spelled as the settings spell it. Values from other apps that aren't one of his are not shown. */
+export function categoryFinder(categories: string[]): (values: string[] | undefined) => string | undefined {
+	const byKey = new Map<string, string>();
+	for (const c of categories) if (!byKey.has(key(c))) byKey.set(key(c), c);
+	return (values) => {
+		for (const value of (values ?? []).slice(0, LOOKED_AT)) {
+			const found = byKey.get(key(value));
+			if (found) return found;
+		}
+		return undefined;
+	};
+}
+
+/** A task's category; see categoryFinder, which is quicker for many tasks. */
+export const categoryOf = (values: string[] | undefined, categories: string[]) => categoryFinder(categories)(values);
 
 export const daysBetween = (from: string, to: string) =>
 	Math.round((new Date(`${to}T12:00:00`).getTime() - new Date(`${from}T12:00:00`).getTime()) / 86_400_000);
@@ -63,8 +74,9 @@ export function applyEdit(item: Item, f: EditFields, categories: string[]): { it
 	if (f.notes.trim()) next.notes = f.notes.trim();
 	// Lists are for tasks: the sheet shows the List field only for one. On a task, the chosen category replaces any
 	// of David's it had, and values other apps added stay as they are; an event's categories are left alone.
+	const davids = new Set(categories.map(key));
 	const kept = item.kind === 'task' && f.kind === 'task'
-		? [...(category ? [category] : []), ...(item.categories ?? []).filter((v) => !categories.some((c) => sameName(c, v)))]
+		? [...(category ? [category] : []), ...(item.categories ?? []).filter((v) => !davids.has(key(v)))]
 		: (item.categories ?? []);
 	if (kept.length) next.categories = kept;
 	if (item.carriedFrom && f.date === item.date) next.carriedFrom = item.carriedFrom;

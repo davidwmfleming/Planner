@@ -361,6 +361,22 @@ describe('future tasks', () => {
 	});
 });
 
+describe('a task with a huge number of categories (from another app)', () => {
+	it('does not slow the page down: each task is looked at once, and only its first 100 values', async () => {
+		const tasks = cal('tasks', 'Tasks', ['task']);
+		fake = fakeStore([tasks], { categories: ['This month', 'Waiting', 'Someday'], workCalendar: null, defaultEventCalendar: null });
+		const values = [...Array.from({ length: 200_000 }, (_, i) => `Tag ${i}`), 'Waiting'];
+		const task = (uid: string, categories?: string[]): StoredItem => ({ ...dentist(tasks), uid, title: uid, kind: 'task', date: undefined, categories });
+		fake.items = [...Array.from({ length: 100 }, (_, i) => task(`many-${i}`, values)), task('plain', ['Someday'])];
+		const started = performance.now();
+		const data = (await run()) as { unscheduled: Record<string, unknown>[] };
+		expect(performance.now() - started).toBeLessThan(250);
+		expect(data.unscheduled[0]).toMatchObject({ uid: 'plain', label: 'Someday' });
+		// 'Waiting' is too far down the list to count.
+		expect(data.unscheduled[1]).not.toHaveProperty('label');
+	});
+});
+
 describe('lists are for tasks', () => {
 	it('gives an event no list, even one whose category from another app is a list name', async () => {
 		const me = cal('me', 'Me');

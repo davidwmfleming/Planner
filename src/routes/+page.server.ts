@@ -1,6 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { addDays, comingSaturday, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
-import { applyEdit, categoryOf, daysBetween } from '$lib/edit';
+import { applyEdit, categoryFinder, daysBetween } from '$lib/edit';
 import { shortTitle } from '$lib/format';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
@@ -37,9 +37,9 @@ function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event'
 
 /** Only plain item data goes to the browser, not where it lives on the server. Of its categories, only the one
  * that is David's goes (as `label`); values from other apps stay in the file and aren't shown. */
-const plain = ({ calendarUrl, url, etag, ics, categories, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }, lists: string[]): Item => {
+const plain = ({ calendarUrl, url, etag, ics, categories, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }, categoryOf: (values?: string[]) => string | undefined): Item => {
 	// Lists are for tasks; an event's categories (from another app) are never shown.
-	const label = item.kind === 'task' ? categoryOf(categories, lists) : undefined;
+	const label = item.kind === 'task' ? categoryOf(categories) : undefined;
 	return label ? { ...item, label } : item;
 };
 
@@ -70,11 +70,9 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).sort(byName);
 	const newEvents = newItemsGoIn(store, 'event', settings);
 	const lists = settings.categories;
+	const categoryOf = categoryFinder(lists);
 	/** Future tasks go in the order of the categories in the settings; those without one come last. */
-	const listOrder = (i: Item) => {
-		const at = lists.indexOf(categoryOf(i.categories, lists) ?? '');
-		return at < 0 ? lists.length : at;
-	};
+	const listOrder = new Map(lists.map((c, at) => [c, at]));
 
 	return {
 		today,
@@ -96,8 +94,10 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		categories: lists,
 		unscheduled: items
 			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
-			.sort((a, b) => listOrder(a) - listOrder(b))
-			.map((i) => plain({ ...i, calendar: pathOf(i.calendarUrl) }, lists)),
+			// Each task's place is worked out once, not on every comparison.
+			.map((i) => ({ i, at: listOrder.get(categoryOf(i.categories) ?? '') ?? lists.length }))
+			.sort((a, b) => a.at - b.at)
+			.map(({ i }) => plain({ ...i, calendar: pathOf(i.calendarUrl) }, categoryOf)),
 		// A repeating item shows on each day of the page it falls on.
 		days: buildDays(
 			dates,
@@ -106,8 +106,8 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 			)
 		).map((d) => ({
 			...d,
-			events: d.events.map((i) => plain(i, lists)),
-			tasks: d.tasks.map((i) => plain(i, lists))
+			events: d.events.map((i) => plain(i, categoryOf)),
+			tasks: d.tasks.map((i) => plain(i, categoryOf))
 		}))
 	};
 };
