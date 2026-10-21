@@ -361,6 +361,18 @@ describe('future tasks', () => {
 	});
 });
 
+describe('lists are for tasks', () => {
+	it('gives an event no list, even one whose category from another app is a list name', async () => {
+		const me = cal('me', 'Me');
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])], { categories: ['Waiting'], workCalendar: null, defaultEventCalendar: null });
+		fake.items = [{ ...dentist(me), categories: ['Waiting', 'Business'] }];
+		const data = (await run('http://localhost/?page=2026-10-21')) as { days: { events: Record<string, unknown>[] }[] };
+		const shown = data.days.flatMap((d) => d.events);
+		expect(shown).toHaveLength(1);
+		expect(shown[0]).not.toHaveProperty('label');
+	});
+});
+
 describe('choosing a category in the details sheet', () => {
 	it("saves the category's name and keeps the values other apps added", async () => {
 		const tasks = cal('tasks', 'Tasks', ['task']);

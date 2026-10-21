@@ -662,12 +662,14 @@
 				</div>
 				<div class="row2">
 					<label class="field">Ends (events) <input type="time" name="endTime" id="f-end" value={editing.endTime ?? ''} /></label>
-					<label class="field">List
-						<select name="label" id="f-label" value={editing.label ?? ''}>
-							<option value="">None</option>
-							{#each data.categories as category (category)}<option value={category}>{category}</option>{/each}
-						</select>
-					</label>
+					{#if editing.kind === 'task'}
+						<label class="field">List
+							<select name="label" id="f-label" value={editing.label ?? ''}>
+								<option value="">None</option>
+								{#each data.categories as category (category)}<option value={category}>{category}</option>{/each}
+							</select>
+						</label>
+					{/if}
 				</div>
 				{#if editing.kind === 'task' && editing.calendar && editing.calendar !== data.tasksCalendar}
 					<p class="hint">In the list {data.calendarLabels[editing.calendar] ?? 'Unnamed calendar'}.</p>

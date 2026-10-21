@@ -66,3 +66,25 @@ for (const [kind, raw] of [['an old key', 'CATEGORIES:month'], ['a name', 'CATEG
 		await expect(tags).toHaveText(['Someday', 'Someday', 'Someday']);
 	});
 }
+
+// From QA: lists are for tasks. An event from another app keeps its categories but shows no list.
+test('an event whose category from another app is a list name shows no list, and keeps its categories when saved', async ({ page, request }, info) => {
+	const title = unique('Board meeting', info);
+	const uid = `cat-${Math.random().toString(36).slice(2, 10)}`;
+	await putEntry(request, '/david/me/', `${uid}.ics`, ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//phone//EN', 'BEGIN:VEVENT', `UID:${uid}`,
+		'DTSTAMP:20261019T000000Z', `DTSTART:${tue.replaceAll('-', '')}T100000`, `SUMMARY:${title}`, 'CATEGORIES:Waiting,Business', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n'));
+	await page.goto(`/?page=${mon}`);
+	const row = page.locator(`section.day[data-date="${tue}"] li`, { hasText: title });
+	await expect(row).toBeVisible();
+	await expect(row.locator('.tag:not(.cal-tag)')).toHaveCount(0);
+	await row.getByRole('button', { name: `Details for ${title}` }).click();
+	const sheet = page.getByRole('dialog', { name: 'Details' });
+	await expect(sheet.locator('#f-title')).toBeVisible();
+	await expect(sheet.locator('#f-label')).toHaveCount(0);
+	await sheet.locator('#f-location').fill('Boardroom');
+	await sheet.getByRole('button', { name: 'Save' }).click();
+	await expect(sheet).toBeHidden();
+	const stored = await (await request.fetch(`/dav/david/me/${uid}.ics`, { headers: auth })).text();
+	expect(stored).toContain('CATEGORIES:Waiting,Business');
+	expect(stored).toContain('LOCATION:Boardroom');
+});

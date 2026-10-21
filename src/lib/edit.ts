@@ -61,8 +61,11 @@ export function applyEdit(item: Item, f: EditFields, categories: string[]): { it
 	}
 	if (f.location.trim()) next.location = f.location.trim();
 	if (f.notes.trim()) next.notes = f.notes.trim();
-	// The chosen category replaces any of David's the task had; values other apps added stay as they are.
-	const kept = [...(category ? [category] : []), ...(item.categories ?? []).filter((v) => !categories.some((c) => sameName(c, v)))];
+	// Lists are for tasks: the sheet shows the List field only for one. On a task, the chosen category replaces any
+	// of David's it had, and values other apps added stay as they are; an event's categories are left alone.
+	const kept = item.kind === 'task' && f.kind === 'task'
+		? [...(category ? [category] : []), ...(item.categories ?? []).filter((v) => !categories.some((c) => sameName(c, v)))]
+		: (item.categories ?? []);
 	if (kept.length) next.categories = kept;
 	if (item.carriedFrom && f.date === item.date) next.carriedFrom = item.carriedFrom;
 	if (recurrence) next.recurrence = recurrence;

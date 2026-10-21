@@ -67,6 +67,14 @@ describe('applyEdit', () => {
 	});
 });
 
+describe('events and lists', () => {
+	it("leaves an event's categories (from another app) as they are; lists are for tasks", () => {
+		const meeting: Item = { ...event, categories: ['Waiting', 'Business'] };
+		expect(applyEdit(meeting, fields({ title: 'Dentist moved' }), LISTS)).toMatchObject({ item: { title: 'Dentist moved', categories: ['Waiting', 'Business'] } });
+		expect(applyEdit(meeting, fields({ kind: 'task', label: '' }), LISTS)).toMatchObject({ item: { kind: 'task', categories: ['Waiting', 'Business'] } });
+	});
+});
+
 describe('categoryOf', () => {
 	it("is the first of a task's values that is one of David's categories, spelled as the settings spell it", () => {
 		expect(categoryOf(['Home', 'WAITING', 'Someday'], LISTS)).toBe('Waiting');

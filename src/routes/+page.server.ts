@@ -38,7 +38,8 @@ function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event'
 /** Only plain item data goes to the browser, not where it lives on the server. Of its categories, only the one
  * that is David's goes (as `label`); values from other apps stay in the file and aren't shown. */
 const plain = ({ calendarUrl, url, etag, ics, categories, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }, lists: string[]): Item => {
-	const label = categoryOf(categories, lists);
+	// Lists are for tasks; an event's categories (from another app) are never shown.
+	const label = item.kind === 'task' ? categoryOf(categories, lists) : undefined;
 	return label ? { ...item, label } : item;
 };
 
