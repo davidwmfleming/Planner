@@ -43,13 +43,13 @@ export async function prepareStore(store: Store, options: StartOptions): Promise
 		// The starting calendars are made only then, so one David deletes stays deleted.
 		if (!store.calendars().some((c) => c.accepts.includes('event'))) {
 			for (const name of [...options.startingCalendars, options.workCalendar]) {
-				await store.ensureCalendar(name, ['event']).catch((e) => console.error(`Could not create the ${name} calendar`, e));
+				await store.ensureCalendar(name, ['event']).catch((e) => console.error('Could not create a starting calendar', e));
 			}
 		}
 		try {
 			await store.ensureCalendar(options.tasksCalendar, ['task'], tasks);
 		} catch (e) {
-			console.error(`Could not create the ${options.tasksCalendar} list`, e);
+			console.error('Could not create the task list', e);
 			return;
 		}
 	}

@@ -76,6 +76,28 @@ describe('CalendarStore without a server', () => {
 		expect((await store.listItems()).map((i) => i.title)).toEqual(['Plain']);
 	});
 
+	it('leaves out a document it cannot read, says where it is, and still lists the rest', async () => {
+		const ics = (uid: string) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:${uid}\r\nDTSTAMP:20261019T120000Z\r\nDTSTART;VALUE=DATE:20261020\r\nSUMMARY:${uid}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`;
+		// Radicale accepts and keeps both as sent: an app's own property whose value isn't of the type it claims.
+		const noValue = ics('Bad repeat').replace('END:VEVENT', 'X-APP-SNOOZE;VALUE=RECUR:FREQ=NEVER\r\nEND:VEVENT');
+		const notATime = ics('Bad period').replace('END:VEVENT', 'X-APP-AWAY;VALUE=PERIOD:soon\r\nEND:VEVENT');
+		const store = storeWith({
+			propfind: async () => [listing('/david/me/', 'Me'), listing('/david/work/', 'Work')],
+			calendarQuery: async ({ url }: { url: string }) =>
+				url.endsWith('/me/')
+					? [
+							{ href: '/david/me/a.ics', props: { calendarData: ics('Before') } },
+							{ href: '/david/me/bad.ics', props: { calendarData: noValue } },
+							{ href: '/david/me/c.ics', props: { calendarData: ics('After') } }
+						]
+					: [{ href: '/david/work/bad.ics', props: { calendarData: notATime } }, { href: '/david/work/d.ics', props: { calendarData: ics('Work') } }]
+		});
+		const { items, unreadable } = await store.readItems();
+		expect(items.map((i) => i.title)).toEqual(['Before', 'After', 'Work']);
+		expect(unreadable).toEqual(['http://127.0.0.1:5232/david/me/bad.ics', 'http://127.0.0.1:5232/david/work/bad.ics']);
+		expect((await store.listItems()).map((i) => i.title)).toEqual(['Before', 'After', 'Work']);
+	});
+
 	it('never moves a document whose file name carries a query or a fragment', async () => {
 		const asked: string[] = [];
 		const store = storeWith({}, 100);
@@ -139,10 +161,13 @@ describe('CalendarStore without a server', () => {
 		};
 	}
 
-	it('gives up on a calendar file the server never finishes sending, naming the calendar', async () => {
+	it('gives up on a calendar file the server never finishes sending, naming the calendar by a fingerprint of its address', async () => {
 		const { store, url, close } = await calendarServedBy((_, res) => res.writeHead(200, { 'Content-Type': 'text/calendar' }).write('BEGIN:VCALENDAR\r\n'), 100);
 		try {
-			await expect(store.calendarFile(url)).rejects.toThrow(/"Slow".*in time|in time.*"Slow"/);
+			// A fingerprint, not the name or the address made from it: the message goes to the server's log.
+			const late = await store.calendarFile(url).catch((e: Error) => e);
+			expect(String(late)).toMatch(/in time.*\/david\/[0-9a-f]{8}\//);
+			expect(String(late)).not.toMatch(/slow/i);
 		} finally {
 			await close();
 		}

@@ -1,8 +1,19 @@
 // Reads and writes planner items on a CalDAV server (Radicale in production and development).
+import { createHash } from 'node:crypto';
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
 import { parseSettings, type Settings, type SettingsSeed } from '$lib/settings';
 import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
+
+/** An address as it may appear in the server's log. A calendar's address is made from its name, so each folder
+ * in it becomes a short fingerprint; item files are named by UID and stay as they are (house rule 4). */
+export function logged(url: string): string {
+	const path = /^[a-z]+:\/\//i.test(url) ? new URL(url).pathname : url;
+	return path
+		.split('/')
+		.map((part, i) => (i < 2 || part === '' || part.endsWith('.ics') ? part : createHash('sha256').update(part).digest('hex').slice(0, 8)))
+		.join('/');
+}
 
 export interface StoreConfig {
 	serverUrl: string;
@@ -177,8 +188,9 @@ export class CalendarStore {
 		const find = () => this.calendars().find((c) => (url ? c.url === url : c.name === name));
 		const existing = find();
 		if (existing) return existing;
+		const address = url ?? this.freeAddress(name, this.home());
 		const made = this.client.makeCalendar({
-			url: url ?? this.freeAddress(name, this.home()),
+			url: address,
 			props: {
 				displayname: name,
 				'c:supported-calendar-component-set': {
@@ -187,10 +199,11 @@ export class CalendarStore {
 			}
 		});
 		// Another program (or another copy of the planner) may create it at the same moment; that's fine.
-		await this.timed(made, `making ${name}`).catch(() => undefined);
+		// Messages name addresses, never names or titles: they end up in the server's log (house rule 4).
+		await this.timed(made, `making ${logged(address)}`).catch(() => undefined);
 		await this.refreshCalendars();
 		const created = find();
-		if (!created) throw new Error(`Could not create the calendar "${name}"`);
+		if (!created) throw new Error(`Could not create the calendar at ${logged(address)}`);
 		return created;
 	}
 
@@ -214,7 +227,7 @@ export class CalendarStore {
 	/** Renames the calendar at this address, so two calendars with the same name can't be mixed up. */
 	async renameCalendarAt(url: string, to: string): Promise<void> {
 		const status = await this.proppatch(url, `<d:displayname>${escapeXml(to)}</d:displayname>`);
-		if (status >= 300) throw new RefusedError(`The calendar server refused to rename ${url} (${status})`, status);
+		if (status >= 300) throw new RefusedError(`The calendar server refused to rename ${logged(url)} (${status})`, status);
 		await this.refreshCalendars();
 	}
 
@@ -271,23 +284,29 @@ export class CalendarStore {
 	 * Undefined if the calendar has been deleted (on a phone) since the list was read. */
 	async calendarFile(url: string): Promise<string | undefined> {
 		const calendar = this.calendarAt(url);
-		const name = calendar.displayName ?? url;
 		// The time limit covers the whole file, so a server that stops halfway can't hang the export either.
 		const signal = AbortSignal.timeout(this.timeoutMs);
 		try {
 			const response = await fetch(calendar.url, { headers: { Authorization: this.authorization(), Accept: 'text/calendar' }, signal });
 			if (response.status === 404) return undefined;
-			if (!response.ok) throw new Error(`The calendar server would not hand out "${name}" (${response.status})`);
+			if (!response.ok) throw new Error(`The calendar server would not hand out ${logged(calendar.url)} (${response.status})`);
 			return await response.text();
 		} catch (e) {
-			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (reading "${name}")`, { cause: e });
+			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (reading ${logged(calendar.url)})`, { cause: e });
 			throw e;
 		}
 	}
 
 	async listItems(): Promise<StoredItem[]> {
+		return (await this.readItems()).items;
+	}
+
+	/** Every item, and the address of each stored document that couldn't be read (written badly by another app, say).
+	 * One bad document is left out rather than failing them all, so the planner still shows everything else. */
+	async readItems(): Promise<{ items: StoredItem[]; unreadable: string[] }> {
 		await this.refreshCalendars();
 		const all: StoredItem[] = [];
+		const unreadable: string[] = [];
 		for (const calendar of this.davCalendars) {
 			const documents = await this.query(calendar).catch(async (e) => {
 				// Deleted elsewhere since the list was read: skip it. Any other failure is real.
@@ -296,18 +315,25 @@ export class CalendarStore {
 				return [];
 			});
 			for (const doc of documents) {
-				for (const item of icsToItems(doc.ics)) all.push({ ...item, ...doc });
+				let items;
+				try {
+					items = icsToItems(doc.ics);
+				} catch {
+					unreadable.push(doc.url);
+					continue;
+				}
+				for (const item of items) all.push({ ...item, ...doc });
 			}
 		}
-		return all;
+		return { items: all, unreadable };
 	}
 
 	/** Every document in one calendar, and the calendar's version (its ETag) read just before them.
 	 * Deleting the calendar with that version fails if anything in it changed since, so nothing unseen is lost. */
 	async documents(calendarUrl: string): Promise<{ version: string | undefined; documents: StoredDocument[] }> {
 		const calendar = this.calendarAt(calendarUrl);
-		const [about] = await this.timed(this.client.propfind({ url: calendar.url, props: { 'd:getetag': {} }, depth: '0' }), `reading ${calendar.displayName ?? calendar.url}`);
-		if (!about?.ok) throw new RefusedError(`Reading ${calendar.url} failed (${about?.status ?? 'no answer'})`, about?.status ?? 502);
+		const [about] = await this.timed(this.client.propfind({ url: calendar.url, props: { 'd:getetag': {} }, depth: '0' }), `reading ${logged(calendar.url)}`);
+		if (!about?.ok) throw new RefusedError(`Reading ${logged(calendar.url)} failed (${about?.status ?? 'no answer'})`, about?.status ?? 502);
 		return { version: davText(about.props?.getetag), documents: await this.query(calendar) };
 	}
 
@@ -321,7 +347,7 @@ export class CalendarStore {
 				filters: ALL_COMPONENTS,
 				depth: '1'
 			}),
-			`reading ${calendar.displayName ?? calendar.url}`
+			`reading ${logged(calendar.url)}`
 		);
 		const documents: StoredDocument[] = [];
 		for (const res of responses) {
@@ -403,7 +429,7 @@ export class CalendarStore {
 		// Only a calendar from the listing: inside this user's home folder, and never the home folder itself.
 		const calendar = this.calendarAt(calendarUrl);
 		const res = await this.send('DELETE', calendar.url, { 'If-Match': version });
-		if (!res.ok) throw new RefusedError(`The calendar server refused to delete ${calendar.url} (${res.status})`, res.status);
+		if (!res.ok) throw new RefusedError(`The calendar server refused to delete ${logged(calendar.url)} (${res.status})`, res.status);
 		this.davCalendars = this.davCalendars.filter((c) => c.url !== calendar.url);
 	}
 
@@ -412,9 +438,10 @@ export class CalendarStore {
 		const calendar = this.calendarAt(calendarUrl);
 		const filename = `${item.uid}.ics`;
 		const ics = itemToICS(item, previous);
-		const res = await this.timed(this.client.createCalendarObject({ calendar, filename, iCalString: ics }), `saving "${item.title}"`);
-		if (!res.ok) throw new RefusedError(`Saving "${item.title}" failed (${res.status})`, res.status);
-		return { ...item, calendarUrl, url: new URL(filename, calendar.url).href, etag: res.headers.get('etag') ?? undefined, ics };
+		const url = new URL(filename, calendar.url).href;
+		const res = await this.timed(this.client.createCalendarObject({ calendar, filename, iCalString: ics }), `saving ${logged(url)}`);
+		if (!res.ok) throw new RefusedError(`Saving ${logged(url)} failed (${res.status})`, res.status);
+		return { ...item, calendarUrl, url, etag: res.headers.get('etag') ?? undefined, ics };
 	}
 
 	/** Saves changes. Fails if someone else changed the item since it was read, so no edit is silently lost. */
@@ -434,8 +461,8 @@ export class CalendarStore {
 	}
 
 	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
-		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving "${stored.title}"`);
-		if (!res.ok) throw new RefusedError(`Saving "${stored.title}" failed (${res.status}); reload and try again`, res.status);
+		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving ${logged(stored.url)}`);
+		if (!res.ok) throw new RefusedError(`Saving ${logged(stored.url)} failed (${res.status}); reload and try again`, res.status);
 		return res.headers.get('etag') ?? undefined;
 	}
 
@@ -447,8 +474,8 @@ export class CalendarStore {
 	}
 
 	async remove(stored: StoredItem): Promise<void> {
-		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting "${stored.title}"`);
-		if (!res.ok) throw new RefusedError(`Deleting "${stored.title}" failed (${res.status})`, res.status);
+		const res = await this.timed(this.client.deleteCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag } }), `deleting ${logged(stored.url)}`);
+		if (!res.ok) throw new RefusedError(`Deleting ${logged(stored.url)} failed (${res.status})`, res.status);
 	}
 
 	/** A plain request with the planner's sign-in and the time limit. No answer in time becomes a NoAnswerError. */
@@ -457,7 +484,7 @@ export class CalendarStore {
 		try {
 			return await fetch(url, { method, headers: { Authorization: this.authorization(), ...headers }, body, signal });
 		} catch (e) {
-			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (${method} ${url})`, { cause: e });
+			if (signal.aborted) throw new NoAnswerError(`The calendar server did not answer in time (${method} ${logged(url)})`, { cause: e });
 			throw e;
 		}
 	}
@@ -468,7 +495,7 @@ export class CalendarStore {
 
 	private calendarAt(url: string): DAVCalendar {
 		const calendar = this.davCalendars.find((c) => c.url === url);
-		if (!calendar) throw new Error(`No calendar at ${url}`);
+		if (!calendar) throw new Error(`No calendar at ${logged(url)}`);
 		return calendar;
 	}
 }
