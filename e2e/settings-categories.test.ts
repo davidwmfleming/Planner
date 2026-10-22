@@ -168,3 +168,78 @@ test('deleting a category with "No list" keeps its tasks, without a category; Es
 	await expect(categories.getByRole('status')).toHaveText(`Deleted ${empty}.`);
 	await expect.poll(() => listed(page)).toEqual(USUAL);
 });
+
+/** What the planner's server sends back when a category change stopped partway (a refusal, in SvelteKit's form). */
+const stopped = (data: Record<string, string>) => ({
+	status: 200,
+	contentType: 'application/json',
+	body: JSON.stringify({ type: 'failure', status: 502, data: JSON.stringify([Object.fromEntries(Object.keys(data).map((k, i) => [k, i + 1])), ...Object.values(data)]) })
+});
+
+test('after a rename stops partway, the page shows both names and "Finish renaming" without a reload', async ({ page, request }, info) => {
+	const from = unique('Errands', info);
+	const to = unique('Jobs', info);
+	await writeSettings(request, { ...(await readSettings(request)), categories: [...USUAL, from] });
+	const uids = [await taskWith(request, unique('Bank', info), from), await taskWith(request, unique('Library', info), from)];
+	// The calendar server stops answering after the first task: the list and that task are as a real stop leaves them.
+	const renameCategoryAsked = (url: URL) => url.search === '?/renameCategory';
+	await page.route(renameCategoryAsked, async (route) => {
+		await writeSettings(request, { ...(await readSettings(request)), categories: [...USUAL, from, to], renaming: { from, to } });
+		await taskWith(request, unique('Bank again', info), to);
+		const message = `1 task now has "${to}". The calendar server stopped answering, so the rest may still say "${from}", and both names stay on the list for now. Wait a minute, then tap "Finish renaming" to finish.`;
+		await route.fulfill(stopped({ action: 'renameCategory', category: from, name: to, message }));
+	});
+
+	await page.goto('/settings');
+	const categories = categoriesRegion(page);
+	await categories.getByRole('button', { name: `Rename ${from}` }).click();
+	await categories.getByLabel(`New name for ${from}`).fill(to);
+	await categories.getByRole('button', { name: 'Save name' }).click();
+	await expect(categories.getByRole('alert')).toContainText('Wait a minute, then tap "Finish renaming" to finish.');
+	await expect.poll(() => listed(page)).toEqual([...USUAL, from, to]);
+	await expect(categories.getByRole('button', { name: 'Save name' })).toHaveCount(0);
+	await expect(categories.getByText(`Being renamed to ${to}; some tasks still say ${from}.`)).toBeVisible();
+	const finish = categories.getByRole('button', { name: `Finish renaming ${from} to ${to}` });
+	await expect(finish).toBeFocused();
+
+	// The server answers again: Finish renaming finishes it.
+	await page.unroute(renameCategoryAsked);
+	await finish.click();
+	await expect(categories.getByRole('status')).toHaveText(`Renamed ${from} to ${to}, on 2 tasks.`);
+	await expect.poll(() => listed(page)).toEqual([...USUAL, to]);
+	for (const uid of uids) expect(await storedCategories(request, uid)).toEqual([`CATEGORIES:${to}`]);
+});
+
+test('after a delete stops partway, the confirm closes with the reason, and Delete counts again', async ({ page, request }, info) => {
+	const name = unique('Errands', info);
+	await writeSettings(request, { ...(await readSettings(request)), categories: [...USUAL, name] });
+	const uids = [await taskWith(request, unique('Bank', info), name), await taskWith(request, unique('Library', info), name)];
+	const deleteCategoryAsked = (url: URL) => url.search === '?/deleteCategory';
+	await page.route(deleteCategoryAsked, async (route) => {
+		// The first task moved before the calendar server stopped answering.
+		await putEntry(request, '/david/tasks/', `${uids[0]}.ics`, ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//phone//EN', 'BEGIN:VTODO', `UID:${uids[0]}`,
+			'DTSTAMP:20261019T000000Z', 'SUMMARY:Bank', 'STATUS:NEEDS-ACTION', 'CATEGORIES:Someday', 'END:VTODO', 'END:VCALENDAR', ''].join('\r\n'));
+		const message = `1 task moved to Someday. The calendar server stopped answering, so the rest may still be in ${name}, and ${name} stays on the list for now. Wait a minute, then delete it again to finish.`;
+		await route.fulfill(stopped({ action: 'deleteCategory', category: name, message }));
+	});
+
+	await page.goto('/settings');
+	const categories = categoriesRegion(page);
+	await categories.getByRole('button', { name: `Delete ${name}` }).click();
+	await expect(page.locator('#category-delete-count')).toHaveText(`${name} holds 2 tasks.`);
+	await categories.getByLabel('Move them to').selectOption({ label: 'Someday' });
+	await categories.getByRole('button', { name: `Move 2 tasks to Someday and delete ${name}` }).click();
+	await expect(categories.getByRole('alert')).toContainText('delete it again to finish');
+	await expect(categories.getByRole('group', { name: `Delete ${name}` })).toHaveCount(0);
+	await expect(categories.getByRole('button', { name: `Delete ${name}` })).toBeFocused();
+	expect(await listed(page)).toEqual([...USUAL, name]);
+
+	await page.unroute(deleteCategoryAsked);
+	await categories.getByRole('button', { name: `Delete ${name}` }).click();
+	await expect(page.locator('#category-delete-count')).toHaveText(`${name} holds 1 task.`);
+	await categories.getByLabel('Move them to').selectOption({ label: 'Someday' });
+	await categories.getByRole('button', { name: `Move 1 task to Someday and delete ${name}` }).click();
+	await expect(categories.getByRole('status')).toHaveText(`Deleted ${name}. Its 1 task is now in Someday.`);
+	await expect.poll(() => listed(page)).toEqual(USUAL);
+	for (const uid of uids) expect(await storedCategories(request, uid)).toEqual(['CATEGORIES:Someday']);
+});

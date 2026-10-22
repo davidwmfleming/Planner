@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import type { ActionResult, SubmitFunction } from '@sveltejs/kit';
 	import { tick } from 'svelte';
 	import { fetchExport } from '$lib/export-download';
@@ -215,9 +216,16 @@
 		return async ({ result, update }) => {
 			categoryBusy = false;
 			await update({ reset: false });
-			// Stopped halfway: the field gives way to "Finish renaming", with the reason next to it.
 			if (result.type !== 'success') {
-				if (data.renaming && data.renaming.from === renamingCategory) renamingCategory = undefined;
+				// A refusal doesn't read the page again, but a rename that stopped halfway has changed the list:
+				// read it, so the new name shows and the field gives way to "Finish renaming", with the reason next to it.
+				const category = renamingCategory;
+				await invalidateAll();
+				if (data.renaming && data.renaming.from === category) {
+					renamingCategory = undefined;
+					await tick();
+					document.querySelector<HTMLButtonElement>(`button[data-finish-category="${CSS.escape(category)}"]`)?.focus();
+				}
 				return;
 			}
 			const { from, renamed, count } = result.data as { from: string; renamed: string; count: number };
@@ -271,6 +279,16 @@
 			categoryBusy = false;
 			await update({ reset: false });
 			if (result.type !== 'success') {
+				// Read the page again: a delete that stopped partway has moved some tasks, so the count shown is old.
+				await invalidateAll();
+				if (result.type === 'failure' && result.status === 502 && deletingCategory) {
+					// Closed, with the reason next to the category; Delete counts again before it finishes the job.
+					const { category } = deletingCategory;
+					deletingCategory = undefined;
+					await tick();
+					document.querySelector<HTMLButtonElement>(`button[data-delete-category="${CSS.escape(category)}"]`)?.focus();
+					return;
+				}
 				await tick();
 				document.querySelector<HTMLElement>('#category-delete-count')?.focus();
 				return;
@@ -537,7 +555,7 @@
 								<form method="POST" action="?/renameCategory" use:enhance={renamedCategory} class="inline">
 									<input type="hidden" name="category" value={category} />
 									<input type="hidden" name="name" value={data.renaming.to} />
-									<button class="btn small primary" class:waiting={categoryBusy} aria-label="Finish renaming {category} to {data.renaming.to}">{categoryBusy ? 'Renaming…' : 'Finish renaming'}</button>
+									<button class="btn small primary" class:waiting={categoryBusy} aria-label="Finish renaming {category} to {data.renaming.to}" data-finish-category={category}>{categoryBusy ? 'Renaming…' : 'Finish renaming'}</button>
 								</form>
 							{:else}
 								<button type="button" class="btn small" aria-label="Rename {category}" class:waiting={categoryBusy} data-rename-category={category} onclick={() => startCategoryRename(category)}>Rename</button>

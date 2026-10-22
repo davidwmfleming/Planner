@@ -39,7 +39,7 @@ export async function readSettings(request: APIRequestContext): Promise<Record<s
 		headers: { ...auth, Depth: '0', 'Content-Type': 'application/xml' },
 		data: `<?xml version="1.0"?><d:propfind xmlns:d="DAV:"><d:prop>${SETTINGS_PROP}</d:prop></d:propfind>`
 	});
-	const text = /<(?:\w+:)?planner-settings[^>]*>([^<]*)</.exec(await read.text())?.[1] ?? '{}';
+	const text = /<(?:\w+:)?planner-settings[^>]*>([^<]*)</.exec(await read.text())?.[1] || '{}'; // none stored yet: the planner hasn't started
 	return JSON.parse(text.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
 }
 
