@@ -203,6 +203,28 @@ describe('repeats the planner cannot sensibly show', () => {
 		expect(() => occurrencesBetween(fromAnotherApp('FREQ=YEARLY', `RDATE:${rdates}\r\n`), '2026-10-19', '2026-10-21')).toThrow();
 	});
 
+	it('passes over empty parts, as a trailing semicolon leaves', () => {
+		const range = ['2026-10-19', '2026-10-25'] as const;
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=WEEKLY;BYDAY=MO;'), ...range))).toEqual(['2026-10-19']);
+		expect(days(occurrencesBetween(fromAnotherApp(';FREQ=WEEKLY;;BYDAY=MO,TH'), ...range))).toEqual(['2026-10-19', '2026-10-22']);
+	});
+
+	it('refuses a document listing more than 2,000 skipped and extra days, counted across lines, folded or not', () => {
+		const day = (n: number) => {
+			const d = new Date(Date.UTC(2000, 0, 1) + n * 86_400_000);
+			return `${d.toISOString().slice(0, 10).replaceAll('-', '')}T090000`;
+		};
+		const list = (from: number, count: number) => Array.from({ length: count }, (_, n) => day(from + n)).join(',');
+		// 1,000 skipped days on one line, folded every 70 characters, and 1,001 extra days over two lines.
+		const folded = `EXDATE:${list(0, 1000)}`.replace(/(.{70})/g, '$1\r\n ');
+		const flood = `${folded}\r\nRDATE:${list(3000, 500)}\r\nRDATE;VALUE=DATE-TIME:${list(4000, 501)}\r\n`;
+		expect(() => occurrencesBetween(fromAnotherApp('FREQ=DAILY', flood), '2026-10-19', '2026-10-21')).toThrow(/more than 2000/);
+		// One more than allowed tips it over; exactly 2,000 is still shown.
+		const atLimit = `EXDATE:${list(0, 1000)}\r\nEXDATE:${list(1000, 1000)}\r\n`;
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY', atLimit), '2026-10-19', '2026-10-21'))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
+		expect(() => occurrencesBetween(fromAnotherApp('FREQ=DAILY', `${atLimit}RDATE:${day(5000)}\r\n`), '2026-10-19', '2026-10-21')).toThrow(/more than 2000/);
+	});
+
 	it('works it out quickly, not after building every second of the year', () => {
 		const started = performance.now();
 		expect(() => occurrencesBetween(fromAnotherApp('FREQ=SECONDLY'), '2026-10-19', '2026-10-21')).toThrow();

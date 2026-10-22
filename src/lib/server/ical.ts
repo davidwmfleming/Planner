@@ -158,7 +158,8 @@ function checkRule(text: string) {
 		throw new Error(`Repeat rule the planner can't show: ${why}`);
 	};
 	const rule = new Map<string, string>();
-	for (const part of text.toUpperCase().split(';')) {
+	// Empty parts, as a trailing semicolon leaves, say nothing and are passed over.
+	for (const part of text.toUpperCase().split(';').filter((p) => p.trim())) {
 		const [key, value, ...extra] = part.split('=');
 		if (value === undefined || extra.length || rule.has(key)) refuse(`badly written part ${key}`);
 		rule.set(key, value);
@@ -208,14 +209,27 @@ function checkRule(text: string) {
 	if (freq === 'YEARLY' && interval > 1 && (fifth || leapDay)) refuse('a day not in every year, not every year');
 }
 
-/** Throws if any repeat rule of an event or task in the document isn't one the planner works out (see checkRule). */
+/** Most skipped and extra days (EXDATE and RDATE values) one document may list; past that it is a flood, not a plan. */
+const MOST_LISTED_DAYS = 2_000;
+
+/**
+ * Throws if any repeat rule of an event or task in the document isn't one the planner works out (see checkRule),
+ * or if the document lists more than MOST_LISTED_DAYS skipped and extra days, which ical.js would sort and step
+ * through whatever the step budget says.
+ */
 function checkRepeatRules(ics: string) {
 	const within: string[] = [];
+	let listed = 0;
 	for (const line of ics.replace(/\r?\n[ \t]/g, '').split(/\r?\n/)) {
 		const [, begin] = /^BEGIN:(\S+)/i.exec(line) ?? [];
+		// The value starts after the first colon that isn't inside a quoted parameter (a TZID, say).
+		const value = () => line.replace(/"[^"]*"/g, '').replace(/^[^:]*:/, '');
 		if (begin) within.push(begin.toUpperCase());
 		else if (/^END:/i.test(line)) within.pop();
-		else if (/^(RRULE|EXRULE)[;:]/i.test(line) && ['VEVENT', 'VTODO'].includes(within.at(-1) ?? '')) checkRule(line.slice(line.indexOf(':') + 1).trim());
+		else if (/^(EXDATE|RDATE)[;:]/i.test(line)) {
+			listed += value().split(',').length;
+			if (listed > MOST_LISTED_DAYS) throw new Error(`Lists more than ${MOST_LISTED_DAYS} skipped or extra days, more than the planner can work out`);
+		} else if (/^(RRULE|EXRULE)[;:]/i.test(line) && ['VEVENT', 'VTODO'].includes(within.at(-1) ?? '')) checkRule(value().trim());
 	}
 }
 
