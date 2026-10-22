@@ -222,10 +222,11 @@ describe('a logged address', () => {
 	});
 
 	it('keeps an item file named by a UID, and fingerprints one named any other way', () => {
-		for (const uid of ['0F8FAD5B-D9CB-469F-A165-70867728950E', '0f8fad5bd9cb469fa16570867728950e', '7kukuqr4ed1m2f80u18cjm31j1']) {
+		for (const uid of ['0F8FAD5B-D9CB-469F-A165-70867728950E', '0f8fad5bd9cb469fa16570867728950e']) {
 			expect(logged(`${FAMILY}${uid}.ics`)).toBe(`${logged(FAMILY)}${uid}.ics`);
 		}
-		for (const named of ['Biopsy results with Dr Okafor', 'biopsy-results-dr-okafor', 'okafor-2026-10-21', 'uid-1', 'appointment@okafor.example']) {
+		// A Google-style id is fingerprinted too: letters and digits mixed can't be told from a name with numbers in it.
+		for (const named of ['7kukuqr4ed1m2f80u18cjm31j1', 'Biopsy results with Dr Okafor', 'biopsy-results-dr-okafor', 'okafor-2026-10-21', 'uid-1', 'appointment@okafor.example', 'Okafor20261109123456', 'okafor1234567890ab', 'okafor2026okafor2026']) {
 			const shown = logged(`${FAMILY}${encodeURIComponent(named)}.ics`);
 			expect(shown).toMatch(/^\/david\/[0-9a-f]{8}\/[0-9a-f]{8}\.ics$/);
 			expect(shown.toLowerCase()).not.toContain('okafor');
@@ -284,8 +285,10 @@ describe('an unexpected error', () => {
 		expectPrivateLog();
 	});
 
-	it('is not logged when it is only a page that is not there', () => {
+	it('is not logged when it is only a page that is not there, or a bad request', () => {
 		handle(new Error(`Not found: /${TITLE}`), 404);
+		handle(new Error('Bad request'), 400);
+		handle(new Error('Unsupported media type'), 415);
 		expect(log).toEqual([]);
 	});
 });

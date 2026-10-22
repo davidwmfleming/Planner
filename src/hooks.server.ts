@@ -24,8 +24,8 @@ export function describeForLog(error: unknown): string {
 }
 
 export const handleError: HandleServerError = ({ error, status }) => {
-	// A page that isn't there is not a fault worth logging.
-	if (status === 404) return;
+	// A missing page or a bad request (wrong address, wrong form) is not a fault worth logging.
+	if (status < 500) return;
 	console.error('Planner: something unexpected went wrong:', describeForLog(error));
 	// The page gets SvelteKit's plain message (nothing is returned), never the error's own.
 };

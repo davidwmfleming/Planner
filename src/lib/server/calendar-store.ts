@@ -22,9 +22,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** Whether an item's file name looks like a UID made by a program (a UUID, or a long run of mostly letters and digits
  * at random), not like words. Other apps can name files anything, the item's title included. */
 function uidLike(stem: string): boolean {
-	if (UUID.test(stem) || /^[0-9a-f]{16,}$/i.test(stem)) return true;
-	const digits = stem.match(/\d/g)?.length ?? 0;
-	return /^[a-z0-9]{16,}$/i.test(stem) && digits * 4 >= stem.length;
+	// Only shapes no word fits: a UUID or a long hex string. Anything else may be a name another app chose.
+	return UUID.test(stem) || /^[0-9a-f]{16,}$/i.test(stem);
 }
 
 /** An address as it may appear in the server's log (house rule 4). A calendar's address is made from its name, so
