@@ -55,10 +55,13 @@ function fakeStore(listed: Calendar[], settings = { categories: [] as string[], 
 		async readSettings() {
 			return settings;
 		},
-		async create(url: string): Promise<StoredItem | void> {
+		/** What each new item was saved as. */
+		saved: [] as { title: string; time?: string }[],
+		async create(url: string, item?: { title: string; time?: string }): Promise<StoredItem | void> {
 			if (!this.listed.some((c) => c.url === url)) throw new Error('No calendar there');
 			if (!this.onServer.some((c) => c.url === url)) throw new Error('Saving failed (409)');
 			this.created.push(url);
+			if (item) this.saved.push({ title: item.title, time: item.time });
 		}
 	};
 }
@@ -125,6 +128,39 @@ describe('the planner page', () => {
 		]);
 		expect(data.workCalendar).toBe('/david/work/');
 		expect(data.defaultEventCalendar).toBe('/david/a/');
+	});
+});
+
+describe('adding a line with an @tag for the calendar', () => {
+	const calendars = () => [cal('me', 'Me'), cal('work', 'Work'), cal('meals', 'Morgan Meals'), cal('tasks', 'Tasks', ['task']), cal('shop', 'Shopping', ['task'])];
+	const settings = { categories: [], workCalendar: '/david/work/', defaultEventCalendar: '/david/me/' };
+
+	it('files an event in the calendar it names, and leaves the tag off the title, time still read', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'event', date: '2026-10-21', text: '9am Standup @work' })).toEqual({ added: 'Standup' });
+		expect(await add({ kind: 'event', date: '2026-10-21', text: '@MorganMeals 5pm Tacos' })).toEqual({ added: 'Tacos' });
+		expect(fake.created).toEqual([`${HOME}work/`, `${HOME}meals/`]);
+		expect(fake.saved).toEqual([{ title: 'Standup', time: '09:00' }, { title: 'Tacos', time: '17:00' }]);
+	});
+
+	it('files a task in the list it names', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'Milk @Shopping' })).toEqual({ added: 'Milk' });
+		expect(fake.created).toEqual([`${HOME}shop/`]);
+	});
+
+	it('uses the default, and keeps the text, when the tag names nothing of that kind', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'event', date: '2026-10-21', text: 'Lunch @Gym' })).toEqual({ added: 'Lunch @Gym' });
+		// Work takes events, not tasks: a task tagged @Work goes to Tasks.
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'Expenses @Work' })).toEqual({ added: 'Expenses @Work' });
+		expect(fake.created).toEqual([`${HOME}me/`, `${HOME}tasks/`]);
+	});
+
+	it('asks for more than a tag', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'event', date: '2026-10-21', text: '@Work' })).toMatchObject({ status: 400 });
+		expect(fake.created).toEqual([]);
 	});
 });
 
