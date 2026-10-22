@@ -8,7 +8,7 @@ import { parseLine } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { pageToday, TEST_TODAY_COOKIE, testClockOn } from '$lib/server/clock';
 import { env } from '$env/dynamic/private';
-import { occurrenceOn, occurrencesBetween } from '$lib/server/ical';
+import { occurrenceOn, occurrencesBetween, pageStepBudget } from '$lib/server/ical';
 import { logged, RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
@@ -74,11 +74,13 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	const { items } = read;
 	// Documents that couldn't be read (written badly by another app, say) are left out, so the rest still shows.
 	const unreadable = new Set(read.unreadable);
-	// A repeating item shows on each day of the page it falls on; one whose repeats can't be worked out is left out too.
+	// A repeating item shows on each day of the page it falls on; one whose repeats can't be worked out is left out too,
+	// as is one that would take the page past the steps all its repeats may share, so the page stays quick.
+	const budget = pageStepBudget();
 	const shown = items.flatMap((i) => {
 		let showings: Item[];
 		try {
-			showings = i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1]) : [i];
+			showings = i.recurrence ? occurrencesBetween(i.ics, dates[0], dates[dates.length - 1], budget) : [i];
 		} catch {
 			unreadable.add(i.url);
 			return [];
