@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseLine } from './parse';
+import { parseLine, takeCalendarTag } from './parse';
 
 describe('parseLine', () => {
 	it.each([
@@ -20,5 +20,23 @@ describe('parseLine', () => {
 
 	it.each(['Pick up meds', '  Green cart  ', '10am', '99 Problems', '3D printer filament'])('keeps "%s" as a plain title', (text) => {
 		expect(parseLine(text)).toEqual({ title: text.trim() });
+	});
+});
+
+describe('takeCalendarTag', () => {
+	const calendars = [{ name: 'Work' }, { name: 'Morgan Meals' }, { name: 'Me' }];
+
+	it('finds the calendar a tag names, anywhere on the line, without regard to case, spaces or punctuation', () => {
+		expect(takeCalendarTag('@Work Team lunch', calendars)).toEqual({ text: 'Team lunch', calendar: { name: 'Work' } });
+		expect(takeCalendarTag('9am Standup @work', calendars)).toEqual({ text: '9am Standup', calendar: { name: 'Work' } });
+		expect(takeCalendarTag('Tacos @morgan-meals tonight', calendars)).toEqual({ text: 'Tacos tonight', calendar: { name: 'Morgan Meals' } });
+		expect(takeCalendarTag('Call bank @Me,', calendars).calendar).toEqual({ name: 'Me' });
+	});
+
+	it('uses the first tag that matches, and leaves other tags and email addresses as written', () => {
+		expect(takeCalendarTag('Ask @Sam about it @Work', calendars)).toEqual({ text: 'Ask @Sam about it', calendar: { name: 'Work' } });
+		expect(takeCalendarTag('Email sam@work.com', calendars)).toEqual({ text: 'Email sam@work.com' });
+		expect(takeCalendarTag('Lunch @Gym', calendars)).toEqual({ text: 'Lunch @Gym' });
+		expect(takeCalendarTag('Price @ 5', calendars)).toEqual({ text: 'Price @ 5' });
 	});
 });

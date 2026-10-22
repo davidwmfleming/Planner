@@ -4,7 +4,7 @@ import { applyEdit, categoryFinder, daysBetween } from '$lib/edit';
 import { shortTitle } from '$lib/format';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
-import { parseLine } from '$lib/parse';
+import { parseLine, takeCalendarTag } from '$lib/parse';
 import { rollover } from '$lib/server/rollover';
 import { pageToday, TEST_TODAY_COOKIE, testClockOn } from '$lib/server/clock';
 import { env } from '$env/dynamic/private';
@@ -144,8 +144,7 @@ export const actions: Actions = {
 		const text = String(form.get('text') ?? '');
 		if (kind !== 'event' && kind !== 'task') return fail(400, { message: 'Choose the events or tasks column' });
 		if (date ? !ISO.test(date) : kind === 'event') return fail(400, { message: 'That day is not a valid date' });
-		const { title, time } = parseLine(text);
-		if (!title) return fail(400, { message: 'Write something on the line first' });
+		if (!parseLine(text).title) return fail(400, { message: 'Write something on the line first' });
 
 		let store, settings;
 		try {
@@ -157,7 +156,12 @@ export const actions: Actions = {
 			console.error('Planner: could not reach the calendar server to add a line', e);
 			return fail(503, { message: NOT_ANSWERING });
 		}
-		const calendar = newItemsGoIn(store, kind, settings);
+		// "@Work" on the line files it in the calendar (or list, for a task) of that name; no tag, or one that names
+		// nothing of this kind, and it goes where new items go.
+		const tagged = takeCalendarTag(text, store.calendars().filter((c) => c.accepts.includes(kind)).sort(byName));
+		const { title, time } = parseLine(tagged.text);
+		if (!title) return fail(400, { message: 'Write something on the line as well as the calendar' });
+		const calendar = tagged.calendar?.url ?? newItemsGoIn(store, kind, settings);
 		if (!calendar) return fail(409, { message: kind === 'event' ? 'There is no calendar for events yet. Add one in Settings.' : 'There is no Tasks list on the calendar server; reload the page.' });
 		try {
 			await store.create(calendar, {

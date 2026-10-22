@@ -8,7 +8,7 @@
 1. **Weekly pages, like the book:** two pages per week, Mon–Wed and Thu–Sun, with Saturday and Sunday given about half the height of a weekday. Opens on the page holding today. Days stack top to bottom; each shows its date top left, events on the left, tasks on the right.
 2. **One-gesture page flip** to the next or previous page, plus a quick jump to any date.
 3. **One-tap marks:** done (tick), dropped (strike-through), and moved to another day. Done and dropped are recorded differently.
-4. **Line-style entry (keyboard in v1):** tap an empty line, type "9am Dentist". In the events column it becomes an event at 9:00 that day; in the tasks column, a task starting at 9:00. "More details" opens recurrence, location, end time, labels and notes.
+4. **Line-style entry (keyboard in v1):** tap an empty line, type "9am Dentist". In the events column it becomes an event at 9:00 that day; in the tasks column, a task starting at 9:00. An @tag on the line, such as "9am Standup @Work", files it in the calendar (or, for a task, the list) of that name, matched without regard to case or spaces; with no tag, or a tag that names nothing, it goes where new items go, and the tag stays in the title. "More details" opens recurrence, location, end time, labels and notes.
 5. **Automatic rollover:** unchecked, undropped tasks move forward to today each morning, marked as carried over so nothing is lost silently.
 
 6. **Tap marks (v1):** tap the box to mark done; a small ✕ button drops an item (shown struck through).
