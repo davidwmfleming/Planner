@@ -29,6 +29,13 @@ test('the header shows the month and which week and days the page holds', async 
 	await expect(header.getByText('Week 43 · Thursday to Sunday')).toBeVisible();
 });
 
+test('the tasks side is light grey and the events side white, to set them apart', async ({ page }) => {
+	await page.goto('/');
+	const today = page.locator(`section.day[data-date="${iso(new Date())}"]`);
+	await expect(today.locator('.col').nth(0)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+	await expect(today.locator('.col').nth(1)).toHaveCSS('background-color', 'rgb(236, 236, 236)');
+});
+
 test('only today has the thick black bar down its left edge', async ({ page }) => {
 	await page.goto('/');
 	const edges = await page.locator('section.day').evaluateAll((days) =>
