@@ -715,6 +715,22 @@ describe('an item that cannot be read', () => {
 		expect(page.match(/Odd stretch/g)?.length).toBe((data.days as { date: string }[]).filter((d) => d.date >= today).length);
 	});
 
+	it('shows daily items that began decades ago, without stepping through every day since', async () => {
+		fake = fakeStore(calendars);
+		fake.items = Array.from({ length: 10 }, (_, n) => ({
+			...readable(`old-${n}`, `Old ${n}`),
+			date: '1970-01-01',
+			recurrence: 'FREQ=DAILY',
+			ics: `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:old-${n}\r\nDTSTAMP:20261001T120000Z\r\nSUMMARY:Old ${n}\r\nDTSTART:19700101T090000\r\nRRULE:FREQ=DAILY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n`
+		}));
+		const started = performance.now();
+		const data = await run();
+		expect(performance.now() - started).toBeLessThan(300);
+		expect(data.unreadable).toBe(0);
+		const page = JSON.stringify(data.days);
+		for (let n = 0; n < 10; n++) expect(page.match(new RegExp(`Old ${n}"`, 'g'))?.length).toBe((data.days as unknown[]).length);
+	});
+
 	it('says nothing when every item can be read', async () => {
 		fake = fakeStore(calendars);
 		fake.items = [readable('swim', 'Swim')];

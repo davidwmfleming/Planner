@@ -1,6 +1,8 @@
+import { spawnSync } from 'node:child_process';
+import ICAL from 'ical.js';
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
-import { itemToICS, occurrenceOn, occurrencesBetween, withOccurrence, withoutOccurrence } from './ical';
+import { itemToICS, occurrenceOn, occurrencesBetween, pageStepBudget, withOccurrence, withoutOccurrence } from './ical';
 
 const lift: Item = { uid: 'r1', kind: 'event', title: 'Lift', date: '2026-10-05', time: '06:30', endTime: '07:30', state: 'open', recurrence: 'FREQ=WEEKLY;BYDAY=MO,TH' };
 const days = (items: Item[]) => items.map((i) => i.date).sort();
@@ -119,7 +121,51 @@ const fromAnotherApp = (rule: string, extra = '') =>
 describe('repeats the planner cannot sensibly show', () => {
 	// Each of these would fill a page with thousands of showings, or repeat in a way that makes no sense,
 	// so it is refused, and the page leaves the item out and counts it as one it couldn't read.
-	it.each(['FREQ=SECONDLY', 'FREQ=MINUTELY', 'FREQ=HOURLY', 'FREQ=HOURLY;INTERVAL=6', 'FREQ=DAILY;INTERVAL=-2', 'FREQ=DAILY;INTERVAL=0', 'FREQ=WEEKLY;INTERVAL=1.5'])(
+	it.each([
+		'FREQ=SECONDLY',
+		'FREQ=MINUTELY',
+		'FREQ=HOURLY',
+		'FREQ=HOURLY;INTERVAL=6',
+		'FREQ=DAILY;INTERVAL=-2',
+		'FREQ=DAILY;INTERVAL=0',
+		'FREQ=WEEKLY;INTERVAL=1.5',
+		'INTERVAL=2',
+		'FREQ=DAILY;FREQ=WEEKLY',
+		'FREQ=DAILY;X-SOMETHING=1',
+		'FREQ=DAILY;COUNT=0',
+		'FREQ=DAILY;UNTIL=soon',
+		'FREQ=DAILY;BYHOUR=9,17',
+		'FREQ=DAILY;BYMINUTE=0',
+		'FREQ=DAILY;BYSECOND=0',
+		'FREQ=YEARLY;BYYEARDAY=100',
+		'FREQ=YEARLY;BYWEEKNO=20',
+		'FREQ=DAILY;BYMONTH=2',
+		'FREQ=DAILY;BYDAY=1MO',
+		'FREQ=WEEKLY;BYDAY=2MO',
+		'FREQ=WEEKLY;BYMONTHDAY=3',
+		'FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=30',
+		'FREQ=MONTHLY;BYMONTHDAY=32',
+		'FREQ=MONTHLY;BYMONTHDAY=0',
+		'FREQ=MONTHLY;BYDAY=6MO',
+		'FREQ=MONTHLY;BYDAY=MO;BYSETPOS=6',
+		'FREQ=MONTHLY;BYSETPOS=1',
+		'FREQ=MONTHLY;BYDAY=1FR;BYMONTHDAY=13',
+		'FREQ=YEARLY;BYMONTH=13',
+		'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30',
+		'FREQ=YEARLY;BYMONTH=2,4;BYMONTHDAY=31',
+		'FREQ=YEARLY;BYMONTH=2;BYDAY=MO;BYSETPOS=6',
+		'FREQ=YEARLY;BYDAY=20MO',
+		'FREQ=YEARLY;BYMONTHDAY=15',
+		'FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=13;BYDAY=FR',
+		// Rules that, from some starts, never fall on any day at all.
+		'FREQ=DAILY;INTERVAL=14;BYDAY=MO',
+		'FREQ=MONTHLY;INTERVAL=12;BYMONTHDAY=31',
+		'FREQ=MONTHLY;INTERVAL=24;BYDAY=5MO',
+		'FREQ=MONTHLY;INTERVAL=12;BYDAY=MO;BYSETPOS=-5',
+		'FREQ=MONTHLY;INTERVAL=2;BYDAY=FR;BYMONTHDAY=13',
+		'FREQ=YEARLY;INTERVAL=4;BYMONTH=2;BYMONTHDAY=29',
+		'FREQ=YEARLY;INTERVAL=28;BYMONTH=3;BYDAY=5MO'
+	])(
 		'refuses %s',
 		(rule) => {
 			expect(() => occurrencesBetween(fromAnotherApp(rule), '2026-10-19', '2026-10-21')).toThrow();
@@ -131,10 +177,26 @@ describe('repeats the planner cannot sensibly show', () => {
 		expect(() => occurrencesBetween(folded, '2026-10-19', '2026-10-21')).toThrow();
 	});
 
-	it('refuses a daily repeat that falls many times on each day', () => {
-		const everyHour = 'FREQ=DAILY;BYHOUR=' + Array.from({ length: 24 }, (_, h) => h).join(',');
-		expect(() => occurrencesBetween(fromAnotherApp(everyHour), '2026-10-19', '2026-10-21')).toThrow();
-	});
+	it('refuses, rather than hangs on, rules ical.js would work on forever', () => {
+		// Each would hang the server inside a single step of ical.js, so it is run apart, with a time limit.
+		const hanging = [
+			'FREQ=DAILY;BYMONTH=2;BYMONTHDAY=30',
+			'FREQ=DAILY;BYYEARDAY=366;BYMONTH=1',
+			'FREQ=MONTHLY;BYMONTH=2;BYMONTHDAY=30',
+			'FREQ=DAILY;BYDAY=1MO',
+			'FREQ=YEARLY;BYMONTH=2;BYDAY=MO;BYSETPOS=6',
+			// Starts on a Thursday, so every 7th day is a Thursday too, never a Monday or Tuesday.
+			'FREQ=DAILY;INTERVAL=7;BYDAY=MO,TU'
+		];
+		// Stopped outright at the limit: a process stuck inside ical.js doesn't stop when asked politely.
+		const run = spawnSync('node_modules/.bin/vite-node', ['--config', 'scripts/vite-node.config.ts', 'src/lib/server/repeat-hang.fixture.ts', ...hanging], {
+			encoding: 'utf8',
+			timeout: 20_000,
+			killSignal: 'SIGKILL'
+		});
+		expect(run.error, 'finished within the time limit').toBeUndefined();
+		expect(JSON.parse(run.stdout.trim().split('\n').at(-1)!)).toEqual(hanging.map(() => 'refused'));
+	}, 30_000);
 
 	it('refuses a long list of extra days that crowds the page', () => {
 		const rdates = Array.from({ length: 30 }, (_, m) => `20261020T${String(8 + Math.floor(m / 6)).padStart(2, '0')}${String((m % 6) * 10).padStart(2, '0')}00`).join(',');
@@ -147,17 +209,118 @@ describe('repeats the planner cannot sensibly show', () => {
 		expect(performance.now() - started).toBeLessThan(100);
 	});
 
-	it('still shows ordinary repeats: daily once a day, every other day, twice a day, monthly and yearly', () => {
+	it('still shows ordinary repeats: daily once a day, every other day, monthly and yearly', () => {
 		const range = ['2026-10-19', '2026-10-21'] as const;
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY'), ...range))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY;INTERVAL=2'), ...range))).toEqual(['2026-10-19', '2026-10-21']);
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY;INTERVAL=+1'), ...range))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
-		expect(occurrencesBetween(fromAnotherApp('FREQ=DAILY;BYHOUR=9,17'), ...range)).toHaveLength(6);
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=MONTHLY'), '2026-11-01', '2026-11-03'))).toEqual(['2026-11-01']);
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=YEARLY'), '2027-10-01', '2027-10-01'))).toEqual(['2027-10-01']);
 	});
 
+	// The shapes iPhone and Mac Calendar's Custom repeat writes, and Google's and Outlook's.
+	it.each([
+		['every weekday, as a daily rule', 'FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR', '2026-10-23', '2026-10-27', ['2026-10-23', '2026-10-26', '2026-10-27']],
+		['every 2 weeks on Monday and Thursday', 'FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;WKST=SU', '2026-10-01', '2026-10-16', ['2026-10-01', '2026-10-12', '2026-10-15']],
+		['monthly on the 3rd and 15th', 'FREQ=MONTHLY;BYMONTHDAY=3,15', '2026-11-01', '2026-11-30', ['2026-11-03', '2026-11-15']],
+		['monthly on the last day', 'FREQ=MONTHLY;BYMONTHDAY=-1', '2026-11-01', '2026-11-30', ['2026-11-30']],
+		['every 2nd Tuesday of the month', 'FREQ=MONTHLY;BYDAY=2TU', '2026-11-01', '2026-11-30', ['2026-11-10']],
+		['the last Friday of the month', 'FREQ=MONTHLY;BYDAY=-1FR', '2026-11-01', '2026-11-30', ['2026-11-27']],
+		['the last weekday of the month', 'FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1', '2026-11-01', '2026-11-30', ['2026-11-30']],
+		['the first weekend day of the month', 'FREQ=MONTHLY;BYDAY=SA,SU;BYSETPOS=1', '2026-11-01', '2026-11-30', ['2026-11-01']],
+		['yearly on 3 March', 'FREQ=YEARLY;BYMONTH=3;BYMONTHDAY=3', '2027-03-01', '2027-03-31', ['2027-03-03']],
+		['yearly in March, on the start day', 'FREQ=YEARLY;BYMONTH=3', '2027-03-01', '2027-03-31', ['2027-03-01']],
+		['yearly on the 2nd Sunday of March', 'FREQ=YEARLY;BYMONTH=3;BYDAY=2SU', '2027-03-01', '2027-03-31', ['2027-03-14']],
+		['yearly on the 2nd Sunday of March, by position', 'FREQ=YEARLY;BYMONTH=3;BYDAY=SU;BYSETPOS=2', '2027-03-01', '2027-03-31', ['2027-03-14']],
+		['daily, five times', 'FREQ=DAILY;COUNT=5', '2026-10-04', '2026-10-08', ['2026-10-04', '2026-10-05']],
+		['weekly until a day', 'FREQ=WEEKLY;UNTIL=20261015T235959Z', '2026-10-01', '2026-10-31', ['2026-10-01', '2026-10-08', '2026-10-15']]
+	] as const)('still shows %s', (_, rule, from, to, expected) => {
+		expect(days(occurrencesBetween(fromAnotherApp(rule), from, to))).toEqual(expected);
+	});
+
 	it('does not mind a time zone’s own yearly rules', () => {
 		expect(days(occurrencesBetween(FROM_PHONE, '2026-10-26', '2026-10-28'))).toEqual(['2026-10-27']);
+	});
+});
+
+/** Every showing ical.js works out by stepping through every repeat from the start: slow, but surely right. */
+function everyStep(ics: string, from: string, to: string) {
+	const comp = new ICAL.Component(ICAL.parse(ics)).getFirstSubcomponent('vevent')!;
+	const expansion = new ICAL.RecurExpansion({ component: comp, dtstart: comp.getFirstPropertyValue('dtstart') as ICAL.Time });
+	const found: string[] = [];
+	for (let next = expansion.next(); next; next = expansion.next()) {
+		const day = next.toString().slice(0, 10);
+		if (day > to) break;
+		if (day >= from) found.push(day);
+	}
+	return found;
+}
+
+const longAgo = (rule: string, start = '19700105T090000', extra = '') =>
+	`BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:old\r\nSUMMARY:Old\r\nDTSTART:${start}\r\nRRULE:${rule}\r\n${extra}END:VEVENT\r\nEND:VCALENDAR\r\n`;
+
+describe('items that started long ago', () => {
+	// Started decades back, so a page far on skips ahead rather than stepping through every day since.
+	it.each([
+		['FREQ=DAILY', '19700101T090000'],
+		['FREQ=DAILY;INTERVAL=3', '19700101T090000'],
+		['FREQ=DAILY;INTERVAL=3;BYDAY=MO,TU', '19700102T090000'],
+		['FREQ=DAILY;BYDAY=MO,WE,FR', '19700101T090000'],
+		['FREQ=WEEKLY', '19700101T090000'],
+		['FREQ=WEEKLY;INTERVAL=3;BYDAY=MO,TH,SU', '19700101T090000'],
+		['FREQ=WEEKLY;INTERVAL=2;BYDAY=TU;WKST=SU', '19991231T090000'],
+		['FREQ=DAILY;COUNT=20678', '19700101T090000'],
+		['FREQ=DAILY;COUNT=20682', '19700101T090000'],
+		['FREQ=DAILY;INTERVAL=2;COUNT=10340', '19700101T090000'],
+		['FREQ=WEEKLY;INTERVAL=2;COUNT=1478', '19700101T090000'],
+		['FREQ=DAILY;UNTIL=20261020T090000', '19700101T090000'],
+		['FREQ=DAILY;UNTIL=99991231T235959Z', '19700101T090000'],
+		['FREQ=DAILY;BYDAY=TU,TH;COUNT=300', '19700101T090000'],
+		['FREQ=MONTHLY', '19700131T090000'],
+		['FREQ=MONTHLY;INTERVAL=5;BYDAY=2TU', '19700101T090000'],
+		['FREQ=MONTHLY;BYDAY=MO,TU,WE,TH,FR;BYSETPOS=-1', '19700101T090000'],
+		['FREQ=MONTHLY;INTERVAL=7;BYMONTHDAY=31,-30', '19700101T090000'],
+		['FREQ=MONTHLY;BYDAY=MO,TH', '20000229T090000'],
+		['FREQ=YEARLY;INTERVAL=3', '19700101T090000'],
+		['FREQ=YEARLY', '19720229T090000'],
+		['FREQ=YEARLY;BYMONTH=10;BYDAY=-1MO', '19700101T090000'],
+		['FREQ=YEARLY;BYMONTH=9,10;BYDAY=SA,SU;BYSETPOS=1,-1', '19700101T090000']
+	])('shows %s (from %s) on the same days as stepping through every one', (rule, start) => {
+		for (const [from, to] of [['2026-10-19', '2026-10-31'], ['2028-02-26', '2028-03-03']]) {
+			expect(days(occurrencesBetween(longAgo(rule, start), from, to)), `${from}..${to}`).toEqual(everyStep(longAgo(rule, start), from, to));
+		}
+	});
+
+	it('keeps skipped days and one-off changes', () => {
+		const ics = longAgo('FREQ=DAILY', '19700101T090000', 'EXDATE:20261020T090000\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:old\r\nRECURRENCE-ID:20261021T090000\r\nSUMMARY:Old (moved)\r\nDTSTART:20261021T150000\r\n');
+		expect(occurrencesBetween(ics, '2026-10-19', '2026-10-21').map((i) => [i.date, i.time, i.seriesStart])).toEqual([
+			['2026-10-19', '09:00', '1970-01-01'],
+			['2026-10-21', '15:00', '1970-01-01']
+		]);
+	});
+
+	it('works out ten daily items from 1970, one that never ends and one with a huge count, well within a second', () => {
+		const budget = pageStepBudget();
+		const items = [...Array.from({ length: 10 }, () => longAgo('FREQ=DAILY')), longAgo('FREQ=DAILY;UNTIL=99991231T235959Z'), longAgo('FREQ=DAILY;COUNT=999999999')];
+		const started = performance.now();
+		for (const ics of items) expect(days(occurrencesBetween(ics, '2026-10-19', '2026-10-21', budget))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
+		expect(performance.now() - started).toBeLessThan(250);
+	});
+
+	it('gives up on, rather than slowly works out, an item with too many repeats before the page', () => {
+		// Weekdays and a count can't be skipped ahead safely, so this one is stepped through, up to a limit.
+		const started = performance.now();
+		expect(() => occurrencesBetween(longAgo('FREQ=DAILY;BYDAY=TU,TH;COUNT=999999999'), '2026-10-19', '2026-10-21')).toThrow();
+		expect(performance.now() - started).toBeLessThan(500);
+	});
+
+	it('shares one budget across a page, so many slow items cannot add up', () => {
+		const budget = { steps: 100 };
+		// Weekdays and a count: stepped through from 2020, which takes more than 100 steps.
+		expect(() => occurrencesBetween(longAgo('FREQ=DAILY;BYDAY=TU,TH;COUNT=999', '20200101T090000'), '2026-10-19', '2026-10-21', budget)).toThrow();
+		expect(budget.steps).toBeLessThanOrEqual(0);
+		// The next item on the same page has none left.
+		expect(() => occurrencesBetween(fromAnotherApp('FREQ=DAILY'), '2026-10-19', '2026-10-21', budget)).toThrow();
+		expect(occurrencesBetween(fromAnotherApp('FREQ=DAILY'), '2026-10-19', '2026-10-21', pageStepBudget())).toHaveLength(3);
 	});
 });
