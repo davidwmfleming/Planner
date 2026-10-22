@@ -211,6 +211,11 @@ describe('giving tasks saved before DUE was written their due date', () => {
 		expect(next).toContain('DUE;VALUE=DATE:20261019');
 		expect(next).toContain('DUE;TZID=America/Halifax:20261027T080000');
 		expect(next).toContain('X-PHONE-THING:keep');
+		// The start stays, and each task has exactly one DUE: a calendar server refuses a second one.
+		expect(next.match(/^DTSTART/gm)).toHaveLength(2);
+		expect(next.match(/^DUE/gm)).toHaveLength(2);
+		expect(next).toContain('DTSTART;VALUE=DATE:20261019');
+		expect(next).toContain('DTSTART;TZID=America/Halifax:20261027T080000');
 		expect(icsToItems(next)[0]).toMatchObject({ date: '2026-10-19', recurrence: 'FREQ=WEEKLY' });
 	});
 

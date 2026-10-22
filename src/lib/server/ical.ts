@@ -75,7 +75,8 @@ export function withDueDates(ics: string): string | undefined {
 	for (const todo of cal.getAllSubcomponents('vtodo')) {
 		const start = todo.getFirstProperty('dtstart');
 		if (!start || !(start.getFirstValue() instanceof ICAL.Time) || todo.hasProperty('due') || todo.hasProperty('duration')) continue;
-		const due = start.toJSON();
+		// A copy: toJSON() hands back the start's own line, so renaming it in place would turn DTSTART into DUE.
+		const due = structuredClone(start.toJSON());
 		due[0] = 'due';
 		todo.addProperty(new ICAL.Property(due));
 		changed = true;
