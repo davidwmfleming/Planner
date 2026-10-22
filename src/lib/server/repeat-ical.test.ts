@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import ICAL from 'ical.js';
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
+import { addDays as addDaysTo } from '$lib/dates';
 import { itemToICS, occurrenceOn, occurrencesBetween, pageStepBudget, withOccurrence, withoutOccurrence } from './ical';
 
 const lift: Item = { uid: 'r1', kind: 'event', title: 'Lift', date: '2026-10-05', time: '06:30', endTime: '07:30', state: 'open', recurrence: 'FREQ=WEEKLY;BYDAY=MO,TH' };
@@ -131,7 +132,7 @@ describe('repeats the planner cannot sensibly show', () => {
 		'FREQ=WEEKLY;INTERVAL=1.5',
 		'INTERVAL=2',
 		'FREQ=DAILY;FREQ=WEEKLY',
-		'FREQ=DAILY;X-SOMETHING=1',
+		'FREQ=DAILY;SOMETHING=1',
 		'FREQ=DAILY;COUNT=0',
 		'FREQ=DAILY;UNTIL=soon',
 		'FREQ=DAILY;BYHOUR=9,17',
@@ -223,6 +224,10 @@ describe('repeats the planner cannot sensibly show', () => {
 		const atLimit = `EXDATE:${list(0, 1000)}\r\nEXDATE:${list(1000, 1000)}\r\n`;
 		expect(days(occurrencesBetween(fromAnotherApp('FREQ=DAILY', atLimit), '2026-10-19', '2026-10-21'))).toEqual(['2026-10-19', '2026-10-20', '2026-10-21']);
 		expect(() => occurrencesBetween(fromAnotherApp('FREQ=DAILY', `${atLimit}RDATE:${day(5000)}\r\n`), '2026-10-19', '2026-10-21')).toThrow(/more than 2000/);
+	});
+
+	it('passes over an app’s own X- parts, as Evolution writes', () => {
+		expect(days(occurrencesBetween(fromAnotherApp('FREQ=WEEKLY;BYDAY=MO;X-EVOLUTION-ENDDATE=20271231T120000Z'), '2026-10-19', '2026-10-25'))).toEqual(['2026-10-19']);
 	});
 
 	it('works it out quickly, not after building every second of the year', () => {
@@ -344,5 +349,75 @@ describe('items that started long ago', () => {
 		// The next item on the same page has none left.
 		expect(() => occurrencesBetween(fromAnotherApp('FREQ=DAILY'), '2026-10-19', '2026-10-21', budget)).toThrow();
 		expect(occurrencesBetween(fromAnotherApp('FREQ=DAILY'), '2026-10-19', '2026-10-21', pageStepBudget())).toHaveLength(3);
+	});
+});
+
+/** The time zone part of FROM_PHONE, as iPhone and Google write it into each document. */
+const TORONTO = FROM_PHONE.slice(FROM_PHONE.indexOf('BEGIN:VTIMEZONE'), FROM_PHONE.indexOf('END:VTIMEZONE') + 'END:VTIMEZONE\n'.length);
+/** A series in Toronto time, as iPhone saves one: its own skipped days and moved days are in Toronto time too. */
+const inToronto = (start: string, rule: string, extra = '', after = '') =>
+	`BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Apple Inc.//iPhone OS 18//EN\n${TORONTO}BEGIN:VEVENT\nUID:tz-1\nDTSTAMP:20261001T120000Z\nSUMMARY:Swim\nDTSTART;TZID=America/Toronto:${start}\nDTEND;TZID=America/Toronto:${start.slice(0, 9)}235900\nRRULE:${rule}\n${extra}END:VEVENT\n${after}END:VCALENDAR\n`;
+const movedInToronto = (from: string, to: string) =>
+	`BEGIN:VEVENT\nUID:tz-1\nDTSTAMP:20261002T120000Z\nRECURRENCE-ID;TZID=America/Toronto:${from}\nSUMMARY:Swim (moved)\nDTSTART;TZID=America/Toronto:${to}\nDTEND;TZID=America/Toronto:${to.slice(0, 9)}235900\nEND:VEVENT\n`;
+
+describe('series in a time zone, worked out from a later start', () => {
+	// The page is weeks after the start, so the planner skips ahead; skipped and moved days must still be found.
+	const swim = inToronto('20261026T163000', 'FREQ=WEEKLY;BYDAY=MO', 'EXDATE;TZID=America/Toronto:20261116T163000\n', movedInToronto('20261109T163000', '20261110T173000'));
+
+	it('keeps a day deleted on the phone deleted', () => {
+		expect(days(occurrencesBetween(swim, '2026-11-16', '2026-11-18'))).toEqual([]);
+		expect(days(occurrencesBetween(swim, '2026-11-23', '2026-11-25'))).toEqual(['2026-11-23']);
+	});
+
+	it('shows a day moved on the phone once, on its new day', () => {
+		expect(occurrencesBetween(swim, '2026-11-09', '2026-11-11').map((i) => [i.date, i.time, i.title, i.occurrence])).toEqual([['2026-11-10', '17:30', 'Swim (moved)', '2026-11-09']]);
+	});
+
+	it.each([
+		['weekly since 2015', inToronto('20150105T163000', 'FREQ=WEEKLY', 'EXDATE;TZID=America/Toronto:20261123T163000\n'), '2026-11-23', '2026-11-30'],
+		['weekly since 2015, with a count', inToronto('20150105T163000', 'FREQ=WEEKLY;COUNT=1000', 'EXDATE;TZID=America/Toronto:20261123T163000\n'), '2026-11-23', '2026-11-30'],
+		['daily since 2015, on weekdays', inToronto('20150101T061500', 'FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR', 'EXDATE;TZID=America/Toronto:20261124T061500\n'), '2026-11-24', '2026-11-25'],
+		['monthly since 2015', inToronto('20150123T090000', 'FREQ=MONTHLY', 'EXDATE;TZID=America/Toronto:20261123T090000\n'), '2026-11-23', '2026-12-23']
+	])('keeps a skipped day skipped in a series %s', (_, ics, skipped, next) => {
+		expect(days(occurrencesBetween(ics, skipped, skipped))).toEqual([]);
+		expect(days(occurrencesBetween(ics, next, next))).toEqual([next]);
+	});
+
+	it('keeps a day deleted here deleted', () => {
+		const deleted = withoutOccurrence(swim, '2026-11-30');
+		expect(deleted).toContain('EXDATE;TZID=America/Toronto:20261130T163000');
+		expect(days(occurrencesBetween(deleted, '2026-11-30', '2026-12-02'))).toEqual([]);
+		expect(days(occurrencesBetween(deleted, '2026-12-07', '2026-12-09'))).toEqual(['2026-12-07']);
+		// Its earlier skipped and moved days are still as they were.
+		expect(days(occurrencesBetween(deleted, '2026-11-16', '2026-11-18'))).toEqual([]);
+		expect(days(occurrencesBetween(deleted, '2026-11-09', '2026-11-11'))).toEqual(['2026-11-10']);
+	});
+
+	// Checked against stepping through every repeat from the start, with the same skipped and moved days.
+	it.each([
+		['FREQ=WEEKLY;BYDAY=MO', '20150105T163000'],
+		['FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH;WKST=SU', '20150105T163000'],
+		['FREQ=WEEKLY;COUNT=1000', '20150105T163000'],
+		['FREQ=DAILY;INTERVAL=3', '20150101T061500'],
+		['FREQ=DAILY;COUNT=5000', '20150101T061500'],
+		['FREQ=MONTHLY;BYDAY=2TU', '20150113T190000'],
+		['FREQ=YEARLY;BYMONTH=11;BYDAY=-1MO', '20151130T090000']
+	])('shows %s (from %s) as stepping through every one would', (rule, start) => {
+		const firstPass = everyStep(inToronto(start, rule), '2026-10-01', '2027-01-31');
+		// Skip every third showing, and move the one after each to the next day.
+		const skipped = firstPass.filter((_, n) => n % 3 === 0);
+		const movedFrom = firstPass.filter((_, n) => n % 3 === 1);
+		const time = start.slice(8);
+		const ics = inToronto(
+			start,
+			rule,
+			skipped.map((d) => `EXDATE;TZID=America/Toronto:${d.replaceAll('-', '')}${time}\n`).join(''),
+			movedFrom.map((d) => movedInToronto(`${d.replaceAll('-', '')}${time}`, `${addDaysTo(d, 1).replaceAll('-', '')}T120000`)).join('')
+		);
+		const want = (from: string, to: string) =>
+			[...everyStep(inToronto(start, rule), from, to).filter((d) => !skipped.includes(d) && !movedFrom.includes(d)), ...movedFrom.map((d) => addDaysTo(d, 1)).filter((d) => d >= from && d <= to)].sort();
+		for (const [from, to] of [['2026-10-19', '2026-10-31'], ['2026-11-09', '2026-11-25'], ['2026-12-28', '2027-01-10']]) {
+			expect(days(occurrencesBetween(ics, from, to)), `${from}..${to}`).toEqual(want(from, to));
+		}
 	});
 });

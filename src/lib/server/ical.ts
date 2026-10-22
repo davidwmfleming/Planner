@@ -167,7 +167,8 @@ function checkRule(text: string) {
 	const freq = rule.get('FREQ') ?? '';
 	const allowed: Record<string, string[]> = { DAILY: ['BYDAY'], WEEKLY: ['BYDAY'], MONTHLY: ['BYDAY', 'BYMONTHDAY', 'BYSETPOS'], YEARLY: ['BYMONTH', 'BYMONTHDAY', 'BYDAY', 'BYSETPOS'] };
 	if (!allowed[freq]) refuse(`repeats ${freq.toLowerCase() || 'with no frequency'}, more often than daily`);
-	for (const key of rule.keys()) if (!['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'WKST', ...allowed[freq]].includes(key)) refuse(`${key} with ${freq}`);
+	// An app's own X- parts (Evolution writes X-EVOLUTION-ENDDATE) are allowed by the standard and change nothing.
+	for (const key of rule.keys()) if (!key.startsWith('X-') && !['FREQ', 'INTERVAL', 'COUNT', 'UNTIL', 'WKST', ...allowed[freq]].includes(key)) refuse(`${key} with ${freq}`);
 
 	const whole = (key: string, lowest: number, highest: number, signed = false) => {
 		const value = rule.get(key);
@@ -284,20 +285,20 @@ export function occurrencesBetween(ics: string, from: string, to: string, budget
 	const touches = (i: Item) => !!i.date && i.date <= to && (i.endDate ?? i.date) >= from;
 
 	const shown: Item[] = [];
-	let component = master;
 	let dtstart = master.getFirstPropertyValue('dtstart') as ICAL.Time;
 	const later = laterStart(master, dtstart, from, length);
 	if (later) {
-		component = new ICAL.Component(master.toJSON());
 		dtstart = later.start;
+		// The count is changed on the document's own series, never on a copy: a copy is cut off from the document's
+		// time zones, so its skipped days (EXDATE;TZID=...) would no longer match. Each call reads the document afresh.
 		if (later.count !== undefined) {
 			const rule = later.rule.clone();
 			rule.count = later.count;
-			component.getFirstProperty('rrule')!.setValue(rule);
+			master.getFirstProperty('rrule')!.setValue(rule);
 		}
 	}
 	// A count all used up before the page: nothing of the series is left to show.
-	const expansion = later?.count !== undefined && later.count <= 0 ? undefined : new ICAL.RecurExpansion({ component, dtstart });
+	const expansion = later?.count !== undefined && later.count <= 0 ? undefined : new ICAL.RecurExpansion({ component: master, dtstart });
 	let lastDay = '';
 	let onLastDay = 0;
 	for (let steps = 0; expansion; steps++) {
