@@ -6,12 +6,29 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
 import { CalendarStore, NoAnswerError, type Calendar, type StoredDocument } from './calendar-store';
-import { deleteCategory, renameCategory, tasksWith, type SettingsPlace } from './categories';
+import { deleteCategory, recategorise, renameCategory, tasksWith, type SettingsPlace } from './categories';
 import { icsToItems, occurrenceOn } from './ical';
 
 const hasRadicale = spawnSync('python3', ['-m', 'radicale', '--version']).status === 0;
 const PORT = 5294;
 const auth = { Authorization: `Basic ${Buffer.from('david:dev').toString('base64')}` };
+
+describe('a task the calendar server gave no version (ETag) for', () => {
+	it('is not saved, and counts as refused, so the category stays on the list', async () => {
+		const todo = (uid: string) => `BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VTODO\r\nUID:${uid}\r\nDTSTAMP:20261019T120000Z\r\nSUMMARY:x\r\nCATEGORIES:Waiting\r\nEND:VTODO\r\nEND:VCALENDAR\r\n`;
+		const tasks = 'http://127.0.0.1:5232/david/tasks/';
+		const store = new CalendarStore({ serverUrl: 'http://127.0.0.1:5232/', username: 'david', password: 'dev' });
+		const sent: string[] = [];
+		Object.assign(store, {
+			refreshCalendars: async () => {},
+			calendars: () => [{ url: tasks, name: 'Tasks', accepts: ['task'] }],
+			documents: async () => ({ version: '"v1"', documents: [{ calendarUrl: tasks, url: `${tasks}a.ics`, ics: todo('a') }, { calendarUrl: tasks, url: `${tasks}b.ics`, etag: '"b1"', ics: todo('b') }] }),
+			put: async (doc: { url: string }) => void sent.push(doc.url)
+		});
+		expect(await recategorise(store, 'Waiting', 'Later')).toEqual({ changed: 1, refused: 1, unsure: false });
+		expect(sent).toEqual([`${tasks}b.ics`]);
+	});
+});
 
 describe.skipIf(!hasRadicale)('renaming and deleting a category against Radicale', () => {
 	let server: ChildProcess;

@@ -25,6 +25,18 @@ const listing = (href: string, name: string, comps = ['VEVENT']) => ({
 });
 
 describe('CalendarStore without a server', () => {
+	it('refuses to save a changed document it has no version (ETag) for, without sending anything', async () => {
+		const sent: unknown[] = [];
+		const store = storeWith({ updateCalendarObject: async (args: unknown) => (sent.push(args), new Response(null, { status: 204 })) });
+		const doc = { calendarUrl: 'http://127.0.0.1:5232/david/tasks/', url: 'http://127.0.0.1:5232/david/tasks/a.ics', ics: 'BEGIN:VCALENDAR' };
+		const refused = await store.saveDocument(doc, 'changed').catch((e: unknown) => e);
+		expect(refused).toBeInstanceOf(RefusedError);
+		expect(refused).toMatchObject({ status: 428 });
+		expect(sent).toEqual([]);
+		await store.saveDocument({ ...doc, etag: '"v1"' }, 'changed');
+		expect(sent).toEqual([{ calendarObject: { url: doc.url, etag: '"v1"', data: 'changed' } }]);
+	});
+
 	it('lists only calendars inside the home folder on the same server', async () => {
 		const store = storeWith({
 			propfind: async () => [

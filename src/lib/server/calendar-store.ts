@@ -469,6 +469,9 @@ export class CalendarStore {
 	/** Saves a changed version of a stored document, only if it is still the version read (its ETag): one changed
 	 * on a phone since is refused (412), so that change is never overwritten unseen. */
 	async saveDocument(doc: StoredDocument, ics: string): Promise<void> {
+		// Without a version, the save couldn't be made only-if-unchanged, so a change made on a phone could be lost.
+		// Refused (428, Precondition Required) without asking the server, so the caller counts it as not changed.
+		if (!doc.etag) throw new RefusedError(`Not saving ${logged(doc.url)}: the calendar server gave no version for it`, 428);
 		await this.put({ url: doc.url, etag: doc.etag }, ics);
 	}
 
