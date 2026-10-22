@@ -598,32 +598,31 @@
 	{/if}
 	<main class="page">
 		{#each data.days as day (day.date)}
-			<section class="day" class:weekend={day.weekend} class:drop-target={dropDay === day.date} aria-label={day.date} data-date={day.date}>
+			<!-- Today has a thick black bar down its left edge (drawn by the stylesheet), as well as its Today tag. -->
+			<section class="day" class:weekend={day.weekend} class:today={day.date === data.today} class:drop-target={dropDay === day.date} aria-label={day.date} data-date={day.date}>
 				<div class="day-head">
-					<span class="dow">{dayLetter(day.date)}</span>
 					<span class="dnum">{dayNumber(day.date)}</span>
-					<span class="dmonth">{monthShort(day.date)}</span>
+					<!-- The month is in the header; a day in another month (a page running into November) says so. -->
+					<span class="dname">{dayName(day.date)}{#if monthShort(day.date) !== monthShort(data.start)}<span class="dmonth"> · {monthShort(day.date)}</span>{/if}</span>
 					{#if day.date === data.today}<span class="today-tag">Today</span>{/if}
 				</div>
-				<div class="cols">
-					<div class="col">
-						<h2>Events</h2>
-						<ul class="lines">
-							{#each day.events as item (rowKey(item))}
-								{@render itemRow(item, day.date)}
-							{/each}
-							{@render blankLine('event', day.date)}
-						</ul>
-					</div>
-					<div class="col">
-						<h2>Tasks</h2>
-						<ul class="lines">
-							{#each day.tasks as item (rowKey(item))}
-								{@render itemRow(item, day.date)}
-							{/each}
-							{@render blankLine('task', day.date)}
-						</ul>
-					</div>
+				<div class="col">
+					<h2>Events</h2>
+					<ul class="lines">
+						{#each day.events as item (rowKey(item))}
+							{@render itemRow(item, day.date)}
+						{/each}
+						{@render blankLine('event', day.date)}
+					</ul>
+				</div>
+				<div class="col">
+					<h2>Tasks</h2>
+					<ul class="lines">
+						{#each day.tasks as item (rowKey(item))}
+							{@render itemRow(item, day.date)}
+						{/each}
+						{@render blankLine('task', day.date)}
+					</ul>
 				</div>
 			</section>
 		{/each}
@@ -800,36 +799,45 @@
 	.lines li[data-uid] { user-select: none; -webkit-user-select: none; }
 	li.dragging { outline: 2px dashed var(--ink); }
 	.day.drop-target { outline: 4px solid var(--ink); outline-offset: -2px; }
-	.day { border-bottom: 2px solid var(--ink); padding: 0.5rem var(--gutter-right) 0.9rem var(--gutter-left); min-height: calc((100dvh - 10rem) / 3); }
-	.day.weekend { min-height: calc((100dvh - 10rem) / 6); }
-	.day-head { display: flex; align-items: baseline; gap: 0.55rem; }
-	.dow, .dnum { font-weight: 800; font-size: 1.6rem; }
-	.dow { width: 1.3em; }
-	.dnum { font-variant-numeric: tabular-nums; }
-	.dmonth { color: var(--muted); font-size: 0.9rem; }
-	.today-tag { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; border: 1.5px solid var(--ink); border-radius: 99px; padding: 0 0.5rem; }
-	.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-top: 0.2rem; }
-	.col { min-width: 0; }
-	h2 { font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin: 0; font-weight: 700; }
+	/* A day: the date in its own narrow column, then events, then tasks, each the day's full height. */
+	.day {
+		position: relative;
+		display: grid;
+		/* Wide enough for WEDNESDAY on one line. */
+		grid-template-columns: calc(var(--gutter-left) + 96px) minmax(0, 1fr) minmax(0, 1fr);
+		border-bottom: 1px solid var(--ink);
+		min-height: calc((100dvh - 12rem) / 3);
+	}
+	.day.weekend { min-height: calc((100dvh - 12rem) / 6); }
+	/* Today's bar, over everything in the day (on a phone the tasks run full width beneath the events). */
+	.day.today::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 8px; background: var(--ink); pointer-events: none; z-index: 1; }
+	.day-head { padding: 20px 0 16px var(--gutter-left); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+	.dnum { font-family: var(--serif); font-size: 3.25rem; line-height: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
+	.dname { font-size: 0.8125rem; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; }
+	.today-tag { margin-top: 8px; align-self: flex-start; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: var(--ink); color: var(--paper); padding: 3px 7px; border-radius: 3px; }
+	.col { min-width: 0; padding: 18px 24px 16px 16px; border-right: 1px solid var(--col-rule); }
+	.col + .col { padding: 18px var(--gutter-right) 16px 24px; border-right: 0; }
+	h2 { font-size: 0.8125rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin: 0; padding-bottom: 6px; font-weight: 400; }
 	.lines { list-style: none; margin: 0; padding: 0; }
-	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 0.45rem; }
+	.lines li { min-height: var(--line); border-bottom: 1px solid var(--rule); display: flex; align-items: center; gap: 0.6rem; }
 	.inline { display: contents; }
 	.act {
 		font: inherit;
 		background: none;
 		border: 0;
 		color: var(--muted);
-		min-width: var(--line);
+		/* Tall as the line, but not as wide, so a task's title keeps room beside ✕, → and ↩. */
+		min-width: min(var(--line), 44px);
 		min-height: var(--line);
 		padding: 0;
 		cursor: pointer;
 	}
 	/* The square is small like a paper box, but the whole line height around it is tappable. */
 	.box { cursor: pointer; padding: 0; margin-left: -0.5rem; background: none; border: 0; width: 2.25rem; min-height: var(--line); flex: none; display: grid; place-items: center; }
-	.sq { background: var(--paper); width: 1.25rem; height: 1.25rem; border: 2px solid var(--pen); border-radius: 3px; display: grid; place-items: center; font-weight: 800; font-size: 0.95rem; line-height: 1; color: var(--pen); }
-	.time { font-variant-numeric: tabular-nums; color: var(--pen); font-weight: 700; min-width: 4.4em; font-size: 0.92rem; }
-	.allday { color: var(--pen); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 4.4em; }
-	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--pen); }
+	.sq { background: var(--paper); width: 22px; height: 22px; border: 2px solid var(--ink); border-radius: 3px; display: grid; place-items: center; font-weight: 700; font-size: 1.0625rem; line-height: 1; color: var(--ink); }
+	.time { font-variant-numeric: tabular-nums; color: var(--ink); font-weight: 700; min-width: 4.4em; font-size: 0.9em; }
+	.allday { color: var(--ink); font-weight: 700; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; min-width: 5.6em; }
+	.title { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink); }
 	li.done .title, li.done .time { color: var(--muted); }
 	li.done.marked .sq::after { content: '✓'; }
 	li.dropped .title, li.dropped .time { text-decoration: line-through; text-decoration-thickness: 2px; color: var(--muted); }
@@ -838,13 +846,13 @@
 		flex: 1;
 		min-width: 0;
 		font: inherit;
-		color: var(--pen);
+		color: var(--ink);
 		background: transparent;
 		border: 0;
 		padding: 0.2rem 0;
 		min-height: var(--line);
 	}
-	.entry::placeholder { color: var(--muted); opacity: 0.6; font-size: 0.85rem; }
+	.entry::placeholder { color: var(--hint); opacity: 1; font-size: 1rem; }
 	.entry:focus { background: var(--wash); outline-offset: 0; }
 	/* A line being written on opens up, so there's room for handwriting. It closes a moment after you leave it,
 	   so the page doesn't shift under a tap that is still landing. */
@@ -923,8 +931,8 @@
 	/* The buttons come first, for the phone layout below; beside the text they go after it. */
 	.trouble-buttons { display: contents; }
 	.trouble .error { order: -1; }
-	.tag { font-size: 0.72rem; border: 1px solid var(--muted); color: var(--muted); border-radius: 99px; padding: 0 0.4rem; white-space: nowrap; }
-	.carry { font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+	.tag { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border: 1.5px solid var(--muted); color: var(--muted); border-radius: 3px; padding: 1px 6px; white-space: nowrap; }
+	.carry { font-size: 0.8125rem; font-style: italic; color: var(--muted); white-space: nowrap; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
@@ -936,13 +944,23 @@
 	.titled { position: relative; }
 	.titled .title::after { content: ''; position: absolute; inset: 0; }
 	/* Ink, not grey, and a firmer line, so the tag reads on e-ink. A tap on it goes to the title under it. */
-	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; border-radius: 0.6rem; color: var(--ink); border: 1.5px solid var(--ink); pointer-events: none; }
+	.cal-tag { max-width: 100%; white-space: normal; overflow-wrap: anywhere; color: var(--ink); border: 1.5px solid var(--ink); pointer-events: none; }
 	.cal-tag.work-tag { background: var(--ink); color: var(--paper); }
 	/* Read out, not shown. */
 	.unseen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 	.work-tag { border-color: var(--ink); color: var(--ink); }
 	@media (max-width: 520px) {
-		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
+		.wrap { font-size: 1.0625rem; }
+		/* The date across the top of the day, then events, then tasks, each the screen's full width. */
+		.day { grid-template-columns: minmax(0, 1fr); }
+		.day-head { flex-direction: row; align-items: baseline; gap: 0.6rem; padding: 14px var(--gutter-right) 2px var(--gutter-left); }
+		.dnum { font-size: 2.25rem; }
+		.today-tag { margin-top: 0; align-self: center; }
+		.col, .col + .col { padding: 8px var(--gutter-right) 12px var(--gutter-left); border-right: 0; }
+		/* A narrow row gives its room to the title: closer spacing, slimmer buttons and tags. */
+		.lines li { gap: 0.45rem; }
+		.act { min-width: 40px; }
+		.tag { letter-spacing: 0.03em; padding: 1px 4px; }
 		.row2 { grid-template-columns: minmax(0, 1fr); }
 		/* Month and the gear on one line, the four page controls on the next: no third row eating the page. */
 		.bar { padding-top: 12px; padding-bottom: 10px; gap: 0.5rem; }
