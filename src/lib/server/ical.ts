@@ -64,6 +64,25 @@ export function withCategoryChanged(ics: string, from: string, to: string | unde
 	return changed ? cal.toString() : undefined;
 }
 
+/**
+ * A stored document with a DUE added to each task that has a start but no due date, so Apple Reminders shows its day.
+ * The DUE is a copy of the start, time zone included; everything else stays as it was. A task with a DURATION is left
+ * alone, as the standard allows only one of the two. Undefined when nothing changes, so nothing is saved.
+ */
+export function withDueDates(ics: string): string | undefined {
+	const cal = new ICAL.Component(ICAL.parse(ics));
+	let changed = false;
+	for (const todo of cal.getAllSubcomponents('vtodo')) {
+		const start = todo.getFirstProperty('dtstart');
+		if (!start || !(start.getFirstValue() instanceof ICAL.Time) || todo.hasProperty('due') || todo.hasProperty('duration')) continue;
+		const due = start.toJSON();
+		due[0] = 'due';
+		todo.addProperty(new ICAL.Property(due));
+		changed = true;
+	}
+	return changed ? cal.toString() : undefined;
+}
+
 /** A property's value as text, to tell whether a one-off change has its own. CATEGORIES can hold several, and are
  * compared as names without regard to case, so a day written with "This month" still matches a series with "month". */
 const textOf = (comp: ICAL.Component, name: string) =>
@@ -453,8 +472,13 @@ function componentToItem(comp: ICAL.Component): Item {
 	};
 
 	// A task's day is its DUE, the date Apple Reminders shows and changes, unless it repeats: repeats count from DTSTART.
-	const due = kind === 'task' && !comp.hasProperty('rrule') ? comp.getFirstPropertyValue('due') : null;
-	const start = (due ?? comp.getFirstPropertyValue('dtstart') ?? (kind === 'task' ? comp.getFirstPropertyValue('due') : null)) as ICAL.Time | null;
+	// Only a real date or time counts: a DUE written as a period or text by a faulty app falls back to DTSTART.
+	const timeOf = (name: string) => {
+		const v = comp.getFirstPropertyValue(name);
+		return v instanceof ICAL.Time ? v : null;
+	};
+	const due = kind === 'task' ? timeOf('due') : null;
+	const start = (!comp.hasProperty('rrule') && due) || timeOf('dtstart') || due;
 	if (start) {
 		item.date = isoDate(start);
 		if (!start.isDate) item.time = hhmm(start);

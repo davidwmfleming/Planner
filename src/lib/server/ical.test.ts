@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
-import { carriesCategory, icsToItems, itemToICS, occurrenceOn, withCategoryChanged, withOccurrence } from './ical';
+import { carriesCategory, icsToItems, itemToICS, occurrenceOn, withCategoryChanged, withDueDates, withOccurrence } from './ical';
 
 const roundTrip = (item: Item) => icsToItems(itemToICS(item))[0];
 
@@ -86,6 +86,12 @@ describe('tasks', () => {
 		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r3', 'DTSTAMP:20261019T000000Z',
 			'SUMMARY:Sheets', 'DTSTART;VALUE=DATE:20261021', 'DUE;VALUE=DATE:20261023', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
 		expect(icsToItems(ics)[0]).toMatchObject({ date: '2026-10-23' });
+	});
+
+	it('falls back to the start when another app wrote DUE as something other than a date', () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r4', 'DTSTAMP:20261019T000000Z',
+			'SUMMARY:Sheets', 'DTSTART;VALUE=DATE:20261021', 'DUE;VALUE=PERIOD:20261023T090000/PT1H', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		expect(icsToItems(ics)[0]).toMatchObject({ date: '2026-10-21' });
 	});
 
 	it('remembers where a carried-over task came from', () => {
@@ -190,5 +196,28 @@ describe('changing a category on a stored task (rename or delete of a category)'
 	it('gives nothing back when no task carries the category, so nothing is saved', () => {
 		expect(withCategoryChanged(series, 'Someday', 'Later')).toBeUndefined();
 		expect(withCategoryChanged(doc('BEGIN:VTODO', 'UID:t', 'DTSTAMP:20261019T000000Z', 'SUMMARY:x', 'CATEGORIES:Later', 'END:VTODO'), 'Someday', 'Later')).toBeUndefined();
+	});
+});
+
+describe('giving tasks saved before DUE was written their due date', () => {
+	const doc = (...lines: string[]) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', ...lines, 'END:VCALENDAR'].join('\r\n');
+
+	it('copies the start to DUE on the series and each one-off change, time zone included, keeping everything else', () => {
+		const ics = doc('BEGIN:VTODO', 'UID:o1', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins', 'DTSTART;VALUE=DATE:20261019', 'RRULE:FREQ=WEEKLY',
+			'X-PHONE-THING:keep', 'END:VTODO',
+			'BEGIN:VTODO', 'UID:o1', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins', 'RECURRENCE-ID;VALUE=DATE:20261026',
+			'DTSTART;TZID=America/Halifax:20261027T080000', 'END:VTODO');
+		const next = withDueDates(ics)!;
+		expect(next).toContain('DUE;VALUE=DATE:20261019');
+		expect(next).toContain('DUE;TZID=America/Halifax:20261027T080000');
+		expect(next).toContain('X-PHONE-THING:keep');
+		expect(icsToItems(next)[0]).toMatchObject({ date: '2026-10-19', recurrence: 'FREQ=WEEKLY' });
+	});
+
+	it('changes nothing for undated tasks, tasks with DUE or DURATION, and events', () => {
+		expect(withDueDates(doc('BEGIN:VTODO', 'UID:o2', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Someday', 'END:VTODO'))).toBeUndefined();
+		expect(withDueDates(doc('BEGIN:VTODO', 'UID:o3', 'DTSTAMP:20261019T000000Z', 'DTSTART;VALUE=DATE:20261019', 'DUE;VALUE=DATE:20261020', 'END:VTODO'))).toBeUndefined();
+		expect(withDueDates(doc('BEGIN:VTODO', 'UID:o4', 'DTSTAMP:20261019T000000Z', 'DTSTART:20261019T090000', 'DURATION:PT1H', 'END:VTODO'))).toBeUndefined();
+		expect(withDueDates(doc('BEGIN:VEVENT', 'UID:o5', 'DTSTAMP:20261019T000000Z', 'DTSTART;VALUE=DATE:20261019', 'END:VEVENT'))).toBeUndefined();
 	});
 });
