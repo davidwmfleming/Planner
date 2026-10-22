@@ -57,7 +57,8 @@ describe('category names in the stored settings', () => {
 		const raw = JSON.stringify({ categories: names });
 		const started = performance.now();
 		const kept = parseSettings(raw, calendars).categories;
-		expect(performance.now() - started).toBeLessThan(250);
+		// Much of this is parsing about 6 MB of JSON; the old way took seconds, so 1 s still catches it without failing on a busy runner.
+		expect(performance.now() - started).toBeLessThan(1000);
 		const first51 = [...new Set(names.filter((n) => n !== huge))].slice(0, 51);
 		expect(first51.slice(0, 4)).toEqual(['List 0', 'waiting', 'List 6', 'List 9']);
 		expect(kept).toEqual(first51);

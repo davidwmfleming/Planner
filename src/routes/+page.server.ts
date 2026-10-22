@@ -87,7 +87,7 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	});
 	if (unreadable.size) {
 		// Where each one is, so it can be found and fixed; never its title or details (house rule 4).
-		console.warn(`Planner: left out ${unreadable.size} item(s) that couldn't be read:`, [...unreadable].map(pathOf).join(', '));
+		console.warn(`Planner: left out ${unreadable.size} item(s) that couldn't be read:`, [...unreadable].slice(0, 10).map(logged).join(', '));
 	}
 
 	const calendars = store.calendars();

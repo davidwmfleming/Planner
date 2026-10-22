@@ -1,6 +1,6 @@
 // The planner page's server side with a pretend calendar server, for the cases a shared test server can't stage.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NoAnswerError, RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
+import { logged as forLog, NoAnswerError, RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
@@ -728,7 +728,7 @@ describe('an item that cannot be read', () => {
 		expect(data.unreadable).toBe(1);
 		expect(JSON.stringify(data.days)).toContain('Swim');
 		// The log says where it is, so it can be found and fixed; it has no title to give.
-		expect(warned.join('\n')).toContain('/david/me/from-a-phone.ics');
+		expect(warned.join('\n')).toContain(forLog('/david/me/from-a-phone.ics'));
 	});
 
 	it('counts a repeating item whose repeats cannot be worked out, and logs where it is, not its title', async () => {
@@ -738,7 +738,7 @@ describe('an item that cannot be read', () => {
 		expect(data.unreadable).toBe(1);
 		expect(JSON.stringify(data.days)).toContain('Swim');
 		expect(JSON.stringify(data.days)).not.toContain('Piano');
-		expect(warned.join('\n')).toContain('/david/me/piano.ics');
+		expect(warned.join('\n')).toContain(forLog('/david/me/piano.ics'));
 		expect(warned.join('\n')).not.toContain('Piano');
 	});
 

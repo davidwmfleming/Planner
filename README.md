@@ -53,7 +53,7 @@ Every night at 02:30 the server copies all the calendars, the planner's settings
 
 The copies and their folder belong to root. Your account can read them (through its group) but can't change or add anything there; no other account can see them.
 
-The times and dates follow the server's clock, so set its time zone once: `timedatectl` shows it; if it doesn't say `America/Toronto`, run `sudo timedatectl set-timezone America/Toronto`.
+The times and dates follow the server's clock, so set its time zone once: `timedatectl` shows it; if it doesn't say `America/Halifax`, run `sudo timedatectl set-timezone America/Halifax`.
 
 - See when it last ran and when it runs next: `systemctl list-timers planner-backup.timer`
 - Make a copy now: `sudo systemctl start planner-backup`, then `ls -l /srv/backups/planner`
