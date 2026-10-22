@@ -2,7 +2,7 @@
 import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
 import { byName, calendarAtPath, type Settings } from '$lib/settings';
-import { CalendarStore } from './calendar-store';
+import { CalendarStore, useLogKey } from './calendar-store';
 import { prepareStore, tasksCalendarUrl } from './startup';
 
 let store: Promise<CalendarStore> | undefined;
@@ -16,6 +16,7 @@ export function getStore(): Promise<CalendarStore> {
 		});
 		const started = s.connect().then(async () => {
 			await prepareStore(s, { startingCalendars: eventCalendarNames(), ...seed(), tasksCalendar: tasksCalendarName() });
+			await useInstallLogKey(s);
 			return s;
 		});
 		// Retry on the next request if the server was down or didn't answer in time.
@@ -25,6 +26,16 @@ export function getStore(): Promise<CalendarStore> {
 		store = started;
 	}
 	return store;
+}
+
+/** Fingerprints in the log are made with this install's own key from now on. If it can't be read or made, the
+ * planner still starts, with a key for this run only: fingerprints then change at the next start. */
+async function useInstallLogKey(s: CalendarStore) {
+	try {
+		useLogKey(await s.logKey(s.addressFor(tasksCalendarName())));
+	} catch (e) {
+		console.error('Could not read or make the key for fingerprints in the log; using one for this run only', e);
+	}
 }
 
 /** Event calendars a planner starts with on a first run. More can be added from the details sheet. */

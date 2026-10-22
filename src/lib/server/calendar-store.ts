@@ -1,17 +1,43 @@
 // Reads and writes planner items on a CalDAV server (Radicale in production and development).
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
 import { parseSettings, type Settings, type SettingsSeed } from '$lib/settings';
 import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
 
-/** An address as it may appear in the server's log. A calendar's address is made from its name, so each folder
- * in it becomes a short fingerprint; item files are named by UID and stay as they are (house rule 4). */
+/** The key fingerprints in the log are made with. Each install has its own, kept on the Tasks collection beside the
+ * settings (so in the data volume, and backed up), so fingerprints stay the same across restarts but nobody can work
+ * out a calendar's name from a shared log by fingerprinting likely names. Until it is read, a key for this run only. */
+let logKey = randomBytes(32);
+
+/** Uses this install's key (64 hex characters) for fingerprints in the log from now on. */
+export function useLogKey(key: string) {
+	logKey = Buffer.from(key, 'hex');
+}
+
+const fingerprint = (text: string) => createHmac('sha256', logKey).update(text).digest('hex').slice(0, 8);
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Whether an item's file name looks like a UID made by a program (a UUID, or a long run of mostly letters and digits
+ * at random), not like words. Other apps can name files anything, the item's title included. */
+function uidLike(stem: string): boolean {
+	// Only shapes no word fits: a UUID or a long hex string. Anything else may be a name another app chose.
+	return UUID.test(stem) || /^[0-9a-f]{16,}$/i.test(stem);
+}
+
+/** An address as it may appear in the server's log (house rule 4). A calendar's address is made from its name, so
+ * each folder in it becomes a short fingerprint; so does an item's file name, unless it looks like a UID. */
 export function logged(url: string): string {
 	const path = /^[a-z]+:\/\//i.test(url) ? new URL(url).pathname : url;
 	return path
 		.split('/')
-		.map((part, i) => (i < 2 || part === '' || part.endsWith('.ics') ? part : createHash('sha256').update(part).digest('hex').slice(0, 8)))
+		.map((part, i) => {
+			if (i < 2 || part === '') return part;
+			if (!part.endsWith('.ics')) return fingerprint(part);
+			const stem = part.slice(0, -'.ics'.length);
+			return uidLike(stem) ? part : `${fingerprint(stem)}.ics`;
+		})
 		.join('/');
 }
 
@@ -244,18 +270,37 @@ export class CalendarStore {
 
 	/** Whether there is a collection at this address, and the settings stored on it. Throws if the server couldn't say. */
 	async settingsAt(calendarUrl: string): Promise<{ found: boolean; stored: string | undefined }> {
+		return this.plannerProperty(calendarUrl, 'settings');
+	}
+
+	/** One of the planner's own properties on a collection (planner-<name>). Throws if the server couldn't say. */
+	private async plannerProperty(calendarUrl: string, name: 'settings' | 'log-key'): Promise<{ found: boolean; stored: string | undefined }> {
 		const [response] = await this.timed(
 			this.client.propfind({
 				url: calendarUrl,
-				props: { 'p:planner-settings': { _attributes: { 'xmlns:p': PLANNER_NS } } },
+				props: { [`p:planner-${name}`]: { _attributes: { 'xmlns:p': PLANNER_NS } } },
 				depth: '0'
 			}),
-			'reading the settings'
+			`reading the ${name}`
 		);
-		if (response?.ok) return { found: true, stored: davText(response.props?.plannerSettings) };
+		// The DAV library names properties in camel case: planner-log-key is plannerLogKey.
+		const key = `planner-${name}`.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+		if (response?.ok) return { found: true, stored: davText(response.props?.[key]) };
 		// A missing property comes back as 404 inside an answer about the collection; a missing collection, as a plain 404.
 		if (response?.status === 404) return { found: (response.propStats?.length ?? 0) > 0, stored: undefined };
-		throw new Error(`The calendar server could not read the settings (${response?.status ?? 'no answer'})`);
+		throw new Error(`The calendar server could not read the ${name} (${response?.status ?? 'no answer'})`);
+	}
+
+	/** This install's key for fingerprints in the log, kept on the Tasks collection; made and stored the first time. */
+	async logKey(calendarUrl: string): Promise<string> {
+		const valid = (key: string | undefined) => (key && /^[0-9a-f]{64}$/.test(key.trim()) ? key.trim() : undefined);
+		const stored = valid((await this.plannerProperty(calendarUrl, 'log-key')).stored);
+		if (stored) return stored;
+		const made = randomBytes(32).toString('hex');
+		const status = await this.proppatch(calendarUrl, `<p:planner-log-key xmlns:p="${PLANNER_NS}">${made}</p:planner-log-key>`);
+		if (status >= 300) throw new Error(`The calendar server refused to keep the log key (${status})`);
+		// Another copy of the planner may have stored its own at the same moment: whichever is stored now is the one.
+		return valid((await this.plannerProperty(calendarUrl, 'log-key')).stored) ?? made;
 	}
 
 	async writeSettings(calendarUrl: string, settings: Settings): Promise<void> {

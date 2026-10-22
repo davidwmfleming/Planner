@@ -10,7 +10,12 @@ vi.mock('./calendar-store', () => ({
 			attempts++;
 			if (attempts === 1) throw new Error('The calendar server did not answer in time (signing in)');
 		}
-	}
+		addressFor = (name: string) => `http://127.0.0.1:5232/david/${name.toLowerCase()}/`;
+		async logKey() {
+			return 'ab'.repeat(32);
+		}
+	},
+	useLogKey: () => {}
 }));
 vi.mock('./startup', () => ({ prepareStore: async () => {}, tasksCalendarUrl: () => undefined }));
 
