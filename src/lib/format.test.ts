@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dayName, saysReload, shortTitle } from './format';
+import { dayName, pageSubtitle, saysReload, shortTitle, weekNumber } from './format';
 
 describe('titles quoted in messages', () => {
 	it('leaves a short title as it is', () => {
@@ -49,5 +49,23 @@ describe('dayName', () => {
 	it('names the day of the week in full', () => {
 		expect(dayName('2026-10-22')).toBe('Thursday');
 		expect(dayName('2026-10-25')).toBe('Sunday');
+	});
+});
+
+describe('the line under the month in the page header', () => {
+	it('numbers weeks from Monday, the first week holding a Thursday', () => {
+		expect(weekNumber('2026-10-19')).toBe(43);
+		expect(weekNumber('2026-10-25')).toBe(43);
+		expect(weekNumber('2026-10-26')).toBe(44);
+		// 1 January 2027 is a Friday, so it belongs to the last week of 2026.
+		expect(weekNumber('2027-01-01')).toBe(53);
+		expect(weekNumber('2027-01-04')).toBe(1);
+	});
+
+	it('names the week and the days on the page', () => {
+		expect(pageSubtitle(['2026-10-19', '2026-10-20', '2026-10-21'])).toBe('Week 43 · Monday to Wednesday');
+		expect(pageSubtitle(['2026-10-22', '2026-10-23', '2026-10-24', '2026-10-25'])).toBe('Week 43 · Thursday to Sunday');
+		expect(pageSubtitle(['2026-10-22'])).toBe('Week 43 · Thursday');
+		expect(pageSubtitle([])).toBe('');
 	});
 });

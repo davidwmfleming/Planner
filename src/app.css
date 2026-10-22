@@ -10,6 +10,7 @@
 	--work: #fde4e4;
 	--line: 2.1rem;
 	--font: 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	--serif: 'Source Serif 4', Georgia, 'Noto Serif', 'Times New Roman', serif;
 	color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
