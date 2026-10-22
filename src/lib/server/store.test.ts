@@ -17,7 +17,7 @@ vi.mock('./calendar-store', () => ({
 	},
 	useLogKey: () => {}
 }));
-vi.mock('./startup', () => ({ prepareStore: async () => {}, tasksCalendarUrl: () => undefined }));
+vi.mock('./startup', () => ({ prepareStore: async () => {}, addDueDates: async () => 0, tasksCalendarUrl: () => undefined }));
 
 const { getStore } = await import('./store');
 

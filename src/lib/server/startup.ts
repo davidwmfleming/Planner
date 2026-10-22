@@ -1,6 +1,7 @@
 // What the planner does with the calendar server each time it starts.
 import { parseSettings } from '$lib/settings';
 import type { CalendarStore } from './calendar-store';
+import { withDueDates } from './ical';
 
 export interface StartOptions {
 	/** Event calendars made on a first run, besides Work. */
@@ -62,4 +63,27 @@ export async function prepareStore(store: Store, options: StartOptions): Promise
 	} catch (e) {
 		console.error('Could not store the starting settings', e);
 	}
+}
+
+/**
+ * Gives every stored task with a day but no due date its due date, once: tasks saved before the planner wrote DUE showed
+ * no date in Apple Reminders. Each save is only-if-unchanged, so a task changed on a phone meanwhile is left for the next
+ * start. One that can't be read or saved is skipped. Gives back how many were updated.
+ */
+export async function addDueDates(store: Pick<CalendarStore, 'calendars' | 'documents' | 'saveDocument'>): Promise<number> {
+	let updated = 0;
+	for (const calendar of store.calendars().filter((c) => c.accepts.includes('task'))) {
+		const { documents } = await store.documents(calendar.url);
+		for (const doc of documents) {
+			try {
+				const next = withDueDates(doc.ics);
+				if (next === undefined) continue;
+				await store.saveDocument(doc, next);
+				updated++;
+			} catch {
+				// Unreadable, or changed elsewhere since it was read: left as it is.
+			}
+		}
+	}
+	return updated;
 }

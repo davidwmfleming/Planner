@@ -3,7 +3,7 @@ import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
 import { byName, calendarAtPath, type Settings } from '$lib/settings';
 import { CalendarStore, useLogKey } from './calendar-store';
-import { prepareStore, tasksCalendarUrl } from './startup';
+import { addDueDates, prepareStore, tasksCalendarUrl } from './startup';
 
 let store: Promise<CalendarStore> | undefined;
 
@@ -17,6 +17,10 @@ export function getStore(): Promise<CalendarStore> {
 		const started = s.connect().then(async () => {
 			await prepareStore(s, { startingCalendars: eventCalendarNames(), ...seed(), tasksCalendar: tasksCalendarName() });
 			await useInstallLogKey(s);
+			// In the background, so the first page doesn't wait for it.
+			addDueDates(s)
+				.then((n) => n && console.log(`Gave ${n} task(s) a due date, so Apple Reminders shows their day`))
+				.catch((e) => console.error('Could not give older tasks a due date', e));
 			return s;
 		});
 		// Retry on the next request if the server was down or didn't answer in time.

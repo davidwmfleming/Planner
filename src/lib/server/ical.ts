@@ -64,6 +64,26 @@ export function withCategoryChanged(ics: string, from: string, to: string | unde
 	return changed ? cal.toString() : undefined;
 }
 
+/**
+ * A stored document with a DUE added to each task that has a start but no due date, so Apple Reminders shows its day.
+ * The DUE is a copy of the start, time zone included; everything else stays as it was. A task with a DURATION is left
+ * alone, as the standard allows only one of the two. Undefined when nothing changes, so nothing is saved.
+ */
+export function withDueDates(ics: string): string | undefined {
+	const cal = new ICAL.Component(ICAL.parse(ics));
+	let changed = false;
+	for (const todo of cal.getAllSubcomponents('vtodo')) {
+		const start = todo.getFirstProperty('dtstart');
+		if (!start || !(start.getFirstValue() instanceof ICAL.Time) || todo.hasProperty('due') || todo.hasProperty('duration')) continue;
+		// A copy: toJSON() hands back the start's own line, so renaming it in place would turn DTSTART into DUE.
+		const due = structuredClone(start.toJSON());
+		due[0] = 'due';
+		todo.addProperty(new ICAL.Property(due));
+		changed = true;
+	}
+	return changed ? cal.toString() : undefined;
+}
+
 /** A property's value as text, to tell whether a one-off change has its own. CATEGORIES can hold several, and are
  * compared as names without regard to case, so a day written with "This month" still matches a series with "month". */
 const textOf = (comp: ICAL.Component, name: string) =>
@@ -137,7 +157,10 @@ function itemComponent(item: Item): ICAL.Component {
 		if (item.state === 'done') comp.addPropertyWithValue('x-planner-ticked', 'TRUE');
 	} else {
 		if (item.date) {
-			comp.addPropertyWithValue('dtstart', item.time ? dateTimeValue(item.date, item.time) : dateValue(item.date));
+			// DUE is the date Apple Reminders and most task apps show; DTSTART is kept for repeats and older readers.
+			const when = () => (item.time ? dateTimeValue(item.date!, item.time) : dateValue(item.date!));
+			comp.addPropertyWithValue('dtstart', when());
+			comp.addPropertyWithValue('due', when());
 		}
 		const status = { open: 'NEEDS-ACTION', done: 'COMPLETED', dropped: 'CANCELLED' }[item.state];
 		comp.addPropertyWithValue('status', status);
@@ -449,8 +472,14 @@ function componentToItem(comp: ICAL.Component): Item {
 		state: 'open'
 	};
 
-	// Apple Reminders and other task apps often set only DUE; treat it as the task's day.
-	const start = (comp.getFirstPropertyValue('dtstart') ?? (kind === 'task' ? comp.getFirstPropertyValue('due') : null)) as ICAL.Time | null;
+	// A task's day is its DUE, the date Apple Reminders shows and changes, unless it repeats: repeats count from DTSTART.
+	// Only a real date or time counts: a DUE written as a period or text by a faulty app falls back to DTSTART.
+	const timeOf = (name: string) => {
+		const v = comp.getFirstPropertyValue(name);
+		return v instanceof ICAL.Time ? v : null;
+	};
+	const due = kind === 'task' ? timeOf('due') : null;
+	const start = (!comp.hasProperty('rrule') && due) || timeOf('dtstart') || due;
 	if (start) {
 		item.date = isoDate(start);
 		if (!start.isDate) item.time = hhmm(start);

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ItemKind } from '$lib/item';
 import type { Settings } from '$lib/settings';
 import type { Calendar } from './calendar-store';
-import { prepareStore, tasksCalendarUrl, type StartOptions } from './startup';
+import { addDueDates, prepareStore, tasksCalendarUrl, type StartOptions } from './startup';
 
 const HOME = 'http://127.0.0.1:5232/david/';
 
@@ -187,5 +187,37 @@ describe('starting the planner', () => {
 		await prepareStore(store, options);
 		expect(tasksCalendarUrl(store, 'Tasks')).toBe(`${HOME}tasks/`);
 		expect([...store.stored.keys()]).toEqual([`${HOME}tasks/`]);
+	});
+});
+
+describe('giving older tasks a due date at start', () => {
+	const task = (uid: string, ...lines: string[]) =>
+		['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', `UID:${uid}`, 'DTSTAMP:20261019T000000Z', ...lines, 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+
+	it('saves only the tasks that need it, only as read, and carries on past one it cannot save', async () => {
+		const tasks = { url: `${HOME}tasks/`, name: 'Tasks', accepts: ['task'] as ItemKind[] };
+		const work = { url: `${HOME}work/`, name: 'Work', accepts: ['event'] as ItemKind[] };
+		const docs = [
+			{ calendarUrl: tasks.url, url: `${tasks.url}a.ics`, etag: '"1"', ics: task('a', 'DTSTART;VALUE=DATE:20261019') },
+			{ calendarUrl: tasks.url, url: `${tasks.url}b.ics`, etag: '"2"', ics: task('b', 'DTSTART;VALUE=DATE:20261020') },
+			{ calendarUrl: tasks.url, url: `${tasks.url}c.ics`, etag: '"3"', ics: task('c') },
+			{ calendarUrl: tasks.url, url: `${tasks.url}d.ics`, etag: '"4"', ics: 'not a calendar' }
+		];
+		const saved: { url: string; etag?: string; ics: string }[] = [];
+		const store = {
+			calendars: () => [tasks, work],
+			documents: async (url: string) => {
+				expect(url).toBe(tasks.url);
+				return { version: '"v"', documents: docs };
+			},
+			saveDocument: async (doc: { url: string; etag?: string }, ics: string) => {
+				if (doc.url.endsWith('b.ics')) throw new Error('412: changed on a phone');
+				saved.push({ url: doc.url, etag: doc.etag, ics });
+			}
+		};
+		expect(await addDueDates(store)).toBe(1);
+		expect(saved).toHaveLength(1);
+		expect(saved[0]).toMatchObject({ url: `${tasks.url}a.ics`, etag: '"1"' });
+		expect(saved[0].ics).toContain('DUE;VALUE=DATE:20261019');
 	});
 });
