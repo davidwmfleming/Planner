@@ -603,7 +603,7 @@
 				<div class="day-head">
 					<span class="dnum">{dayNumber(day.date)}</span>
 					<!-- The month is in the header; a day in another month (a page running into November) says so. -->
-					<span class="dname">{dayName(day.date)}{#if monthShort(day.date) !== monthShort(data.start)}<span class="dmonth"> · {monthShort(day.date)}</span>{/if}</span>
+					<span class="dname">{dayName(day.date)}{#if monthShort(day.date) !== monthShort(data.start)}<span class="dmonth">{' · '}{monthShort(day.date)}</span>{/if}</span>
 					{#if day.date === data.today}<span class="today-tag">Today</span>{/if}
 				</div>
 				<div class="col">
@@ -743,6 +743,8 @@
 		--col-rule: #8a8a8a;
 		--hint: #6b6b6b;
 		--tasks-side: #ececec;
+		/* Darker lines on the grey side, so they still show on an e-ink screen. */
+		--rule-grey: #949494;
 		--gutter: clamp(16px, 4.8vw, 48px);
 		--gutter-left: max(var(--gutter), env(safe-area-inset-left, 0px));
 		--gutter-right: max(var(--gutter), env(safe-area-inset-right, 0px));
@@ -755,7 +757,7 @@
 	/* A tablet's pen or finger gets the notebook's tall lines. */
 	@media (pointer: coarse) and (min-width: 521px) { .wrap { --line: 3.25rem; } }
 	@media (prefers-color-scheme: dark) {
-		.wrap { --muted: #a3abb9; --rule: #2f3746; --col-rule: #586072; --hint: #8d95a3; --tasks-side: #1d222b; }
+		.wrap { --muted: #a3abb9; --rule: #2f3746; --col-rule: #586072; --hint: #8d95a3; --tasks-side: #1d222b; --rule-grey: #2f3746; }
 	}
 	.bar {
 		position: sticky;
@@ -818,7 +820,7 @@
 	.today-tag { margin-top: 8px; align-self: flex-start; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; background: var(--ink); color: var(--paper); padding: 3px 7px; border-radius: 3px; }
 	.col { min-width: 0; padding: 18px 24px 16px 16px; border-right: 1px solid var(--col-rule); }
 	/* The tasks side is light grey, to set it apart from the events. */
-	.col + .col { padding: 18px var(--gutter-right) 16px 24px; border-right: 0; background: var(--tasks-side); }
+	.col + .col { padding: 18px var(--gutter-right) 16px 24px; border-right: 0; background: var(--tasks-side); --rule: var(--rule-grey); }
 	.col + .col .entry:focus { background: var(--paper); }
 	h2 { font-size: 0.8125rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin: 0; padding-bottom: 6px; font-weight: 400; }
 	.lines { list-style: none; margin: 0; padding: 0; }
