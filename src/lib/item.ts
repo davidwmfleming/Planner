@@ -1,7 +1,6 @@
 /** One line in the planner. Events sit in the left column, tasks in the right. */
 export type ItemKind = 'event' | 'task';
 export type ItemState = 'open' | 'done' | 'dropped';
-export type ItemLabel = 'month' | 'waiting' | 'someday';
 
 export interface Item {
 	uid: string;
@@ -17,7 +16,12 @@ export interface Item {
 	endTime?: string;
 	location?: string;
 	notes?: string;
-	label?: ItemLabel;
+	/** Every CATEGORIES value, in the file's order, with the keys older planners wrote read as names. Some are David's
+	 * task categories (from the settings); the others came from other apps and are kept as they are. */
+	categories?: string[];
+	/** The task's category as the page shows it: the first of `categories` that is one of David's, spelled as the
+	 * settings spell it. Filled in for the page only; not part of the .ics. */
+	label?: string;
 	state: ItemState;
 	/** Day an unfinished task was originally on before rollover moved it. */
 	carriedFrom?: string;
@@ -30,5 +34,3 @@ export interface Item {
 	/** Path of the calendar it is kept in (Me, Family, Work…), which a rename doesn't change. Not part of the .ics. */
 	calendar?: string;
 }
-
-export const LABELS: ItemLabel[] = ['month', 'waiting', 'someday'];

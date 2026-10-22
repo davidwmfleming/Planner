@@ -1,6 +1,6 @@
 // The planner page's server side with a pretend calendar server, for the cases a shared test server can't stage.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NoAnswerError, RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
+import { logged as forLog, NoAnswerError, RefusedError, type Calendar, type StoredItem } from '$lib/server/calendar-store';
 
 vi.mock('$env/dynamic/private', () => ({ env: {} }));
 vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
@@ -16,7 +16,7 @@ vi.mock('$lib/server/store', async (original) => ({
 	}
 }));
 
-function fakeStore(listed: Calendar[], settings = { categories: [], workCalendar: null as string | null, defaultEventCalendar: null as string | null }) {
+function fakeStore(listed: Calendar[], settings = { categories: [] as string[], workCalendar: null as string | null, defaultEventCalendar: null as string | null }) {
 	return {
 		listed,
 		/** What the server holds now; a refresh makes the planner see it. */
@@ -352,6 +352,60 @@ describe('future tasks', () => {
 		const data = (await run()) as { unscheduled: { calendar: string }[] };
 		expect(data.unscheduled.map((t) => t.calendar)).toEqual(['/david/tasks/']);
 	});
+
+	it("go in the order of the categories in the settings, each showing only its category of David's", async () => {
+		const tasks = cal('tasks', 'Tasks', ['task']);
+		fake = fakeStore([tasks], { categories: ['Errands', 'Waiting'], workCalendar: null, defaultEventCalendar: null });
+		const task = (uid: string, categories?: string[]): StoredItem => ({ ...dentist(tasks), uid, title: uid, kind: 'task', date: undefined, categories });
+		fake.items = [task('none'), task('phone', ['Home']), task('wait', ['Home', 'WAITING']), task('errand', ['errands']), task('old', ['Someday'])];
+		const data = (await run()) as { categories: string[]; unscheduled: Record<string, unknown>[] };
+		expect(data.categories).toEqual(['Errands', 'Waiting']);
+		expect(data.unscheduled.map((t) => [t.uid, t.label])).toEqual([['errand', 'Errands'], ['wait', 'Waiting'], ['none', undefined], ['phone', undefined], ['old', undefined]]);
+		// Values from other apps stay on the server; the page never gets them.
+		expect(data.unscheduled.some((t) => 'categories' in t)).toBe(false);
+	});
+});
+
+describe('a task with a huge number of categories (from another app)', () => {
+	it('does not slow the page down: each task is looked at once, and only its first 100 values', async () => {
+		const tasks = cal('tasks', 'Tasks', ['task']);
+		fake = fakeStore([tasks], { categories: ['This month', 'Waiting', 'Someday'], workCalendar: null, defaultEventCalendar: null });
+		const values = [...Array.from({ length: 200_000 }, (_, i) => `Tag ${i}`), 'Waiting'];
+		const task = (uid: string, categories?: string[]): StoredItem => ({ ...dentist(tasks), uid, title: uid, kind: 'task', date: undefined, categories });
+		fake.items = [...Array.from({ length: 100 }, (_, i) => task(`many-${i}`, values)), task('plain', ['Someday'])];
+		const started = performance.now();
+		const data = (await run()) as { unscheduled: Record<string, unknown>[] };
+		expect(performance.now() - started).toBeLessThan(250);
+		expect(data.unscheduled[0]).toMatchObject({ uid: 'plain', label: 'Someday' });
+		// 'Waiting' is too far down the list to count.
+		expect(data.unscheduled[1]).not.toHaveProperty('label');
+	});
+});
+
+describe('lists are for tasks', () => {
+	it('gives an event no list, even one whose category from another app is a list name', async () => {
+		const me = cal('me', 'Me');
+		fake = fakeStore([me, cal('tasks', 'Tasks', ['task'])], { categories: ['Waiting'], workCalendar: null, defaultEventCalendar: null });
+		fake.items = [{ ...dentist(me), categories: ['Waiting', 'Business'] }];
+		const data = (await run('http://localhost/?page=2026-10-21')) as { days: { events: Record<string, unknown>[] }[] };
+		const shown = data.days.flatMap((d) => d.events);
+		expect(shown).toHaveLength(1);
+		expect(shown[0]).not.toHaveProperty('label');
+	});
+});
+
+describe('choosing a category in the details sheet', () => {
+	it("saves the category's name and keeps the values other apps added", async () => {
+		const tasks = cal('tasks', 'Tasks', ['task']);
+		fake = fakeStore([tasks], { categories: ['This month', 'Waiting'], workCalendar: null, defaultEventCalendar: null });
+		fake.items = [{ ...dentist(tasks), kind: 'task', date: undefined, categories: ['Home', 'This month'] }];
+		const replaced: unknown[] = [];
+		fake.replace = async (...args: unknown[]) => void replaced.push(args[1]);
+		const sheet = { ...inNewCalendar(''), kind: 'task', date: '', calendar: '', keptIn: '/david/tasks/' };
+		expect(await act('save', { ...sheet, label: 'waiting' })).toBeUndefined();
+		expect(replaced).toEqual([expect.objectContaining({ categories: ['Waiting', 'Home'] })]);
+		expect(await act('save', { ...sheet, label: 'Someday' })).toMatchObject({ status: 400, data: { message: 'Unknown list' } });
+	});
 });
 
 describe('moving an item to another calendar from the details sheet', () => {
@@ -674,7 +728,7 @@ describe('an item that cannot be read', () => {
 		expect(data.unreadable).toBe(1);
 		expect(JSON.stringify(data.days)).toContain('Swim');
 		// The log says where it is, so it can be found and fixed; it has no title to give.
-		expect(warned.join('\n')).toContain('/david/me/from-a-phone.ics');
+		expect(warned.join('\n')).toContain(forLog('/david/me/from-a-phone.ics'));
 	});
 
 	it('counts a repeating item whose repeats cannot be worked out, and logs where it is, not its title', async () => {
@@ -684,7 +738,7 @@ describe('an item that cannot be read', () => {
 		expect(data.unreadable).toBe(1);
 		expect(JSON.stringify(data.days)).toContain('Swim');
 		expect(JSON.stringify(data.days)).not.toContain('Piano');
-		expect(warned.join('\n')).toContain('/david/me/piano.ics');
+		expect(warned.join('\n')).toContain(forLog('/david/me/piano.ics'));
 		expect(warned.join('\n')).not.toContain('Piano');
 	});
 

@@ -136,7 +136,7 @@ describe.skipIf(!hasRadicale)('export against Radicale', () => {
 		await store.create(me.url, { uid: 'ex-2', kind: 'event', title: 'Swim', date: '2026-10-22', state: 'open', recurrence: 'FREQ=WEEKLY' });
 		await store.create(odd.url, { uid: 'ex-3', kind: 'event', title: 'Soccer, then pizza', date: '2026-10-23', state: 'open' });
 		await store.create(tasks.url, { uid: 'ex-4', kind: 'task', title: 'Pick up meds', date: '2026-10-20', state: 'open' });
-		await store.create(tasks.url, { uid: 'ex-5', kind: 'task', title: 'Fix piano keys', state: 'open', label: 'someday' });
+		await store.create(tasks.url, { uid: 'ex-5', kind: 'task', title: 'Fix piano keys', state: 'open', categories: ['Someday'] });
 
 		const files = unzipSync(await exportZip(store));
 		expect(Object.keys(files).sort()).toEqual(['Empty.ics', 'Kids fun stuff.ics', 'Me.ics', 'Tasks.ics']);
