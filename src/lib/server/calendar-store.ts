@@ -505,10 +505,19 @@ export class CalendarStore {
 		await this.put(stored, withoutOccurrence(stored.ics, day));
 	}
 
-	private async put(stored: StoredItem, data: string): Promise<string | undefined> {
+	private async put(stored: Pick<StoredItem, 'url' | 'etag'>, data: string): Promise<string | undefined> {
 		const res = await this.timed(this.client.updateCalendarObject({ calendarObject: { url: stored.url, etag: stored.etag, data } }), `saving ${logged(stored.url)}`);
 		if (!res.ok) throw new RefusedError(`Saving ${logged(stored.url)} failed (${res.status}); reload and try again`, res.status);
 		return res.headers.get('etag') ?? undefined;
+	}
+
+	/** Saves a changed version of a stored document, only if it is still the version read (its ETag): one changed
+	 * on a phone since is refused (412), so that change is never overwritten unseen. */
+	async saveDocument(doc: StoredDocument, ics: string): Promise<void> {
+		// Without a version, the save couldn't be made only-if-unchanged, so a change made on a phone could be lost.
+		// Refused (428, Precondition Required) without asking the server, so the caller counts it as not changed.
+		if (!doc.etag) throw new RefusedError(`Not saving ${logged(doc.url)}: the calendar server gave no version for it`, 428);
+		await this.put({ url: doc.url, etag: doc.etag }, ics);
 	}
 
 	/** Saves an item exactly as given, dropping any field it no longer has. */

@@ -8,11 +8,15 @@ export interface Settings {
 	workCalendar: string | null;
 	/** Path of the calendar new events go in, or null to use the first event calendar. */
 	defaultEventCalendar: string | null;
+	/** A rename of a category that hasn't finished: both names are on the list until every task has the new one. */
+	renaming?: { from: string; to: string };
 }
 
 export const DEFAULT_CATEGORIES = ['This month', 'Waiting', 'Someday'];
-/** Most categories kept from the stored settings. */
+/** Most categories the settings page lets David have. */
 export const MAX_CATEGORIES = 50;
+/** Most kept from the stored settings: one more, for a rename under way (both names are on the list meanwhile). */
+const MAX_STORED = MAX_CATEGORIES + 1;
 
 /** Calendar names that fill in the Work and default choices when nothing is stored yet. */
 export interface SettingsSeed {
@@ -39,10 +43,10 @@ const STORED_LOOKED_AT = MAX_CATEGORIES * 4;
 const STORED_NAME_CHARS = 200;
 
 /** Category names as stored, cleaned as calendar names are. Names left empty, longer than 40 letters or with a comma
- * (which separates CATEGORIES values) are dropped, and at most 50 are kept: the stored value can be changed by any
+ * (which separates CATEGORIES values) are dropped, and at most 51 are kept: the stored value can be changed by any
  * calendar app, so it is not trusted to be what the settings page saved. */
 const storedCategories = (names: string[]) =>
-	withoutRepeats(names.slice(0, STORED_LOOKED_AT).map((n) => cleanName(n.slice(0, STORED_NAME_CHARS))).filter((n) => n && !n.includes(',') && letters(n).length <= MAX_NAME)).slice(0, MAX_CATEGORIES);
+	withoutRepeats(names.slice(0, STORED_LOOKED_AT).map((n) => cleanName(n.slice(0, STORED_NAME_CHARS))).filter((n) => n && !n.includes(',') && letters(n).length <= MAX_NAME)).slice(0, MAX_STORED);
 
 const isPath = (value: unknown): value is string | null => value === null || (typeof value === 'string' && value !== '');
 
@@ -57,11 +61,24 @@ export function parseSettings(raw: string | undefined, calendars: { url: string;
 	}
 	const categories = stored.categories;
 	const validCategories = Array.isArray(categories) && categories.every((c) => typeof c === 'string' && c.trim() !== '');
-	return {
+	const settings: Settings = {
 		categories: validCategories ? storedCategories(categories) : DEFAULT_CATEGORIES,
 		workCalendar: isPath(stored.workCalendar) ? stored.workCalendar : pathOf(calendars, seed.workCalendar),
 		defaultEventCalendar: isPath(stored.defaultEventCalendar) ? stored.defaultEventCalendar : pathOf(calendars, seed.defaultEventCalendar)
 	};
+	const renaming = storedRename(stored.renaming, settings.categories);
+	if (renaming) settings.renaming = renaming;
+	return settings;
+}
+
+/** A rename under way, with both names as the list spells them; none if damaged or either name isn't on the list. */
+function storedRename(value: unknown, categories: string[]): Settings['renaming'] {
+	if (!value || typeof value !== 'object') return undefined;
+	const { from, to } = value as Record<string, unknown>;
+	if (typeof from !== 'string' || typeof to !== 'string') return undefined;
+	const onList = (name: string) => categories.find((c) => c.toLowerCase() === cleanName(name.slice(0, STORED_NAME_CHARS)).toLowerCase());
+	const [listFrom, listTo] = [onList(from), onList(to)];
+	return listFrom && listTo && listFrom !== listTo ? { from: listFrom, to: listTo } : undefined;
 }
 
 /** The calendar a stored path points at, if it is still there. Paths stay the same when a calendar is renamed. */
@@ -193,6 +210,18 @@ function withoutFormatCharacters(text: string): string {
 /** A name as the planner keeps it: line breaks and tabs become spaces; other control characters and invisible format
  * characters (zero-width spaces, right-to-left overrides) are dropped, except those that spell an emoji or a word. */
 export const cleanName = (raw: string) => withoutFormatCharacters(raw.replace(/\s+/g, ' ').replace(/\p{Cc}/gu, '')).replace(/ {2,}/g, ' ').trim();
+
+/** Checks a name for a new or renamed task category: 1 to 40 letters, no comma (commas separate CATEGORIES values),
+ * and not already on the list (case ignored). `current` is the category being renamed, which may change its own case. */
+export function checkCategoryName(raw: string, categories: string[], current?: string): { name: string } | { error: string } {
+	const name = cleanName(raw);
+	if (!name) return { error: 'Give the category a name' };
+	if (letters(name).length > MAX_NAME) return { error: `Keep the name to ${MAX_NAME} letters or fewer` };
+	if (name.includes(',')) return { error: "A category name can't have a comma in it: other apps would read it as two" };
+	const taken = categories.find((c) => c !== current && c.toLowerCase() === name.toLowerCase());
+	if (taken) return { error: `There is already a category called "${taken}"` };
+	return { name };
+}
 
 export function checkCalendarName(raw: string, calendars: { url: string; name: string }[], current?: string): { name: string } | { error: string } {
 	const name = cleanName(raw);

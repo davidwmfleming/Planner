@@ -19,6 +19,51 @@ const categoriesOf = (comp: ICAL.Component) =>
 /** A component's categories as the planner reads them: old keys as their names. */
 const namesOf = (comp: ICAL.Component) => categoriesOf(comp).map((c) => OLD_KEYS[c.toLowerCase()] ?? c);
 
+/** A category name as compared: an old key as its name, without regard to case or spaces at the ends. */
+const categoryKey = (value: string) => (OLD_KEYS[value.trim().toLowerCase()] ?? value).trim().toLowerCase();
+
+/** Whether any task in a stored document carries this category. False for a document that can't be read. */
+export function carriesCategory(ics: string, name: string): boolean {
+	try {
+		const cal = new ICAL.Component(ICAL.parse(ics));
+		return cal.getAllSubcomponents('vtodo').some((todo) => categoriesOf(todo).some((c) => categoryKey(c) === categoryKey(name)));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * A stored document with one category changed on every task in it (the series and each one-off change):
+ * renamed to `to`, or taken off when `to` is undefined. A task that already has `to` doesn't get it twice. Everything
+ * else (other categories, other lines, time zones) stays as it was. Undefined when nothing changes, so nothing is saved.
+ */
+export function withCategoryChanged(ics: string, from: string, to: string | undefined): string | undefined {
+	const cal = new ICAL.Component(ICAL.parse(ics));
+	let changed = false;
+	const [fromKey, toKey] = [categoryKey(from), to === undefined ? undefined : categoryKey(to)];
+	for (const todo of cal.getAllSubcomponents('vtodo')) {
+		// A task that has `to` already keeps it as it is spelled there, and just loses `from`.
+		const hasTo = toKey !== fromKey && categoriesOf(todo).some((c) => categoryKey(c) === toKey);
+		let given = false;
+		for (const prop of todo.getAllProperties('categories')) {
+			const values = prop.getValues().map(String);
+			const next: string[] = [];
+			for (const value of values) {
+				if (categoryKey(value) !== fromKey) next.push(value);
+				else if (to !== undefined && !hasTo && !given) {
+					next.push(to);
+					given = true;
+				}
+			}
+			if (next.length === values.length && next.every((v, i) => v === values[i])) continue;
+			changed = true;
+			if (next.length) prop.setValues(next);
+			else todo.removeProperty(prop);
+		}
+	}
+	return changed ? cal.toString() : undefined;
+}
+
 /** A property's value as text, to tell whether a one-off change has its own. CATEGORIES can hold several, and are
  * compared as names without regard to case, so a day written with "This month" still matches a series with "month". */
 const textOf = (comp: ICAL.Component, name: string) =>

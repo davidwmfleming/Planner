@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
+import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, checkCategoryName, DEFAULT_CATEGORIES, menuLabels, parseSettings } from './settings';
 
 const calendars = [
 	{ url: 'http://127.0.0.1:5232/david/me/', name: 'Me' },
@@ -50,22 +50,59 @@ describe('category names in the stored settings', () => {
 		expect(read(['Waiting', 'waiting\n', 'Wait\u200bing'])).toEqual(['Waiting']);
 	});
 
-	it('reads 20,000 stored names (mostly repeats, some huge) quickly, keeping the first 50 different ones in order', () => {
-		const huge = 'x'.repeat(10_000);
+	it('reads 20,000 stored names (mostly repeats, some huge) quickly, keeping the first 51 different ones in order', () => {
+		// Ten times the 200 letters looked at; longer only makes the JSON itself slow to read.
+		const huge = 'x'.repeat(2_000);
 		const names = Array.from({ length: 20_000 }, (_, i) => (i % 7 === 3 ? huge : i % 3 === 0 && i < 300 ? `List ${i}` : 'waiting'));
 		const raw = JSON.stringify({ categories: names });
 		const started = performance.now();
 		const kept = parseSettings(raw, calendars).categories;
-		// Most of this is parsing ~28 MB of JSON; the old way took about 16 s, so 1 s still catches it without failing on a busy runner.
+		// Much of this is parsing about 6 MB of JSON; the old way took seconds, so 1 s still catches it without failing on a busy runner.
 		expect(performance.now() - started).toBeLessThan(1000);
-		const first50 = [...new Set(names.filter((n) => n !== huge))].slice(0, 50);
-		expect(first50.slice(0, 4)).toEqual(['List 0', 'waiting', 'List 6', 'List 9']);
-		expect(kept).toEqual(first50);
+		const first51 = [...new Set(names.filter((n) => n !== huge))].slice(0, 51);
+		expect(first51.slice(0, 4)).toEqual(['List 0', 'waiting', 'List 6', 'List 9']);
+		expect(kept).toEqual(first51);
 	});
 
-	it('keeps at most 50', () => {
+	it('keeps at most 51: the 50 the settings page allows, and one more while a rename is under way', () => {
 		const many = Array.from({ length: 80 }, (_, i) => `List ${i + 1}`);
-		expect(read(many)).toEqual(many.slice(0, 50));
+		expect(read(many)).toEqual(many.slice(0, 51));
+	});
+});
+
+describe('a rename of a category that is under way', () => {
+	const stored = (value: object) => parseSettings(JSON.stringify(value), calendars);
+
+	it('is read when both names are on the list, spelled as the list spells them', () => {
+		expect(stored({ categories: ['Waiting', 'Waiting for', 'Someday'], renaming: { from: 'waiting', to: 'WAITING FOR' } }).renaming).toEqual({ from: 'Waiting', to: 'Waiting for' });
+	});
+
+	it('is dropped when it is damaged or one of the names is not on the list', () => {
+		expect(stored({ categories: ['Waiting'], renaming: { from: 'Waiting', to: 'Later' } })).not.toHaveProperty('renaming');
+		expect(stored({ categories: ['Waiting', 'Later'], renaming: { from: 'Waiting', to: 7 } })).not.toHaveProperty('renaming');
+		expect(stored({ categories: ['Waiting', 'Later'], renaming: 'Waiting' })).not.toHaveProperty('renaming');
+		expect(stored({ categories: ['Waiting', 'Later'], renaming: { from: 'Waiting', to: 'waiting' } })).not.toHaveProperty('renaming');
+	});
+});
+
+describe('checkCategoryName', () => {
+	const lists = ['This month', 'Waiting', 'Someday'];
+
+	it('accepts a new name, cleaned as calendar names are', () => {
+		expect(checkCategoryName('  Kids\t&  school\u200b ', lists)).toEqual({ name: 'Kids & school' });
+	});
+
+	it('refuses an empty name, a long one, and one with a comma', () => {
+		expect(checkCategoryName(' \u200b ', lists)).toEqual({ error: 'Give the category a name' });
+		expect(checkCategoryName('x'.repeat(41), lists)).toEqual({ error: 'Keep the name to 40 letters or fewer' });
+		expect(checkCategoryName('é'.repeat(40), lists)).toEqual({ name: 'é'.repeat(40) });
+		expect(checkCategoryName('Kids, school', lists)).toEqual({ error: "A category name can't have a comma in it: other apps would read it as two" });
+	});
+
+	it('refuses a name already on the list, whatever its case, but lets a category change the case of its own', () => {
+		expect(checkCategoryName('waiting', lists)).toEqual({ error: 'There is already a category called "Waiting"' });
+		expect(checkCategoryName('WAITING', lists, 'Waiting')).toEqual({ name: 'WAITING' });
+		expect(checkCategoryName('someday', lists, 'Waiting')).toEqual({ error: 'There is already a category called "Someday"' });
 	});
 });
 

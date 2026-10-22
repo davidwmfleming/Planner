@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { enhance } from '$app/forms';
+	import { invalidateAll } from '$app/navigation';
 	import type { ActionResult, SubmitFunction } from '@sveltejs/kit';
 	import { tick } from 'svelte';
 	import { fetchExport } from '$lib/export-download';
@@ -90,6 +91,11 @@
 	}
 
 	function confirmKeys(e: KeyboardEvent) {
+		if (e.key === 'Escape' && deletingCategory && !categoryBusy) {
+			e.preventDefault();
+			cancelCategoryDelete();
+			return;
+		}
 		if (e.key !== 'Escape' || !deleting || busyPath) return;
 		e.preventDefault();
 		cancelDelete();
@@ -163,6 +169,139 @@
 		await tick();
 		if (deleting?.path === path) document.querySelector<HTMLElement>('#delete-count')?.focus();
 	}
+
+	// Task categories: add and rename work like the calendars', on the page itself.
+	let addCategoryError = $derived(form?.action === 'addCategory' ? form.message : undefined);
+	/** The category whose name is being changed, and why the last rename of it was refused. */
+	let renamingCategory = $state<string | undefined>();
+	let categoryError = $derived(
+		form?.action === 'renameCategory' || form?.action === 'checkCategory' || form?.action === 'deleteCategory' ? { category: form.category, message: form.message } : undefined
+	);
+	/** A rename under way changes every task with that name; meanwhile the other category buttons do nothing. */
+	let categoryBusy = $state(false);
+
+	async function startCategoryRename(category: string) {
+		if (categoryBusy) return;
+		deletingCategory = undefined;
+		renamingCategory = category;
+		categoryError = undefined;
+		await tick();
+		document.querySelector<HTMLInputElement>('#category-rename-field')?.select();
+	}
+
+	/** Closes the name field and puts the keyboard back on that category's Rename button. */
+	async function stopCategoryRename(category = renamingCategory) {
+		renamingCategory = undefined;
+		await tick();
+		document.querySelector<HTMLButtonElement>(`button[data-rename-category="${CSS.escape(category ?? '')}"]`)?.focus();
+	}
+
+	function categoryRenameKeys(e: KeyboardEvent) {
+		if (e.key === 'Escape' && !categoryBusy) {
+			e.preventDefault();
+			stopCategoryRename();
+		}
+	}
+
+	const addedCategory: SubmitFunction = () => async ({ result, update }) => {
+		await update();
+		if (result.type === 'success') announcement = `Added ${result.data?.added}`;
+		document.querySelector<HTMLInputElement>('#new-category')?.focus();
+	};
+
+	/** A rename that worked closes its field and says how many tasks changed; one that didn't keeps the reason next to it. */
+	const renamedCategory: SubmitFunction = ({ cancel }) => {
+		if (categoryBusy) return cancel();
+		categoryBusy = true;
+		return async ({ result, update }) => {
+			categoryBusy = false;
+			await update({ reset: false });
+			if (result.type !== 'success') {
+				// A refusal doesn't read the page again, but a rename that stopped halfway has changed the list:
+				// read it, so the new name shows and the field gives way to "Finish renaming", with the reason next to it.
+				const category = renamingCategory;
+				await invalidateAll();
+				if (data.renaming && data.renaming.from === category) {
+					renamingCategory = undefined;
+					await tick();
+					document.querySelector<HTMLButtonElement>(`button[data-finish-category="${CSS.escape(category)}"]`)?.focus();
+				}
+				return;
+			}
+			const { from, renamed, count } = result.data as { from: string; renamed: string; count: number };
+			categoryMessage = `Renamed ${from} to ${renamed}${count ? `, on ${count} ${count === 1 ? 'task' : 'tasks'}` : ''}.`;
+			announcement = categoryMessage;
+			await stopCategoryRename(renamed);
+		};
+	};
+	/** What the last category change did, shown under the list until something else is done. */
+	let categoryMessage = $state('');
+
+	/** The category being deleted and how many tasks it held when counted; and where they go ('' for no list). */
+	let deletingCategory = $state<{ category: string; count: number } | undefined>();
+	let categoryMoveTo = $state('');
+	const tasksCount = (n: number) => `${n} ${n === 1 ? 'task' : 'tasks'}`;
+	/** Where a deleted category's tasks can go: another category, but not one in a rename under way. */
+	const movesFor = (category: string) => data.categories.filter((c) => c !== category && c !== data.renaming?.from && c !== data.renaming?.to);
+
+	/** Delete asks the server how many tasks have the category; the confirm then shows on the page. */
+	const countedCategory: SubmitFunction = ({ formData, cancel }) => {
+		if (categoryBusy) return cancel();
+		const category = String(formData.get('category'));
+		renamingCategory = undefined;
+		deletingCategory = undefined;
+		categoryMessage = '';
+		return async ({ result, update }) => {
+			if (result.type !== 'success') return update();
+			deletingCategory = { category, count: Number(result.data?.count ?? 0) };
+			categoryMoveTo = movesFor(category)[0] ?? '';
+			categoryError = undefined;
+			await tick();
+			document.querySelector<HTMLElement>('#category-delete-count')?.focus();
+		};
+	};
+
+	/** Closes the confirm and puts the keyboard back on that category's Delete button. */
+	async function cancelCategoryDelete() {
+		if (categoryBusy) return; // it can't be stopped once sent
+		const category = deletingCategory?.category;
+		deletingCategory = undefined;
+		await tick();
+		document.querySelector<HTMLButtonElement>(`button[data-delete-category="${CSS.escape(category ?? '')}"]`)?.focus();
+	}
+
+
+	/** A delete that worked says where the tasks went; one that stopped keeps the confirm open with the reason. */
+	const deletedCategory: SubmitFunction = ({ cancel }) => {
+		if (categoryBusy) return cancel();
+		categoryBusy = true;
+		return async ({ result, update }) => {
+			categoryBusy = false;
+			await update({ reset: false });
+			if (result.type !== 'success') {
+				// Read the page again: a delete that stopped partway has moved some tasks, so the count shown is old.
+				await invalidateAll();
+				if (result.type === 'failure' && result.status === 502 && deletingCategory) {
+					// Closed, with the reason next to the category; Delete counts again before it finishes the job.
+					const { category } = deletingCategory;
+					deletingCategory = undefined;
+					await tick();
+					document.querySelector<HTMLButtonElement>(`button[data-delete-category="${CSS.escape(category)}"]`)?.focus();
+					return;
+				}
+				await tick();
+				document.querySelector<HTMLElement>('#category-delete-count')?.focus();
+				return;
+			}
+			const { deleted, count, movedTo } = result.data as { deleted: string; count: number; movedTo?: string };
+			deletingCategory = undefined;
+			const are = count === 1 ? 'is' : 'are';
+			categoryMessage = !count ? `Deleted ${deleted}.` : movedTo ? `Deleted ${deleted}. Its ${tasksCount(count)} ${are} now in ${movedTo}.` : `Deleted ${deleted}. Its ${tasksCount(count)} ${are} now without a list.`;
+			announcement = categoryMessage;
+			await tick();
+			document.querySelector<HTMLElement>('#category-message')?.focus();
+		};
+	};
 
 	// "Download everything": one export at a time; a failure is said here, on the page.
 	let exporting = $state(false);
@@ -269,6 +408,37 @@
 	</form>
 {/snippet}
 
+<!-- Deleting a task category: how many tasks have it and where they go. A category is only a label, so no task is deleted. -->
+{#snippet confirmCategoryDelete(category: string, count: number)}
+	{@const others = movesFor(category)}
+	<form method="POST" action="?/deleteCategory" use:enhance={deletedCategory} class="confirm">
+		<div role="group" aria-label="Delete {category}">
+			<input type="hidden" name="category" value={category} />
+			<p id="category-delete-count" tabindex="-1"><strong>{category} {count ? `holds ${tasksCount(count)}.` : 'holds no tasks.'}</strong></p>
+			{#if count}
+				<div class="move">
+					<label for="category-move-to" class="choice">Move them to</label>
+					<select id="category-move-to" name="to" bind:value={categoryMoveTo}>
+						{#each others as other (other)}<option value={other}>{other}</option>{/each}
+						<option value="">No list</option>
+					</select>
+				</div>
+				<p class="hint">No task is deleted{categoryMoveTo ? '' : ': with No list they stay on Future tasks, or on their day, without a category'}.</p>
+			{:else}
+				<input type="hidden" name="to" value="" />
+			{/if}
+			<div class="edit" aria-busy={categoryBusy}>
+				{#if categoryBusy}
+					<button type="button" class="btn primary" aria-disabled="true">Deleting…</button>
+				{:else}
+					<button class="btn primary">{!count ? `Delete ${category}` : categoryMoveTo ? `Move ${tasksCount(count)} to ${categoryMoveTo} and delete ${category}` : `Delete ${category}, keeping its ${tasksCount(count)}`}</button>
+					<button type="button" class="btn" onclick={cancelCategoryDelete}>Cancel</button>
+				{/if}
+			</div>
+		</div>
+	</form>
+{/snippet}
+
 <!-- Escape closes the delete confirm, as Cancel does (not while the delete is under way). -->
 <svelte:window onkeydown={confirmKeys} />
 
@@ -366,10 +536,51 @@
 			<h2 id="h-categories">Task categories</h2>
 			<ul class="lines">
 				{#each data.categories as category (category)}
-					<li><span class="name">{category}</span></li>
+					<li>
+						{#if renamingCategory === category}
+							<form method="POST" action="?/renameCategory" use:enhance={renamedCategory} class="edit">
+								<input type="hidden" name="category" value={category} />
+								<input id="category-rename-field" class="text" name="name" value={category} aria-label="New name for {category}" autocomplete="off" onkeydown={categoryRenameKeys} />
+								{#if categoryBusy}
+									<button type="button" class="btn primary" aria-disabled="true">Renaming…</button>
+								{:else}
+									<button class="btn primary">Save name</button>
+									<button type="button" class="btn" onclick={() => stopCategoryRename()}>Cancel</button>
+								{/if}
+							</form>
+						{:else}
+							<span class="name">{category}</span>
+							{#if data.renaming?.from === category}
+								<!-- A rename that stopped halfway: both names stay on the list until every task has the new one. -->
+								<form method="POST" action="?/renameCategory" use:enhance={renamedCategory} class="inline">
+									<input type="hidden" name="category" value={category} />
+									<input type="hidden" name="name" value={data.renaming.to} />
+									<button class="btn small primary" class:waiting={categoryBusy} aria-label="Finish renaming {category} to {data.renaming.to}" data-finish-category={category}>{categoryBusy ? 'Renaming…' : 'Finish renaming'}</button>
+								</form>
+							{:else}
+								<button type="button" class="btn small" aria-label="Rename {category}" class:waiting={categoryBusy} data-rename-category={category} onclick={() => startCategoryRename(category)}>Rename</button>
+								<form method="POST" action="?/checkCategory" use:enhance={countedCategory} class="inline">
+									<input type="hidden" name="category" value={category} />
+									<button class="btn small" aria-label="Delete {category}" class:waiting={categoryBusy} data-delete-category={category}>Delete</button>
+								</form>
+							{/if}
+						{/if}
+						{#if deletingCategory?.category === category}{@render confirmCategoryDelete(category, deletingCategory.count)}{/if}
+						{#if data.renaming?.from === category}<p class="hint row-hint">Being renamed to {data.renaming.to}; some tasks still say {category}.</p>{/if}
+						{#if categoryError?.category === category && categoryError.message}{@render problem(categoryError.message)}{/if}
+					</li>
 				{/each}
 			</ul>
-			<p class="hint">In this order on the Future tasks list.</p>
+			<form method="POST" action="?/addCategory" use:enhance={addedCategory} class="add">
+				<label for="new-category">New category</label>
+				<div class="edit">
+					<input id="new-category" class="text" name="name" value={form?.action === 'addCategory' ? form.name : ''} placeholder="Name, up to 40 letters" autocomplete="off" />
+					<button class="btn" aria-label="Add category">Add</button>
+				</div>
+				{#if addCategoryError}{@render problem(addCategoryError)}{/if}
+			</form>
+			<p class="hint">In this order on the Future tasks list and in the List menu. A new name is given to every task in that category, on every phone too.</p>
+			{#if categoryMessage}<p id="category-message" class="done" role="status" tabindex="-1">{categoryMessage}</p>{/if}
 		</section>
 
 		<section aria-labelledby="h-export">
@@ -484,6 +695,7 @@
 	.move { display: flex; flex-wrap: wrap; align-items: center; gap: 0 0.4rem; }
 	.choice { min-height: 44px; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
 	.choice input { width: 22px; height: 22px; margin: 0; accent-color: var(--ink); }
+	.move label.choice { font-size: 0.9rem; }
 	.move select {
 		flex: 1 1 10rem;
 		min-width: 0;
@@ -498,7 +710,8 @@
 	}
 	/* A long confirm ("Move 42 items to … and delete …") wraps rather than widening the page. */
 	.confirm .btn { max-width: 100%; overflow-wrap: anywhere; text-align: center; padding-block: 0.3rem; }
-	.confirm #delete-count:focus, .done:focus { outline: none; }
+	.confirm #delete-count:focus, .confirm #category-delete-count:focus, .done:focus { outline: none; }
 	.done { margin: 0.7rem 0 0; }
+	.row-hint { flex-basis: 100%; margin: 0 0 0.3rem; }
 	.error { flex-basis: 100%; color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
 </style>

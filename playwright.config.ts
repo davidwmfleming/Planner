@@ -3,6 +3,7 @@ import { defineConfig } from '@playwright/test';
 const tablet = { viewport: { width: 1000, height: 1400 }, isMobile: true, hasTouch: true };
 const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 const CHANGES_EVERY_PAGE = /settings-choices\.test\.ts/;
+const CHANGES_CATEGORIES = /settings-categories\.test\.ts/;
 
 export default defineConfig({
 	testDir: 'e2e',
@@ -24,11 +25,14 @@ export default defineConfig({
 		}
 	],
 	projects: [
-		{ name: 'tablet', testIgnore: CHANGES_EVERY_PAGE, use: tablet },
-		{ name: 'phone', testIgnore: CHANGES_EVERY_PAGE, use: phone },
+		{ name: 'tablet', testIgnore: [CHANGES_EVERY_PAGE, CHANGES_CATEGORIES], use: tablet },
+		{ name: 'phone', testIgnore: [CHANGES_EVERY_PAGE, CHANGES_CATEGORIES], use: phone },
 		// Changing which calendar is Work, or where new events go, would upset tests running alongside,
 		// so those tests run alone, once everything else has finished: tablet first, then phone.
 		{ name: 'tablet-settings', testMatch: CHANGES_EVERY_PAGE, dependencies: ['tablet', 'phone'], use: tablet },
-		{ name: 'phone-settings', testMatch: CHANGES_EVERY_PAGE, dependencies: ['tablet-settings'], use: phone }
+		{ name: 'phone-settings', testMatch: CHANGES_EVERY_PAGE, dependencies: ['tablet-settings'], use: phone },
+		// Changing the task categories would upset the List menu of tests running alongside, and the settings tests' choices.
+		{ name: 'tablet-categories', testMatch: CHANGES_CATEGORIES, dependencies: ['phone-settings'], use: tablet },
+		{ name: 'phone-categories', testMatch: CHANGES_CATEGORIES, dependencies: ['tablet-categories'], use: phone }
 	]
 });

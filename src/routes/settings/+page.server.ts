@@ -1,6 +1,7 @@
 import { error, fail, type ActionFailure } from '@sveltejs/kit';
 import { shortTitle } from '$lib/format';
-import { byName, calendarAtPath, checkCalendarName, menuLabels, type Settings } from '$lib/settings';
+import { byName, calendarAtPath, checkCalendarName, checkCategoryName, MAX_CATEGORIES, menuLabels, type Settings } from '$lib/settings';
+import { deleteCategory, renameCategory, tasksWith, type Recategorised, type SettingsPlace } from '$lib/server/categories';
 import { logged, RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
 import { icsToItems } from '$lib/server/ical';
 import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
@@ -52,11 +53,112 @@ export const load: PageServerLoad = async () => {
 		taskLists: calendars.filter((c) => c.accepts.includes('task') && !c.accepts.includes('event')).map((c) => ({ path: pathOf(c.url), name: c.name, newTasks: c.url === newTasks })),
 		workPath: work && pathOf(work.url),
 		defaultEventPath: newEvents && pathOf(newEvents),
-		categories: settings.categories
+		categories: settings.categories,
+		// A rename of a category that didn't finish: both names are on the list until it does.
+		renaming: settings.renaming
 	};
 };
 
 export const actions: Actions = {
+	/** A new task category, at the end of the list. Only the list changes: no task has it yet. */
+	addCategory: async ({ request }) => {
+		const asked = String((await request.formData()).get('name') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'addCategory' as const, name: asked, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { place, settings } = found;
+		if (settings.categories.length >= MAX_CATEGORIES) return refuse(400, `There are ${MAX_CATEGORIES} categories already, the most there can be. Delete one to make room.`);
+		const checked = checkCategoryName(asked, settings.categories);
+		if ('error' in checked) return refuse(400, checked.error);
+		try {
+			await place.write({ ...settings, categories: [...settings.categories, checked.name] });
+		} catch (e) {
+			console.error('Settings: could not save a new category', e);
+			return refuse(502, `The calendar server didn't add "${checked.name}". Try again in a moment.`);
+		}
+		return { action: 'addCategory' as const, added: checked.name };
+	},
+
+	/** Before deleting a category: how many tasks have it (a repeating task counts once), for the confirm. */
+	checkCategory: async ({ request }) => {
+		const category = String((await request.formData()).get('category') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'checkCategory' as const, category, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { store, settings } = found;
+		if (!settings.categories.includes(category)) return refuse(404, CATEGORY_GONE);
+		if (settings.renaming && [settings.renaming.from, settings.renaming.to].includes(category)) return refuse(409, unfinishedRename(settings.renaming));
+		try {
+			return { action: 'checkCategory' as const, category, count: (await tasksWith(store, category)).length };
+		} catch (e) {
+			console.error('Settings: could not count the tasks in a category', e);
+			return refuse(502, `The calendar server didn't say which tasks are in ${category}. Try again in a moment.`);
+		}
+	},
+
+	/** Deletes a category. Its tasks are never deleted: they move to another category (`to`), or have none ("No list"). */
+	deleteCategory: async ({ request }) => {
+		const form = await request.formData();
+		const category = String(form.get('category') ?? '');
+		const to = String(form.get('to') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'deleteCategory' as const, category, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { store, place, settings } = found;
+		if (!settings.categories.includes(category)) return refuse(404, CATEGORY_GONE);
+		const pending = settings.renaming;
+		if (pending && [pending.from, pending.to].some((c) => c === category || c === to)) return refuse(409, unfinishedRename(pending));
+		if (to && !settings.categories.includes(to)) return refuse(404, `${to} isn't on the list any more; reload the page`);
+		if (to === category) return refuse(400, `Choose a category other than ${category} for its tasks`);
+		let done: Recategorised;
+		try {
+			done = await deleteCategory(store, place, category, to || undefined);
+		} catch (e) {
+			console.error('Settings: could not delete a category', e);
+			return refuse(502, `The calendar server didn't finish deleting ${category}. Try again in a moment: no task is lost, and deleting it again carries on where it stopped.`);
+		}
+		if (done.unsure || done.refused) {
+			// Counts only: category names may say what the tasks are about, and logs are kept.
+			console.error('Settings: a category delete stopped before every task was changed', done);
+			return refuse(502, stoppedDelete(category, to, done));
+		}
+		return { action: 'deleteCategory' as const, deleted: category, count: done.changed, movedTo: to || undefined };
+	},
+
+	/** A new name for a task category, on the list and on every task that has it (see renameCategory). */
+	renameCategory: async ({ request }) => {
+		const form = await request.formData();
+		const category = String(form.get('category') ?? '');
+		const asked = String(form.get('name') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'renameCategory' as const, category, name: asked, message });
+		const found = await categoryPlace();
+		if ('refusal' in found) return refuse(found.refusal.status, found.refusal.message);
+		const { store, place, settings } = found;
+		const from = settings.categories.find((c) => c === category);
+		if (!from) return refuse(404, CATEGORY_GONE);
+		const pending = settings.renaming;
+		if (pending && pending.from !== from) return refuse(409, unfinishedRename(pending));
+		// A rename that didn't finish has put the new name on the list already: running it again is allowed.
+		const checked = checkCategoryName(asked, settings.categories.filter((c) => c !== pending?.to), from);
+		if ('error' in checked) return refuse(400, checked.error);
+		if (pending && checked.name.toLowerCase() !== pending.to.toLowerCase()) return refuse(409, unfinishedRename(pending));
+		const to = pending?.to ?? checked.name;
+		if (to === from) return { action: 'renameCategory' as const, renamed: to, from, count: 0 };
+		let done: Recategorised;
+		try {
+			done = await renameCategory(store, place, from, to);
+		} catch (e) {
+			console.error('Settings: could not rename a category', e);
+			return refuse(502, `The calendar server didn't finish renaming "${from}". Try again in a moment: the rename carries on where it stopped.`);
+		}
+		if (done.unsure || done.refused) {
+			// Counts only: category names may say what the tasks are about, and logs are kept.
+			console.error('Settings: a category rename stopped before every task had the new name', done);
+			return refuse(502, stoppedRename(from, to, done));
+		}
+		return { action: 'renameCategory' as const, renamed: to, from, count: done.changed };
+	},
+
 	/** A new event calendar, with a name no other calendar or list has. */
 	add: async ({ request }) => {
 		const asked = String((await request.formData()).get('name') ?? '');
@@ -195,6 +297,46 @@ export const actions: Actions = {
 		return recounted(store, calendar, await finish(store, calendar, left.version, done));
 	}
 };
+
+const CATEGORY_GONE = "That category isn't on the list any more; reload the page";
+const tasksCount = (n: number) => `${n} ${n === 1 ? 'task' : 'tasks'}`;
+
+/** The settings, read fresh, and where to save them; or why the categories can't be changed now. */
+async function categoryPlace(): Promise<{ store: CalendarStore; place: SettingsPlace; settings: Settings } | { refusal: { status: number; message: string } }> {
+	const store = await connect();
+	if (!store) return { refusal: { status: 503, message: NOT_ANSWERING } };
+	try {
+		await store.refreshCalendars();
+		const tasks = tasksUrl(store);
+		if (!tasks) return { refusal: { status: 503, message: 'There is no Tasks list to keep the settings on; reload the page' } };
+		const place = { read: () => getSettings(store), write: (settings: Settings) => store.writeSettings(tasks, settings) };
+		return { store, place, settings: await place.read() };
+	} catch (e) {
+		console.error('Settings: could not read the settings to change the categories', e);
+		return { refusal: { status: 503, message: NOT_ANSWERING } };
+	}
+}
+
+const unfinishedRename = (pending: NonNullable<Settings['renaming']>) =>
+	`Renaming "${pending.from}" to "${pending.to}" didn't finish. Finish that first: tap "Finish renaming" next to "${pending.from}".`;
+
+/** Why a rename stopped before every task had the new name. Both names stay on the list, so no task loses its category. */
+function stoppedRename(from: string, to: string, done: Recategorised): string {
+	const sofar = `${tasksCount(done.changed)} now ${done.changed === 1 ? 'has' : 'have'} "${to}".`;
+	const why = done.unsure
+		? 'The calendar server stopped answering, so the rest may still say'
+		: `${tasksCount(done.refused)} changed on another device meanwhile, so ${done.refused === 1 ? 'it still says' : 'they still say'}`;
+	return `${sofar} ${why} "${from}", and both names stay on the list for now. Wait a minute, then tap "Finish renaming" to finish.`;
+}
+
+/** Why a delete stopped before every task was changed. The category stays on the list, so no task loses it unseen. */
+function stoppedDelete(category: string, to: string, done: Recategorised): string {
+	const sofar = to ? `${tasksCount(done.changed)} moved to ${to}.` : `${tasksCount(done.changed)} no longer ${done.changed === 1 ? 'has' : 'have'} a list.`;
+	const why = done.unsure
+		? `The calendar server stopped answering, so the rest may still be in ${category}`
+		: `${tasksCount(done.refused)} changed on another device meanwhile, so ${done.refused === 1 ? 'it is' : 'they are'} still in ${category}`;
+	return `${sofar} ${why}, and ${category} stays on the list for now. Wait a minute, then delete it again to finish.`;
+}
 
 const nulls = (fields: object) => Object.fromEntries(Object.keys(fields).map((k) => [k, null]));
 
