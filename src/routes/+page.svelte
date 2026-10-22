@@ -5,7 +5,7 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays, toISODate } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, saysReload, shortTitle } from '$lib/format';
+	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, pageSubtitle, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from '$lib/new-day';
 	import { REPEATS, repeatChoice } from '$lib/repeat';
@@ -557,7 +557,11 @@
 
 <div class="wrap" bind:this={wrap}>
 	<header class="bar">
-		<h1 tabindex="-1" bind:this={pageTitle}>Planner <span>· {monthYear(data.start)}</span></h1>
+		<!-- The month in large type, as at the top of a paper notebook page; "Planner" is still read out. -->
+		<div class="heading">
+			<h1 tabindex="-1" bind:this={pageTitle}><span class="unseen">Planner · </span>{monthYear(data.start)}</h1>
+			<p class="week">{pageSubtitle(data.days.map((d) => d.date))}</p>
+		</div>
 		<nav aria-label="Pages">
 			<a class="btn" href={pageUrl(data.previous)} aria-label="Previous page">‹</a>
 			<a class="btn" href={pageUrl(data.todayPage)}>Today</a>
@@ -732,12 +736,26 @@
 </dialog>
 
 <style>
+	/* The "Notebook" look: black on white, a serif month and day numbers, grey ruled lines, the tasks side in light grey.
+	   The page runs edge to edge (so today's bar sits at the screen's edge); each part keeps its own margin, the gutter. */
 	.wrap {
-		max-width: 980px;
+		--muted: #555555;
+		--rule: #b8b8b8;
+		--col-rule: #8a8a8a;
+		--hint: #6b6b6b;
+		--gutter: clamp(16px, 4.8vw, 48px);
+		--gutter-left: max(var(--gutter), env(safe-area-inset-left, 0px));
+		--gutter-right: max(var(--gutter), env(safe-area-inset-right, 0px));
+		--line: 2.75rem;
+		max-width: 1000px;
 		margin: 0 auto;
-		padding-left: max(16px, env(safe-area-inset-left, 0px));
-		padding-right: max(16px, env(safe-area-inset-right, 0px));
 		padding-block: 0 2rem;
+		font-size: 1.1875rem;
+	}
+	/* A tablet's pen or finger gets the notebook's tall lines. */
+	@media (pointer: coarse) and (min-width: 521px) { .wrap { --line: 3.25rem; } }
+	@media (prefers-color-scheme: dark) {
+		.wrap { --muted: #a3abb9; --rule: #2f3746; --col-rule: #586072; --hint: #8d95a3; }
 	}
 	.bar {
 		position: sticky;
@@ -747,13 +765,15 @@
 		border-bottom: 2px solid var(--ink);
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: 0.75rem 1rem;
 		align-items: center;
-		padding-block: 0.6rem;
+		padding: 28px var(--gutter-right) 20px var(--gutter-left);
+		font-size: 1rem;
 	}
-	h1 { font-weight: 800; font-size: 1.25rem; margin: 0 auto 0 0; }
-	h1 span { font-weight: 600; color: var(--muted); }
-	nav { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+	.heading { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+	h1 { font-family: var(--serif); font-weight: 600; font-size: 2.25rem; line-height: 1.1; letter-spacing: -0.01em; margin: 0; }
+	.week { margin: 0; font-size: 0.94rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+	nav { display: flex; gap: 0.75rem; flex-wrap: wrap; }
 	.btn, input[type='date'] {
 		font: inherit;
 		color: var(--ink);
@@ -768,14 +788,19 @@
 		text-decoration: none;
 	}
 	input[type='date'] { padding: 0 0.4rem; }
-	.gear { padding: 0; }
+	/* The header's controls are round-ended, like the notebook's tabs. */
+	.bar .btn, .bar input[type='date'] { border-width: 1.5px; border-radius: 24px; min-height: 48px; min-width: 48px; }
+	.bar input[type='date'] { padding: 0 1rem; }
+	nav .btn { font-weight: 700; padding: 0 1.25rem; }
+	nav .btn[aria-label] { padding: 0; font-size: 1.4rem; }
+	.bar .gear { padding: 0; border-color: transparent; }
 	.wrap { touch-action: pan-y; }
 	.page { margin-top: 0.4rem; }
 	/* Dragging an item: it gets a dashed outline, and the day it would land on a thick one. */
 	.lines li[data-uid] { user-select: none; -webkit-user-select: none; }
 	li.dragging { outline: 2px dashed var(--ink); }
 	.day.drop-target { outline: 4px solid var(--ink); outline-offset: -2px; }
-	.day { border-bottom: 2px solid var(--ink); padding-block: 0.5rem 0.9rem; min-height: calc((100dvh - 10rem) / 3); }
+	.day { border-bottom: 2px solid var(--ink); padding: 0.5rem var(--gutter-right) 0.9rem var(--gutter-left); min-height: calc((100dvh - 10rem) / 3); }
 	.day.weekend { min-height: calc((100dvh - 10rem) / 6); }
 	.day-head { display: flex; align-items: baseline; gap: 0.55rem; }
 	.dow, .dnum { font-weight: 800; font-size: 1.6rem; }
@@ -833,7 +858,7 @@
 		cursor: pointer;
 		min-height: var(--line);
 	}
-	.someday { margin-top: 1.2rem; }
+	.someday { margin-top: 1.2rem; padding-inline: var(--gutter-left) var(--gutter-right); }
 	.btn.wide { width: 100%; }
 	.hint { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0; }
 	.pull {
@@ -885,7 +910,8 @@
 	.actions-left, .actions-right { display: flex; flex-wrap: wrap; gap: 0.5rem; }
 	.btn.primary { background: var(--ink); color: var(--paper); }
 	button.btn { cursor: pointer; }
-	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem 0 0; }
+	.notice { border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0.5rem var(--gutter-right) 0 var(--gutter-left); }
+	.bar .notice { margin: 0; }
 	.notice a { color: var(--ink); font-weight: 700; }
 	.day-note { flex: 1 0 100%; order: 3; margin: 0; }
 	.error { color: var(--ink); border: 2px solid var(--ink); border-radius: 6px; padding: 0.4rem 0.6rem; margin: 0; font-weight: 700; }
@@ -918,8 +944,13 @@
 	@media (max-width: 520px) {
 		.cols { grid-template-columns: 1fr; gap: 0.4rem; }
 		.row2 { grid-template-columns: minmax(0, 1fr); }
-		/* Title, month and the gear on one line, the four page controls on the next: no third row eating the page. */
-		h1 { flex: 1; }
+		/* Month and the gear on one line, the four page controls on the next: no third row eating the page. */
+		.bar { padding-top: 12px; padding-bottom: 10px; gap: 0.5rem; }
+		h1 { font-size: 1.6rem; }
+		.week { font-size: 0.75rem; }
+		nav { gap: 0.5rem; }
+		.bar .btn, .bar input[type='date'] { min-height: 44px; min-width: 44px; }
+		nav .btn { padding: 0 0.9rem; }
 		nav { flex-wrap: nowrap; width: 100%; order: 1; }
 		input[type='date'] { flex: 1; min-width: 0; font-size: 0.95rem; }
 		/* A message beside its buttons is squeezed into a narrow column many lines tall. Here Reload and × sit

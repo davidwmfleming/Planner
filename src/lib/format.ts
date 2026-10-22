@@ -13,6 +13,23 @@ export const dayNumber = (date: string) => parts(date).d;
 export const monthShort = (date: string) => MONTHS[parts(date).m - 1].slice(0, 3);
 export const monthYear = (date: string) => `${MONTHS[parts(date).m - 1]} ${parts(date).y}`;
 
+/** The week's number, counted from Monday; week 1 is the one holding the year's first Thursday (as printed diaries do). */
+export function weekNumber(date: string): number {
+	const { y, m, d, dow } = parts(date);
+	// The Thursday of this week decides which year the week belongs to.
+	const thursday = Date.UTC(y, m - 1, d + 3 - ((dow + 6) % 7));
+	const yearStart = Date.UTC(new Date(thursday).getUTCFullYear(), 0, 1);
+	return Math.floor((thursday - yearStart) / 86_400_000 / 7) + 1;
+}
+
+/** "Week 43 · Monday to Wednesday": the line under the month in the page header. */
+export function pageSubtitle(dates: string[]): string {
+	if (!dates.length) return '';
+	const first = dayName(dates[0]);
+	const last = dayName(dates[dates.length - 1]);
+	return `Week ${weekNumber(dates[0])} · ${first === last ? first : `${first} to ${last}`}`;
+}
+
 /** "08:45" → "8:45 am" */
 export function formatTime(time?: string): string {
 	if (!time) return '';

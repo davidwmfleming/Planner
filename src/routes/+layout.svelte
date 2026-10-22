@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	// The fonts are served by the planner itself (bundled at build time), so pages look the same with no internet.
+	import '@fontsource/atkinson-hyperlegible/400.css';
+	import '@fontsource/atkinson-hyperlegible/700.css';
+	import '@fontsource/source-serif-4/600.css';
 	import '../app.css';
 
 	let { children } = $props();
