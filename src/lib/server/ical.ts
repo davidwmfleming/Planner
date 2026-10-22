@@ -137,7 +137,10 @@ function itemComponent(item: Item): ICAL.Component {
 		if (item.state === 'done') comp.addPropertyWithValue('x-planner-ticked', 'TRUE');
 	} else {
 		if (item.date) {
-			comp.addPropertyWithValue('dtstart', item.time ? dateTimeValue(item.date, item.time) : dateValue(item.date));
+			// DUE is the date Apple Reminders and most task apps show; DTSTART is kept for repeats and older readers.
+			const when = () => (item.time ? dateTimeValue(item.date!, item.time) : dateValue(item.date!));
+			comp.addPropertyWithValue('dtstart', when());
+			comp.addPropertyWithValue('due', when());
 		}
 		const status = { open: 'NEEDS-ACTION', done: 'COMPLETED', dropped: 'CANCELLED' }[item.state];
 		comp.addPropertyWithValue('status', status);
@@ -449,8 +452,9 @@ function componentToItem(comp: ICAL.Component): Item {
 		state: 'open'
 	};
 
-	// Apple Reminders and other task apps often set only DUE; treat it as the task's day.
-	const start = (comp.getFirstPropertyValue('dtstart') ?? (kind === 'task' ? comp.getFirstPropertyValue('due') : null)) as ICAL.Time | null;
+	// A task's day is its DUE, the date Apple Reminders shows and changes, unless it repeats: repeats count from DTSTART.
+	const due = kind === 'task' && !comp.hasProperty('rrule') ? comp.getFirstPropertyValue('due') : null;
+	const start = (due ?? comp.getFirstPropertyValue('dtstart') ?? (kind === 'task' ? comp.getFirstPropertyValue('due') : null)) as ICAL.Time | null;
 	if (start) {
 		item.date = isoDate(start);
 		if (!start.isDate) item.time = hhmm(start);

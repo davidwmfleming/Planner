@@ -70,6 +70,24 @@ describe('tasks', () => {
 		expect(roundTrip({ ...base, state: 'dropped' }).state).toBe('dropped');
 	});
 
+	it('writes the day as DUE too, so Apple Reminders shows it', () => {
+		const allDay = itemToICS({ uid: 't5', kind: 'task', title: 'Call bank', date: '2026-10-22', state: 'open' });
+		expect(allDay).toContain('DUE;VALUE=DATE:20261022');
+		expect(allDay).toContain('DTSTART;VALUE=DATE:20261022');
+		const timed = itemToICS({ uid: 't6', kind: 'task', title: 'Call bank', date: '2026-10-22', time: '09:30', state: 'open' });
+		expect(timed).toContain('DUE:20261022T093000');
+		const repeating: Item = { uid: 't7', kind: 'task', title: 'Bins', date: '2026-10-22', recurrence: 'FREQ=WEEKLY', state: 'open' };
+		expect(itemToICS(repeating)).toContain('DUE;VALUE=DATE:20261022');
+		const moved = withOccurrence(itemToICS(repeating), '2026-10-29', () => ({ date: '2026-10-30' }));
+		expect(moved).toContain('DUE;VALUE=DATE:20261030');
+	});
+
+	it('reads the day from DUE when Reminders moved a task but left its start', () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r3', 'DTSTAMP:20261019T000000Z',
+			'SUMMARY:Sheets', 'DTSTART;VALUE=DATE:20261021', 'DUE;VALUE=DATE:20261023', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		expect(icsToItems(ics)[0]).toMatchObject({ date: '2026-10-23' });
+	});
+
 	it('remembers where a carried-over task came from', () => {
 		const item: Item = { uid: 't4', kind: 'task', title: 'Book dentist', date: '2026-10-19', carriedFrom: '2026-10-18', state: 'open' };
 		expect(roundTrip(item)).toEqual(item);
