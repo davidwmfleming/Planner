@@ -1,6 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { addDays, comingSaturday, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
-import { applyEdit, daysBetween } from '$lib/edit';
+import { applyEdit, categoryFinder, daysBetween } from '$lib/edit';
 import { shortTitle } from '$lib/format';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
@@ -15,7 +15,6 @@ import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
-const LIST_ORDER = ['month', 'waiting', 'someday', ''];
 const NEW_CALENDAR = '+new';
 /** What the calendar server says when asked for something that isn't there (any more). */
 const GONE = [404, 410];
@@ -42,8 +41,13 @@ function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event'
 	}
 }
 
-/** Only plain item data goes to the browser, not where it lives on the server. */
-const plain = ({ calendarUrl, url, etag, ics, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }): Item => item;
+/** Only plain item data goes to the browser, not where it lives on the server. Of its categories, only the one
+ * that is David's goes (as `label`); values from other apps stay in the file and aren't shown. */
+const plain = ({ calendarUrl, url, etag, ics, categories, ...item }: Item & { calendarUrl?: string; url?: string; etag?: string; ics?: string }, categoryOf: (values?: string[]) => string | undefined): Item => {
+	// Lists are for tasks; an event's categories (from another app) are never shown.
+	const label = item.kind === 'task' ? categoryOf(categories) : undefined;
+	return label ? { ...item, label } : item;
+};
 
 export const load: PageServerLoad = async ({ url, cookies }) => {
 	const now = new Date();
@@ -90,6 +94,10 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 	const workCalendar = calendarAtPath(calendars, settings.workCalendar) ? settings.workCalendar : null;
 	const eventCalendars = calendars.filter((c) => c.accepts.includes('event')).sort(byName);
 	const newEvents = newItemsGoIn(store, 'event', settings);
+	const lists = settings.categories;
+	const categoryOf = categoryFinder(lists);
+	/** Future tasks go in the order of the categories in the settings; those without one come last. */
+	const listOrder = new Map(lists.map((c, at) => [c, at]));
 
 	return {
 		today,
@@ -107,14 +115,18 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		next: flipPage(start, 1),
 		todayPage: pageStart(today),
 		saturday: comingSaturday(today),
+		// The List menu in the details sheet.
+		categories: lists,
 		unscheduled: items
 			.filter((i) => i.kind === 'task' && !i.date && i.state === 'open')
-			.sort((a, b) => LIST_ORDER.indexOf(a.label ?? '') - LIST_ORDER.indexOf(b.label ?? ''))
-			.map((i) => plain({ ...i, calendar: pathOf(i.calendarUrl) })),
+			// Each task's place is worked out once, not on every comparison.
+			.map((i) => ({ i, at: listOrder.get(categoryOf(i.categories) ?? '') ?? lists.length }))
+			.sort((a, b) => a.at - b.at)
+			.map(({ i }) => plain({ ...i, calendar: pathOf(i.calendarUrl) }, categoryOf)),
 		days: buildDays(dates, shown).map((d) => ({
 			...d,
-			events: d.events.map(plain),
-			tasks: d.tasks.map(plain)
+			events: d.events.map((i) => plain(i, categoryOf)),
+			tasks: d.tasks.map((i) => plain(i, categoryOf))
 		})),
 		// How many items are left out because they couldn't be read; the page says so.
 		unreadable: unreadable.size
@@ -219,11 +231,18 @@ export const actions: Actions = {
 		if (!('item' in found)) return found;
 		const { store, item } = found;
 		const field = (name: string) => String(form.get(name) ?? '');
+		let settings;
+		try {
+			settings = await getSettings(store);
+		} catch (e) {
+			console.error('Planner: could not read the settings to save an item', e);
+			return fail(503, { message: NOT_ANSWERING });
+		}
 		const result = applyEdit(item, {
 			title: field('title'), kind: field('kind'), date: field('date'), time: field('time'),
 			endTime: field('endTime'), location: field('location'), label: field('label'), notes: field('notes'),
 			repeat: field('repeat')
-		});
+		}, settings.categories);
 		if ('error' in result) return fail(400, { message: result.error });
 		// Events can be filed in any calendar that takes events (Me, Family, Work…), or in a new one made here.
 		// The same name rules as the settings page; a calendar that already exists is picked from the list.
@@ -236,7 +255,7 @@ export const actions: Actions = {
 				: result.item.kind === 'event'
 					? calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'))
 					: undefined;
-			const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, await getSettings(store)));
+			const target = wanted?.url ?? (result.item.kind === item.kind ? item.calendarUrl : defaultCalendarUrl(store, result.item.kind, settings));
 			if (result.item.kind === item.kind && target === item.calendarUrl) {
 				// Fields left blank are removed, so save the whole item rather than a merge.
 				await store.replace(item, result.item);
@@ -416,10 +435,11 @@ async function takeBack(store: Awaited<ReturnType<typeof getStore>>, old: Stored
 }
 
 /** The fields the details sheet edits, besides the calendar and kind. */
-const SHEET_FIELDS = ['title', 'date', 'time', 'endTime', 'location', 'notes', 'label', 'recurrence'] as const;
+const SHEET_FIELDS = ['title', 'date', 'time', 'endTime', 'location', 'notes', 'recurrence'] as const;
 
 /** Whether the sheet changed anything besides where the item is kept. */
-const otherChanges = (before: Item, after: Item) => SHEET_FIELDS.some((field) => (before[field] ?? '') !== (after[field] ?? ''));
+const otherChanges = (before: Item, after: Item) =>
+	SHEET_FIELDS.some((field) => (before[field] ?? '') !== (after[field] ?? '')) || (before.categories ?? []).join(',') !== (after.categories ?? []).join(',');
 
 /** How many copies of the item are now kept anywhere but the new copy's address, or undefined if that can't be read. */
 async function elsewhere(store: Awaited<ReturnType<typeof getStore>>, old: StoredItem, copy: StoredItem) {

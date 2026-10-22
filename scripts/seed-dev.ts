@@ -30,10 +30,10 @@ const todo = [
 	tk(t, 'Green cart'), tk(t, 'Ruck', { state: 'dropped' }), tk(t, 'Anniversary gift ideas'), tk(y, 'Book dentist cleaning'),
 	tk(t1, 'Hot tub'), tk(t1, 'Ruck walk', { state: 'dropped' }), tk(t1, 'Bag to truck', { time: '17:00' }), tk(t1, 'Pick up meds'),
 	tk(t2, 'Veggie box'), tk(t2, 'Lift'), tk(t2, 'Sheets'),
-	tk(undefined, 'Fix piano keys (glue)', { label: 'someday' }), tk(undefined, 'Defrost freezer before winter', { label: 'month' }),
-	tk(undefined, 'Budget update and chat, before January', { label: 'month' }), tk(undefined, 'Cancel credit card (one call)', { label: 'month' }),
-	tk(undefined, 'Wills: signing meeting', { label: 'waiting' }), tk(undefined, 'Tax credit: awaiting adjudication', { label: 'waiting' }),
-	tk(undefined, 'French training: waiting to hear', { label: 'waiting' })
+	tk(undefined, 'Fix piano keys (glue)', { categories: ['Someday'] }), tk(undefined, 'Defrost freezer before winter', { categories: ['This month'] }),
+	tk(undefined, 'Budget update and chat, before January', { categories: ['This month'] }), tk(undefined, 'Cancel credit card (one call)', { categories: ['This month'] }),
+	tk(undefined, 'Wills: signing meeting', { categories: ['Waiting'] }), tk(undefined, 'Tax credit: awaiting adjudication', { categories: ['Waiting'] }),
+	tk(undefined, 'French training: waiting to hear', { categories: ['Waiting'] })
 ];
 for (const e of events) await store.create(me.url, e);
 await store.create(work.url, ev(t, 'Economic Modelling', '09:00', { endTime: '10:00' }));

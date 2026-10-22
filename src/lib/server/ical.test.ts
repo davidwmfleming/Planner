@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Item } from '$lib/item';
-import { icsToItems, itemToICS } from './ical';
+import { icsToItems, itemToICS, occurrenceOn, withOccurrence } from './ical';
 
 const roundTrip = (item: Item) => icsToItems(itemToICS(item))[0];
 
@@ -44,10 +44,11 @@ describe('events', () => {
 });
 
 describe('tasks', () => {
-	it('keeps an undated task with its list label', () => {
-		const item: Item = { uid: 't1', kind: 'task', title: 'Fix piano keys', label: 'someday', state: 'open' };
+	it('keeps an undated task with its category, written by name', () => {
+		const item: Item = { uid: 't1', kind: 'task', title: 'Fix piano keys', categories: ['Someday'], state: 'open' };
 		const ics = itemToICS(item);
 		expect(ics).toContain('BEGIN:VTODO');
+		expect(ics).toContain('CATEGORIES:Someday');
 		expect(ics).toContain('STATUS:NEEDS-ACTION');
 		expect(ics).not.toContain('DTSTART');
 		expect(roundTrip(item)).toEqual(item);
@@ -76,10 +77,53 @@ describe('tasks', () => {
 });
 
 describe('reading other apps\' data', () => {
-	it('reads an undated task written by another app, with its label', () => {
+	it('reads an undated task written by another app, with its categories', () => {
 		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r1', 'DTSTAMP:20261019T000000Z',
 			'SUMMARY:Green cart', 'STATUS:NEEDS-ACTION', 'CATEGORIES:Waiting', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
-		expect(icsToItems(ics)).toEqual([{ uid: 'r1', kind: 'task', title: 'Green cart', label: 'waiting', state: 'open' }]);
+		expect(icsToItems(ics)).toEqual([{ uid: 'r1', kind: 'task', title: 'Green cart', categories: ['Waiting'], state: 'open' }]);
+	});
+
+	it('reads the keys older planners wrote as names, and writes the names when saved again', () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r3', 'DTSTAMP:20261019T000000Z',
+			'SUMMARY:Fix piano keys', 'CATEGORIES:month', 'CATEGORIES:Waiting', 'CATEGORIES:SOMEDAY', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		const [item] = icsToItems(ics);
+		expect(item.categories).toEqual(['This month', 'Waiting', 'Someday']);
+		const saved = itemToICS({ ...item, state: 'done' }, ics);
+		expect(saved).toContain('CATEGORIES:This month,Waiting,Someday');
+		expect(saved).not.toMatch(/CATEGORIES:month|SOMEDAY/);
+	});
+
+	it('keeps categories it does not know, from a phone say, as they are', () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r4', 'DTSTAMP:20261019T000000Z',
+			'SUMMARY:Green cart', 'CATEGORIES:Home,Errands', 'CATEGORIES:waiting', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		const [item] = icsToItems(ics);
+		expect(item.categories).toEqual(['Home', 'Errands', 'Waiting']);
+		expect(icsToItems(itemToICS(item, ics))[0].categories).toEqual(['Home', 'Errands', 'Waiting']);
+	});
+
+	it("gives a ticked day of a repeating task the series' new categories, all of them", () => {
+		const series: Item = { uid: 'r5', kind: 'task', title: 'Bins', date: '2026-10-19', categories: ['Home', 'This month'], state: 'open', recurrence: 'FREQ=WEEKLY' };
+		const ticked = withOccurrence(itemToICS(series), '2026-10-26', () => ({ state: 'done' }));
+		const recategorised = itemToICS({ ...series, categories: ['Waiting', 'Home'] }, ticked);
+		expect(occurrenceOn(recategorised, '2026-10-26')).toMatchObject({ state: 'done', categories: ['Waiting', 'Home'] });
+	});
+
+	it("gives the ticked and moved days of an older repeating task (with keys, not names) the series' new category", () => {
+		const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', 'BEGIN:VTODO', 'UID:r6', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Bins',
+			'DTSTART;VALUE=DATE:20261019', 'RRULE:FREQ=DAILY;COUNT=5', 'CATEGORIES:month', 'CATEGORIES:Home', 'END:VTODO', 'END:VCALENDAR'].join('\r\n');
+		const ticked = withOccurrence(ics, '2026-10-20', () => ({ state: 'done' }));
+		const moved = withOccurrence(ticked, '2026-10-21', () => ({ date: '2026-10-22' }));
+		const [series] = icsToItems(moved);
+		const changed = itemToICS({ ...series, categories: ['Someday', 'Home'] }, moved);
+		expect(occurrenceOn(changed, '2026-10-20')).toMatchObject({ state: 'done', categories: ['Someday', 'Home'] });
+		expect(occurrenceOn(changed, '2026-10-21')).toMatchObject({ date: '2026-10-22', categories: ['Someday', 'Home'] });
+	});
+
+	it('keeps a category a day was given for itself when the series changes', () => {
+		const series: Item = { uid: 'r7', kind: 'task', title: 'Bins', date: '2026-10-19', categories: ['This month'], state: 'open', recurrence: 'FREQ=DAILY;COUNT=5' };
+		const own = withOccurrence(itemToICS(series), '2026-10-20', () => ({ categories: ['Waiting'] }));
+		const changed = itemToICS({ ...series, categories: ['Someday'] }, own);
+		expect(occurrenceOn(changed, '2026-10-20')?.categories).toEqual(['Waiting']);
 	});
 
 	it('uses DUE as the day when a task has no start, as Apple Reminders writes it', () => {
