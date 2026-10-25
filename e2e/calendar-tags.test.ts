@@ -41,6 +41,9 @@ test('events show their calendar in a few letters; Work events say Work once; ma
 test('tapping a tag opens the item, as tapping its title does', async ({ page }) => {
 	await page.goto('/');
 	const tag = calendarTag(page.locator(`section.day[data-date="${iso(new Date())}"] li`, { hasText: 'ADHD follow-up' }));
+	// Measured once the notebook fonts are in and the row is on screen: a font arriving after the measure moves the tag.
+	await page.evaluate(() => document.fonts.ready);
+	await tag.scrollIntoViewIfNeeded();
 	const box = (await tag.boundingBox())!;
 	await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
 	const sheet = page.getByRole('dialog', { name: 'Details' });
