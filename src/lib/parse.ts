@@ -41,8 +41,12 @@ export function takeCalendarTag<T extends { name: string }>(text: string, calend
 		const key = tagKey(m[2]);
 		const calendar = key ? byKey.get(key) : undefined;
 		if (!calendar) continue;
+		// Punctuation after the tag belongs to the sentence: "Gym @Work, then shower" keeps its comma, after "Gym".
+		const after = m[2].match(/\p{P}*$/u)![0];
 		const start = m.index + m[1].length;
-		return { text: `${text.slice(0, start)} ${text.slice(start + m[2].length + 1)}`.replace(/\s+/g, ' ').trim(), calendar };
+		const before = text.slice(0, start).trimEnd();
+		const rest = text.slice(start + m[2].length + 1);
+		return { text: `${before}${before ? after : ''} ${rest}`.replace(/\s+/g, ' ').trim(), calendar };
 	}
 	return { text };
 }

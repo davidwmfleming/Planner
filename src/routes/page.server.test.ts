@@ -157,6 +157,13 @@ describe('adding a line with an @tag for the calendar', () => {
 		expect(fake.created).toEqual([`${HOME}me/`, `${HOME}tasks/`]);
 	});
 
+	it('refuses a line longer than a title may be, without saving', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'x'.repeat(501) })).toMatchObject({ status: 400 });
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'x'.repeat(500) })).toEqual({ added: 'x'.repeat(500) });
+		expect(fake.created).toEqual([`${HOME}tasks/`]);
+	});
+
 	it('asks for more than a tag', async () => {
 		fake = fakeStore(calendars(), settings);
 		expect(await add({ kind: 'event', date: '2026-10-21', text: '@Work' })).toMatchObject({ status: 400 });
@@ -765,6 +772,20 @@ describe('an item that cannot be read', () => {
 		expect(JSON.stringify(data.days)).toContain('Swim');
 		// The log says where it is, so it can be found and fixed; it has no title to give.
 		expect(warned.join('\n')).toContain(forLog('/david/me/from-a-phone.ics'));
+	});
+
+	it('says so in the log once, and again only when what is left out changes', async () => {
+		fake = fakeStore(calendars);
+		fake.items = [readable('swim', 'Swim')];
+		fake.unreadable = [`${HOME}me/once-a.ics`];
+		await run();
+		await run();
+		expect(warned.filter((w) => w.includes('left out'))).toHaveLength(1);
+		fake.unreadable = [`${HOME}me/once-a.ics`, `${HOME}me/once-b.ics`];
+		await run();
+		await run();
+		expect(warned.filter((w) => w.includes('left out'))).toHaveLength(2);
+		expect(warned.join('\n')).toContain('left out 2 item(s)');
 	});
 
 	it('counts a repeating item whose repeats cannot be worked out, and logs where it is, not its title', async () => {

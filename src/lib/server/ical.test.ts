@@ -94,6 +94,23 @@ describe('tasks', () => {
 		expect(icsToItems(ics)[0]).toMatchObject({ date: '2026-10-21' });
 	});
 
+	it("shows a time written in UTC in the house's time zone, day included", () => {
+		const was = process.env.TZ;
+		process.env.TZ = 'America/Halifax';
+		try {
+			const doc = (...lines: string[]) => ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:x', ...lines, 'END:VCALENDAR'].join('\r\n');
+			const task = doc('BEGIN:VTODO', 'UID:z1', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Call', 'DUE:20261021T140000Z', 'END:VTODO');
+			expect(icsToItems(task)[0]).toMatchObject({ date: '2026-10-21', time: '11:00' });
+			const late = doc('BEGIN:VEVENT', 'UID:z2', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Late', 'DTSTART:20261022T010000Z', 'DTEND:20261022T020000Z', 'END:VEVENT');
+			expect(icsToItems(late)[0]).toMatchObject({ date: '2026-10-21', time: '22:00', endTime: '23:00' });
+			const floating = doc('BEGIN:VEVENT', 'UID:z3', 'DTSTAMP:20261019T000000Z', 'SUMMARY:Here', 'DTSTART:20261021T140000', 'END:VEVENT');
+			expect(icsToItems(floating)[0]).toMatchObject({ date: '2026-10-21', time: '14:00' });
+		} finally {
+			if (was === undefined) delete process.env.TZ;
+			else process.env.TZ = was;
+		}
+	});
+
 	it('remembers where a carried-over task came from', () => {
 		const item: Item = { uid: 't4', kind: 'task', title: 'Book dentist', date: '2026-10-19', carriedFrom: '2026-10-18', state: 'open' };
 		expect(roundTrip(item)).toEqual(item);

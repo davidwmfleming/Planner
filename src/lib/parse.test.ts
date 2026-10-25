@@ -30,7 +30,10 @@ describe('takeCalendarTag', () => {
 		expect(takeCalendarTag('@Work Team lunch', calendars)).toEqual({ text: 'Team lunch', calendar: { name: 'Work' } });
 		expect(takeCalendarTag('9am Standup @work', calendars)).toEqual({ text: '9am Standup', calendar: { name: 'Work' } });
 		expect(takeCalendarTag('Tacos @morgan-meals tonight', calendars)).toEqual({ text: 'Tacos tonight', calendar: { name: 'Morgan Meals' } });
-		expect(takeCalendarTag('Call bank @Me,', calendars).calendar).toEqual({ name: 'Me' });
+		expect(takeCalendarTag('Call bank @Me,', calendars)).toEqual({ text: 'Call bank,', calendar: { name: 'Me' } });
+		expect(takeCalendarTag('Gym @Work, then shower', calendars)).toEqual({ text: 'Gym, then shower', calendar: { name: 'Work' } });
+		expect(takeCalendarTag('@Work: standup', calendars)).toEqual({ text: 'standup', calendar: { name: 'Work' } });
+		expect(takeCalendarTag('Tacos @morgan-meals!', calendars)).toEqual({ text: 'Tacos!', calendar: { name: 'Morgan Meals' } });
 	});
 
 	it('uses the first tag that matches, and leaves other tags and email addresses as written', () => {
