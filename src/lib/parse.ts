@@ -34,9 +34,12 @@ const tagKey = (name: string) => name.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '
  * and no calendar is given, so the item goes where new items go.
  */
 export function takeCalendarTag<T extends { name: string }>(text: string, calendars: T[]): { text: string; calendar?: T } {
+	// Each calendar's key, worked out once: a long line can hold many tags. The first calendar with a key keeps it.
+	const byKey = new Map<string, T>();
+	for (const c of calendars) if (!byKey.has(tagKey(c.name))) byKey.set(tagKey(c.name), c);
 	for (const m of text.matchAll(/(^|\s)@(\S+)/g)) {
 		const key = tagKey(m[2]);
-		const calendar = key ? calendars.find((c) => tagKey(c.name) === key) : undefined;
+		const calendar = key ? byKey.get(key) : undefined;
 		if (!calendar) continue;
 		const start = m.index + m[1].length;
 		return { text: `${text.slice(0, start)} ${text.slice(start + m[2].length + 1)}`.replace(/\s+/g, ' ').trim(), calendar };
