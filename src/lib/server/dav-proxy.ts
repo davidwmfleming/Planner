@@ -23,7 +23,10 @@ export function onServer(server: URL, path: string, search: string): URL | undef
 	return target.origin === server.origin ? target : undefined;
 }
 
-export async function proxyToCalendarServer(request: Request, url: URL, serverUrl: string): Promise<Response> {
+/** How long the calendar server has to start answering, and to finish: a big calendar can take a while to send. */
+export const DAV_TIMEOUTS = { answer: 30_000, whole: 300_000 };
+
+export async function proxyToCalendarServer(request: Request, url: URL, serverUrl: string, timeouts = DAV_TIMEOUTS): Promise<Response> {
 	if (url.pathname.startsWith('/.well-known/caldav')) {
 		return new Response(null, { status: 301, headers: { Location: `${DAV_PREFIX}/` } });
 	}
@@ -47,12 +50,24 @@ export async function proxyToCalendarServer(request: Request, url: URL, serverUr
 	}
 
 	const hasBody = !['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(request.method);
-	const reply = await fetch(target, {
-		method: request.method,
-		headers,
-		body: hasBody ? await request.arrayBuffer() : undefined,
-		redirect: 'manual'
-	});
+	// A calendar server that hangs must not hold the request (and a connection) open for ever.
+	const stop = new AbortController();
+	const noAnswer = setTimeout(() => stop.abort(), timeouts.answer);
+	let reply: Response;
+	try {
+		reply = await fetch(target, {
+			method: request.method,
+			headers,
+			body: hasBody ? await request.arrayBuffer() : undefined,
+			redirect: 'manual',
+			signal: AbortSignal.any([stop.signal, AbortSignal.timeout(timeouts.whole)])
+		});
+	} catch (e) {
+		if (stop.signal.aborted) return new Response('The calendar server did not answer in time', { status: 504 });
+		throw e;
+	} finally {
+		clearTimeout(noAnswer);
+	}
 	const replyHeaders = new Headers(reply.headers);
 	for (const name of DROPPED_FROM_REPLY) replyHeaders.delete(name);
 	return new Response(reply.body, { status: reply.status, statusText: reply.statusText, headers: replyHeaders });
