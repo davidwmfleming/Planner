@@ -16,6 +16,10 @@ export interface EditFields {
 	repeat: string;
 }
 
+/** Longest title, place and notes the planner writes. A page holds many items, so one huge one would slow every load.
+ * Longer ones made in another app are kept as they are while unchanged here. */
+export const LIMITS = { title: 500, location: 500, notes: 10_000 };
+
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
@@ -50,6 +54,10 @@ export const daysBetween = (from: string, to: string) =>
 export function applyEdit(item: Item, f: EditFields, categories: string[]): { item: Item } | { error: string } {
 	const title = f.title.trim();
 	if (!title) return { error: 'Give it a title' };
+	const tooLong = (value: string, was: string | undefined, limit: number) => value.length > limit && value !== (was ?? '').trim();
+	if (tooLong(title, item.title, LIMITS.title)) return { error: `Shorten the title to ${LIMITS.title} letters or fewer` };
+	if (tooLong(f.location.trim(), item.location, LIMITS.location)) return { error: `Shorten the location to ${LIMITS.location} letters or fewer` };
+	if (tooLong(f.notes.trim(), item.notes, LIMITS.notes)) return { error: `Shorten the notes to ${LIMITS.notes.toLocaleString('en-CA')} letters or fewer` };
 	if (f.kind !== 'event' && f.kind !== 'task') return { error: 'Choose event or task' };
 	if (f.date && !ISO.test(f.date)) return { error: 'That date is not valid' };
 	if (f.kind === 'event' && !f.date) return { error: 'An event needs a date; make it a task to keep it unscheduled' };

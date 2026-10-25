@@ -157,6 +157,13 @@ describe('adding a line with an @tag for the calendar', () => {
 		expect(fake.created).toEqual([`${HOME}me/`, `${HOME}tasks/`]);
 	});
 
+	it('refuses a line longer than a title may be, without saving', async () => {
+		fake = fakeStore(calendars(), settings);
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'x'.repeat(501) })).toMatchObject({ status: 400 });
+		expect(await add({ kind: 'task', date: '2026-10-21', text: 'x'.repeat(500) })).toEqual({ added: 'x'.repeat(500) });
+		expect(fake.created).toEqual([`${HOME}tasks/`]);
+	});
+
 	it('asks for more than a tag', async () => {
 		fake = fakeStore(calendars(), settings);
 		expect(await add({ kind: 'event', date: '2026-10-21', text: '@Work' })).toMatchObject({ status: 400 });

@@ -1,6 +1,6 @@
 import { error, fail } from '@sveltejs/kit';
 import { addDays, comingSaturday, flipPage, pageDays, pageStart, toISODate } from '$lib/dates';
-import { applyEdit, categoryFinder, daysBetween } from '$lib/edit';
+import { applyEdit, categoryFinder, daysBetween, LIMITS } from '$lib/edit';
 import { shortTitle } from '$lib/format';
 import type { Item } from '$lib/item';
 import { buildDays } from '$lib/page';
@@ -145,6 +145,7 @@ export const actions: Actions = {
 		if (kind !== 'event' && kind !== 'task') return fail(400, { message: 'Choose the events or tasks column' });
 		if (date ? !ISO.test(date) : kind === 'event') return fail(400, { message: 'That day is not a valid date' });
 		if (!parseLine(text).title) return fail(400, { message: 'Write something on the line first' });
+		if (text.trim().length > LIMITS.title) return fail(400, { message: `That line is too long; keep it to ${LIMITS.title} letters or fewer` });
 
 		let store, settings;
 		try {

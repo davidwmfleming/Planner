@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyEdit, categoryOf, type EditFields } from './edit';
+import { applyEdit, categoryOf, LIMITS, type EditFields } from './edit';
 import type { Item } from './item';
 
 const fields = (f: Partial<EditFields>): EditFields => ({
@@ -26,6 +26,17 @@ describe('applyEdit', () => {
 		expect(applyEdit(event, fields({ title: '  ' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ time: '25:00' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ label: 'urgent' }), LISTS)).toHaveProperty('error');
+	});
+
+	it('refuses a title, location or notes longer than the limit, but keeps long ones another app wrote while unchanged', () => {
+		const long = (n: number) => 'a'.repeat(n);
+		expect(applyEdit(event, fields({ title: long(LIMITS.title) }), LISTS)).toHaveProperty('item');
+		expect(applyEdit(event, fields({ title: long(LIMITS.title + 1) }), LISTS)).toEqual({ error: 'Shorten the title to 500 letters or fewer' });
+		expect(applyEdit(event, fields({ location: long(LIMITS.location + 1) }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ notes: long(LIMITS.notes + 1) }), LISTS)).toEqual({ error: 'Shorten the notes to 10,000 letters or fewer' });
+		const fromPhone: Item = { ...event, title: long(600), notes: long(20_000) };
+		expect(applyEdit(fromPhone, fields({ title: long(600), notes: long(20_000), time: '11:00' }), LISTS)).toHaveProperty('item');
+		expect(applyEdit(fromPhone, fields({ title: long(601), notes: long(20_000) }), LISTS)).toHaveProperty('error');
 	});
 
 	it('keeps a multi-day event the same length when its first day moves', () => {
