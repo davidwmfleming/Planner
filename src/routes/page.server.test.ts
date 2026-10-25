@@ -774,6 +774,20 @@ describe('an item that cannot be read', () => {
 		expect(warned.join('\n')).toContain(forLog('/david/me/from-a-phone.ics'));
 	});
 
+	it('says so in the log once, and again only when what is left out changes', async () => {
+		fake = fakeStore(calendars);
+		fake.items = [readable('swim', 'Swim')];
+		fake.unreadable = [`${HOME}me/once-a.ics`];
+		await run();
+		await run();
+		expect(warned.filter((w) => w.includes('left out'))).toHaveLength(1);
+		fake.unreadable = [`${HOME}me/once-a.ics`, `${HOME}me/once-b.ics`];
+		await run();
+		await run();
+		expect(warned.filter((w) => w.includes('left out'))).toHaveLength(2);
+		expect(warned.join('\n')).toContain('left out 2 item(s)');
+	});
+
 	it('counts a repeating item whose repeats cannot be worked out, and logs where it is, not its title', async () => {
 		fake = fakeStore(calendars);
 		fake.items = [readable('swim', 'Swim'), { ...readable('piano', 'Piano with Ms Lund'), recurrence: 'FREQ=WEEKLY', ics: 'not iCalendar' }];

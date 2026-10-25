@@ -32,6 +32,9 @@ const forLog = (item: StoredItem) => `item ${logged(item.url)}`;
 /** What a change does, said two ways: with the item's title for the page, by its address for the log. */
 const doing = (verb: string, item: StoredItem) => ({ say: `${verb} "${shortTitle(item.title)}"`, log: `${verb} ${forLog(item)}` });
 
+/** What the log last said was left out, so the same thing isn't said on every page load. */
+let lastLeftOut = '';
+
 /** Where a new item goes, or undefined if no calendar takes that kind (every event calendar deleted, say). */
 function newItemsGoIn(store: Awaited<ReturnType<typeof getStore>>, kind: 'event' | 'task', settings: Awaited<ReturnType<typeof getSettings>>) {
 	try {
@@ -87,10 +90,11 @@ export const load: PageServerLoad = async ({ url, cookies }) => {
 		}
 		return showings.map((one) => ({ ...one, calendar: pathOf(i.calendarUrl) }));
 	});
-	if (unreadable.size) {
-		// Where each one is, so it can be found and fixed; never its title or details (house rule 4).
-		console.warn(`Planner: left out ${unreadable.size} item(s) that couldn't be read:`, [...unreadable].slice(0, 10).map(logged).join(', '));
-	}
+	// Where each one is, so it can be found and fixed; never its title or details (house rule 4). Said once, and again
+	// only when what is left out changes, so the log isn't the same line on every page load.
+	const leftOut = unreadable.size ? `${unreadable.size} item(s) that couldn't be read: ${[...unreadable].sort().slice(0, 10).map(logged).join(', ')}` : '';
+	if (leftOut !== lastLeftOut && leftOut) console.warn(`Planner: left out ${leftOut}`);
+	lastLeftOut = leftOut;
 
 	const calendars = store.calendars();
 	const workCalendar = calendarAtPath(calendars, settings.workCalendar) ? settings.workCalendar : null;
