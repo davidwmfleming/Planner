@@ -51,6 +51,8 @@ export async function proxyToCalendarServer(request: Request, url: URL, serverUr
 
 	const hasBody = !['GET', 'HEAD', 'OPTIONS', 'DELETE'].includes(request.method);
 	// A calendar server that hangs must not hold the request (and a connection) open for ever.
+	// The app's upload is read first, so a slow upload isn't blamed on the calendar server.
+	const body = hasBody ? await request.arrayBuffer() : undefined;
 	const stop = new AbortController();
 	const noAnswer = setTimeout(() => stop.abort(), timeouts.answer);
 	let reply: Response;
@@ -58,7 +60,7 @@ export async function proxyToCalendarServer(request: Request, url: URL, serverUr
 		reply = await fetch(target, {
 			method: request.method,
 			headers,
-			body: hasBody ? await request.arrayBuffer() : undefined,
+			body,
 			redirect: 'manual',
 			signal: AbortSignal.any([stop.signal, AbortSignal.timeout(timeouts.whole)])
 		});

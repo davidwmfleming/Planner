@@ -479,9 +479,9 @@ function componentToItem(comp: ICAL.Component): Item {
 		return v instanceof ICAL.Time ? v : null;
 	};
 	const due = kind === 'task' ? timeOf('due') : null;
-	const repeats = comp.hasProperty('rrule');
+	const repeats = comp.hasProperty('rrule') || comp.hasProperty('recurrence-id');
 	// A time written in UTC (with Z) is shown in the house's time zone (the server's TZ), not at the UTC hour.
-	// A repeating item keeps its days as written, as its repeats and one-off changes are counted from them.
+	// A repeating item and its one-off changes keep their days as written, as the repeats are counted from them.
 	const inHouse = (t: ICAL.Time | null) => (t && !repeats && !t.isDate && t.zone === ICAL.Timezone.utcTimezone ? ICAL.Time.fromJSDate(t.toJSDate(), false) : t);
 	const start = inHouse((!repeats && due) || timeOf('dtstart') || due);
 	if (start) {
