@@ -176,3 +176,24 @@ test('a line the server may or may not have saved is not sent again when the cur
 	await expect.poll(() => sent).toBe(2);
 	await expect(page.locator(`section.day[data-date="${tue}"]`).getByText(name)).toBeVisible();
 });
+
+test('a line or a note longer than the planner keeps is refused with a message, never cut short', async ({ page }, info) => {
+	const tag = unique('', info).trim();
+	const { tue } = futureWeek();
+	await page.goto(`/?page=${tue}`);
+	const taskLine = page.locator(`#add-task-${tue}`);
+	const long = `Pasted ${tag} ${'x'.repeat(600)}`;
+	await taskLine.fill(long);
+	await taskLine.press('Enter');
+	await expect(page.getByRole('alert')).toContainText('500 letters or fewer');
+	await expect(taskLine).toHaveValue(long);
+
+	await taskLine.fill(`Short ${tag}`);
+	await taskLine.press('Enter');
+	await page.getByRole('button', { name: `Details for Short ${tag}` }).click();
+	const sheet = page.getByRole('dialog', { name: 'Details' });
+	await sheet.locator('#f-notes').fill('n'.repeat(10_001));
+	await sheet.getByRole('button', { name: 'Save' }).click();
+	await expect(sheet.getByRole('alert')).toContainText('10,000 letters or fewer');
+	await expect(sheet.locator('#f-notes')).toHaveValue('n'.repeat(10_001));
+});

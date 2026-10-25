@@ -5,7 +5,6 @@
 	import type { SubmitFunction } from '@sveltejs/kit';
 	import { addDays, toISODate } from '$lib/dates';
 	import { movedFar, readStroke, type Point } from '$lib/gesture';
-	import { LIMITS } from '$lib/edit';
 	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, pageSubtitle, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from '$lib/new-day';
@@ -541,7 +540,6 @@
 					if (!e.currentTarget.value.trim()) unsure.delete(e.currentTarget.form!);
 				}}
 				name="text"
-				maxlength={LIMITS.title}
 				id="add-{kind}-{date || 'unscheduled'}"
 				autocomplete="off"
 				enterkeyhint="done"
@@ -657,7 +655,7 @@
 				<input type="hidden" name="keptIn" value={editing.calendar} />
 				{#if editing.occurrence}<input type="hidden" name="occurrence" value={editing.occurrence} />{/if}
 				<h2 class="sheet-title">Details</h2>
-				<label class="field">Title <input name="title" id="f-title" value={editing.title} maxlength={Math.max(LIMITS.title, editing.title.length)} required /></label>
+				<label class="field">Title <input name="title" id="f-title" value={editing.title} required /></label>
 				<fieldset class="field">
 					<legend>Kind</legend>
 					<div class="seg">
@@ -700,8 +698,8 @@
 						{#if repeatChoice(editing.recurrence) === 'custom'}<option value="custom">As set on another device</option>{/if}
 					</select>
 				</label>
-				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} maxlength={Math.max(LIMITS.location, editing.location?.length ?? 0)} /></label>
-				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3" maxlength={Math.max(LIMITS.notes, editing.notes?.length ?? 0)}>{editing.notes ?? ''}</textarea></label>
+				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
+				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
 				<p class="hint">
 					Leave the date empty to keep a task in Future tasks.
 					{#if editing.recurrence}Changes here apply to every day it repeats; tick, ✕ and → change just one day.{/if}
