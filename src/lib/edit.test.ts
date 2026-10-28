@@ -25,6 +25,9 @@ describe('applyEdit', () => {
 		expect(applyEdit(event, fields({ date: '' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ title: '  ' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ time: '25:00' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ date: '2026-02-31' }), LISTS)).toEqual({ error: 'That date is not valid' });
+		expect(applyEdit(event, fields({ date: '2026-13-01' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ date: '2028-02-29' }), LISTS)).toHaveProperty('item');
 		expect(applyEdit(event, fields({ label: 'urgent' }), LISTS)).toHaveProperty('error');
 	});
 
@@ -58,6 +61,15 @@ describe('applyEdit', () => {
 		expect(applyEdit(fromPhone, fields({ repeat: '' }), LISTS)).not.toHaveProperty('item.recurrence');
 		expect(applyEdit({ ...event, kind: 'task' }, fields({ kind: 'task', date: '', repeat: 'weekly' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ repeat: 'hourly' }), LISTS)).toHaveProperty('error');
+	});
+
+	it('saves a monthly repeat every few months, on the date or on the weekday of the month, worked out from the new date', () => {
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '3' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;INTERVAL=3' } });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '', monthlyWay: 'weekday' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;BYDAY=3WE' } });
+		expect(applyEdit(event, fields({ date: '2026-11-26', repeat: 'monthly', monthlyWay: 'weekday' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;BYDAY=4TH' } });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '0' }), LISTS)).toEqual({ error: 'Repeat every 1 to 99 months' });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '1.5' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ repeat: 'monthly', monthlyWay: 'last' }), LISTS)).toEqual({ error: 'Choose which day of the month it repeats on' });
 	});
 
 	it('files a task under a category by its name, as the settings spell it, whatever the case chosen', () => {

@@ -101,6 +101,14 @@ describe('repeating items', () => {
 		expect(shown[0]).toMatchObject({ date: '2026-11-02', endDate: '2026-11-04' });
 	});
 
+	it('repeats every few months on the 4th Thursday, years later too, and skips months without a 31st', () => {
+		const club: Item = { uid: 'r4', kind: 'event', title: 'Book club', date: '2026-10-22', time: '19:00', state: 'open', recurrence: 'FREQ=MONTHLY;INTERVAL=2;BYDAY=4TH' };
+		expect(days(occurrencesBetween(itemToICS(club), '2026-10-01', '2027-04-30'))).toEqual(['2026-10-22', '2026-12-24', '2027-02-25', '2027-04-22']);
+		expect(days(occurrencesBetween(itemToICS(club), '2030-01-01', '2030-12-31'))).toEqual(['2030-02-28', '2030-04-25', '2030-06-27', '2030-08-22', '2030-10-24', '2030-12-26']);
+		const rent: Item = { uid: 'r5', kind: 'task', title: 'Rent', date: '2026-10-31', state: 'open', recurrence: 'FREQ=MONTHLY' };
+		expect(days(occurrencesBetween(itemToICS(rent), '2026-10-01', '2027-03-31'))).toEqual(['2026-10-31', '2026-12-31', '2027-01-31', '2027-03-31']);
+	});
+
 	it('repeats tasks too', () => {
 		const bins: Item = { uid: 'r3', kind: 'task', title: 'Green cart', date: '2026-10-06', state: 'open', recurrence: 'FREQ=WEEKLY;INTERVAL=2' };
 		expect(days(occurrencesBetween(itemToICS(bins), '2026-10-19', '2026-11-08'))).toEqual(['2026-10-20', '2026-11-03']);

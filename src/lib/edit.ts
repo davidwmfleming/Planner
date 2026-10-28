@@ -1,7 +1,7 @@
 // Applies the details sheet's fields to an item. Pure, so the rules can be tested without a server.
 import { addDays } from './dates';
 import type { Item } from './item';
-import { REPEATS } from './repeat';
+import { MOST_MONTHS, monthlyRule, REPEATS } from './repeat';
 
 export interface EditFields {
 	title: string;
@@ -14,6 +14,9 @@ export interface EditFields {
 	notes: string;
 	/** A REPEATS value, or "custom" to keep a rule made elsewhere. */
 	repeat: string;
+	/** For a monthly repeat: how many months apart (blank is every month), and which day it falls on (see monthlyWays). */
+	every?: string;
+	monthlyWay?: string;
 }
 
 /** Longest title, place and notes the planner writes. A page holds many items, so one huge one would slow every load.
@@ -21,6 +24,13 @@ export interface EditFields {
 export const LIMITS = { title: 500, location: 500, notes: 10_000 };
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+/** A date in the YYYY-MM-DD form that is a real day: not 31 February. */
+const realDate = (d: string) => {
+	if (!ISO.test(d)) return false;
+	const [y, m, day] = d.split('-').map(Number);
+	const t = new Date(Date.UTC(y, m - 1, day));
+	return t.getUTCMonth() === m - 1 && t.getUTCDate() === day;
+};
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Category names are matched without regard to case (or spaces at the ends). */
@@ -59,7 +69,7 @@ export function applyEdit(item: Item, f: EditFields, categories: string[]): { it
 	if (tooLong(f.location.trim(), item.location, LIMITS.location)) return { error: `Shorten the location to ${LIMITS.location} letters or fewer` };
 	if (tooLong(f.notes.trim(), item.notes, LIMITS.notes)) return { error: `Shorten the notes to ${LIMITS.notes.toLocaleString('en-CA')} letters or fewer` };
 	if (f.kind !== 'event' && f.kind !== 'task') return { error: 'Choose event or task' };
-	if (f.date && !ISO.test(f.date)) return { error: 'That date is not valid' };
+	if (f.date && !realDate(f.date)) return { error: 'That date is not valid' };
 	if (f.kind === 'event' && !f.date) return { error: 'An event needs a date; make it a task to keep it unscheduled' };
 	if (f.time && !HHMM.test(f.time)) return { error: 'That time is not valid' };
 	if (f.endTime && !HHMM.test(f.endTime)) return { error: 'That end time is not valid' };
@@ -67,8 +77,14 @@ export function applyEdit(item: Item, f: EditFields, categories: string[]): { it
 	if (f.label && !category) return { error: 'Unknown list' };
 	const preset = REPEATS.find((r) => r.value === f.repeat);
 	if (!preset && f.repeat !== 'custom') return { error: 'Unknown repeat' };
-	const recurrence = preset ? preset.rule : item.recurrence;
+	let recurrence: string | undefined = preset ? preset.rule : item.recurrence;
 	if (recurrence && !f.date) return { error: 'A repeating item needs a start date' };
+	if (f.repeat === 'monthly') {
+		const every = f.every?.trim() ? Number(f.every) : 1;
+		if (!Number.isInteger(every) || every < 1 || every > MOST_MONTHS) return { error: `Repeat every 1 to ${MOST_MONTHS} months` };
+		recurrence = monthlyRule(f.date, every, f.monthlyWay || 'day');
+		if (!recurrence) return { error: 'Choose which day of the month it repeats on' };
+	}
 
 	const next: Item = { uid: item.uid, kind: f.kind, title, state: item.state };
 	if (f.date) next.date = f.date;
