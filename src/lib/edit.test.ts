@@ -60,6 +60,15 @@ describe('applyEdit', () => {
 		expect(applyEdit(event, fields({ repeat: 'hourly' }), LISTS)).toHaveProperty('error');
 	});
 
+	it('saves a monthly repeat every few months, on the date or on the weekday of the month, worked out from the new date', () => {
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '3' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;INTERVAL=3' } });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '', monthlyWay: 'weekday' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;BYDAY=3WE' } });
+		expect(applyEdit(event, fields({ date: '2026-11-26', repeat: 'monthly', monthlyWay: 'weekday' }), LISTS)).toMatchObject({ item: { recurrence: 'FREQ=MONTHLY;BYDAY=4TH' } });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '0' }), LISTS)).toEqual({ error: 'Repeat every 1 to 99 months' });
+		expect(applyEdit(event, fields({ repeat: 'monthly', every: '1.5' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ repeat: 'monthly', monthlyWay: 'last' }), LISTS)).toEqual({ error: 'Choose which day of the month it repeats on' });
+	});
+
 	it('files a task under a category by its name, as the settings spell it, whatever the case chosen', () => {
 		const task: Item = { uid: 't', kind: 'task', title: 'Green cart', state: 'open' };
 		const r = applyEdit(task, fields({ kind: 'task', title: 'Green cart', date: '', time: '', label: 'waiting' }), LISTS);

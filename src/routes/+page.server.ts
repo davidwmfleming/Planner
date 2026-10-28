@@ -252,7 +252,7 @@ export const actions: Actions = {
 		const result = applyEdit(item, {
 			title: field('title'), kind: field('kind'), date: field('date'), time: field('time'),
 			endTime: field('endTime'), location: field('location'), label: field('label'), notes: field('notes'),
-			repeat: field('repeat')
+			repeat: field('repeat'), every: field('every'), monthlyWay: field('monthlyWay')
 		}, settings.categories);
 		if ('error' in result) return fail(400, { message: result.error });
 		// Events can be filed in any calendar that takes events (Me, Family, Work…), or in a new one made here.

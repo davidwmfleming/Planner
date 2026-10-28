@@ -8,7 +8,7 @@
 	import { dayLetter, dayName, dayNumber, formatTime, monthShort, monthYear, pageSubtitle, saysReload, shortTitle } from '$lib/format';
 	import type { Item } from '$lib/item';
 	import { dayBegun, freshAddress, mayAsk, pageForNewDay, pageToRead, retryAfter, shownAddress, turnedToNewDay, untilMidnight } from '$lib/new-day';
-	import { REPEATS, repeatChoice } from '$lib/repeat';
+	import { monthlyChoice, monthlyWays, MOST_MONTHS, REPEATS, repeatChoice } from '$lib/repeat';
 	import { onMount, tick, untrack } from 'svelte';
 	import type { PageProps } from './$types';
 
@@ -21,8 +21,15 @@
 	let newCalendar = $state(false);
 	// Why the sheet's last save or delete didn't work.
 	let sheetMessage = $state('');
+	// The sheet's date and repeat as they are being changed: a monthly repeat offers the ways that date can fall.
+	let sheetDate = $state('');
+	let sheetRepeat = $state('');
+	let sheetWay = $state('day');
 	function openDetails(item: Item) {
 		editing = item;
+		sheetDate = item.seriesStart ?? item.date ?? '';
+		sheetRepeat = repeatChoice(item.recurrence, sheetDate);
+		sheetWay = monthlyChoice(item.recurrence, sheetDate)?.way ?? 'day';
 		newCalendar = false;
 		sheetMessage = '';
 		sheet?.showModal();
@@ -664,7 +671,7 @@
 					</div>
 				</fieldset>
 				<div class="row2">
-					<label class="field">{editing.recurrence ? 'Starts' : 'Date'} <input type="date" name="date" id="f-date" value={editing.seriesStart ?? editing.date ?? ''} /></label>
+					<label class="field">{editing.recurrence ? 'Starts' : 'Date'} <input type="date" name="date" id="f-date" value={editing.seriesStart ?? editing.date ?? ''} oninput={(e) => (sheetDate = e.currentTarget.value)} /></label>
 					<label class="field">Time <input type="time" name="time" id="f-time" value={editing.time ?? ''} /></label>
 				</div>
 				<div class="row2">
@@ -693,11 +700,24 @@
 					{/if}
 				{/if}
 				<label class="field">Repeats
-					<select name="repeat" id="f-repeat" value={repeatChoice(editing.recurrence)}>
+					<select name="repeat" id="f-repeat" value={sheetRepeat} onchange={(e) => (sheetRepeat = e.currentTarget.value)}>
 						{#each REPEATS as r (r.value)}<option value={r.value}>{r.name}</option>{/each}
-						{#if repeatChoice(editing.recurrence) === 'custom'}<option value="custom">As set on another device</option>{/if}
+						{#if repeatChoice(editing.recurrence, editing.seriesStart ?? editing.date) === 'custom'}<option value="custom">As set on another device</option>{/if}
 					</select>
 				</label>
+				{#if sheetRepeat === 'monthly'}
+					{@const ways = monthlyWays(sheetDate)}
+					<div class="row2">
+						<label class="field">Every
+							<span class="months"><input type="number" name="every" id="f-every" min="1" max={MOST_MONTHS} inputmode="numeric" value={monthlyChoice(editing.recurrence, editing.seriesStart ?? editing.date)?.every ?? 1} /> months</span>
+						</label>
+						<label class="field">On
+							<select name="monthlyWay" id="f-way" value={ways.some((w) => w.value === sheetWay) ? sheetWay : 'day'} onchange={(e) => (sheetWay = e.currentTarget.value)}>
+								{#each ways as w (w.value)}<option value={w.value}>{w.name}</option>{/each}
+							</select>
+						</label>
+					</div>
+				{/if}
 				<label class="field">Location <input name="location" id="f-location" value={editing.location ?? ''} /></label>
 				<label class="field">Notes <textarea name="notes" id="f-notes" rows="3">{editing.notes ?? ''}</textarea></label>
 				<p class="hint">
@@ -938,6 +958,8 @@
 	.trouble .error { order: -1; }
 	.tag { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; border: 1.5px solid var(--muted); color: var(--muted); border-radius: 3px; padding: 1px 6px; white-space: nowrap; }
 	.carry { font-size: 0.8125rem; font-style: italic; color: var(--muted); white-space: nowrap; }
+	.months { display: flex; align-items: center; gap: 0.5rem; }
+	.months input { width: 5rem; }
 	.repeat { font-size: 1rem; line-height: 1; color: var(--muted); }
 	/* Work meetings: light red shading, plus a word, since e-ink shows the shade only as grey. */
 	li.work { background: var(--work); }
