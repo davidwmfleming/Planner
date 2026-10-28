@@ -24,6 +24,13 @@ export interface EditFields {
 export const LIMITS = { title: 500, location: 500, notes: 10_000 };
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
+/** A date in the YYYY-MM-DD form that is a real day: not 31 February. */
+const realDate = (d: string) => {
+	if (!ISO.test(d)) return false;
+	const [y, m, day] = d.split('-').map(Number);
+	const t = new Date(Date.UTC(y, m - 1, day));
+	return t.getUTCMonth() === m - 1 && t.getUTCDate() === day;
+};
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Category names are matched without regard to case (or spaces at the ends). */
@@ -62,7 +69,7 @@ export function applyEdit(item: Item, f: EditFields, categories: string[]): { it
 	if (tooLong(f.location.trim(), item.location, LIMITS.location)) return { error: `Shorten the location to ${LIMITS.location} letters or fewer` };
 	if (tooLong(f.notes.trim(), item.notes, LIMITS.notes)) return { error: `Shorten the notes to ${LIMITS.notes.toLocaleString('en-CA')} letters or fewer` };
 	if (f.kind !== 'event' && f.kind !== 'task') return { error: 'Choose event or task' };
-	if (f.date && !ISO.test(f.date)) return { error: 'That date is not valid' };
+	if (f.date && !realDate(f.date)) return { error: 'That date is not valid' };
 	if (f.kind === 'event' && !f.date) return { error: 'An event needs a date; make it a task to keep it unscheduled' };
 	if (f.time && !HHMM.test(f.time)) return { error: 'That time is not valid' };
 	if (f.endTime && !HHMM.test(f.endTime)) return { error: 'That end time is not valid' };

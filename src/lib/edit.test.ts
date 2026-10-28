@@ -25,6 +25,9 @@ describe('applyEdit', () => {
 		expect(applyEdit(event, fields({ date: '' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ title: '  ' }), LISTS)).toHaveProperty('error');
 		expect(applyEdit(event, fields({ time: '25:00' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ date: '2026-02-31' }), LISTS)).toEqual({ error: 'That date is not valid' });
+		expect(applyEdit(event, fields({ date: '2026-13-01' }), LISTS)).toHaveProperty('error');
+		expect(applyEdit(event, fields({ date: '2028-02-29' }), LISTS)).toHaveProperty('item');
 		expect(applyEdit(event, fields({ label: 'urgent' }), LISTS)).toHaveProperty('error');
 	});
 
