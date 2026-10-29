@@ -1,5 +1,5 @@
 // A shared calendar link with a pretend calendar server: what a computer on the internet gets back.
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const SECRET = 'S'.repeat(43);
 const ME = { url: 'http://cal/david/me/', name: 'Me', accepts: ['event'] };
@@ -7,11 +7,13 @@ const TASKS = { url: 'http://cal/david/tasks/', name: 'Tasks', accepts: ['task']
 let feeds: Record<string, string> = {};
 let file: string | undefined = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n';
 let fails: 'feeds' | 'file' | undefined;
+let fetched = 0;
 
 vi.mock('$lib/server/store', () => ({
 	getStore: async () => ({
 		calendars: () => [ME, TASKS],
 		calendarFile: async () => {
+			fetched++;
 			if (fails === 'file') throw new Error('connect ECONNREFUSED');
 			return file;
 		}
@@ -24,6 +26,10 @@ vi.mock('$lib/server/store', () => ({
 
 const { GET } = await import('./+server');
 const run = (name: string) => (GET as unknown as (e: { params: { file: string } }) => Promise<Response>)({ params: { file: name } });
+
+// Each test starts two minutes after the last, past the planner's minute of keeping a calendar and its rest after a failure.
+vi.useFakeTimers({ toFake: ['Date'] });
+beforeEach(() => vi.setSystemTime(Date.now() + 120_000));
 
 describe('GET /feed/<secret>.ics', () => {
 	it('hands out the shared calendar, read-only, without being indexed', async () => {
@@ -59,16 +65,43 @@ describe('GET /feed/<secret>.ics', () => {
 		file = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n';
 	});
 
-	it('says only "try again later" when the calendar server is down', async () => {
+	it('leaves out tasks a calendar made elsewhere may hold, reminders and all', async () => {
 		feeds = { '/david/me/': SECRET };
-		const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+		file = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\nBEGIN:VTODO\r\nSUMMARY:Secret task\r\nBEGIN:VALARM\r\nEND:VALARM\r\nEND:VTODO\r\nEND:VCALENDAR\r\n';
+		const text = await (await run(`${SECRET}.ics`)).text();
+		expect(text).toBe('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n');
+		file = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n';
+	});
+
+	it('asks the calendar server for a shared calendar at most once a minute', async () => {
+		feeds = { '/david/me/': SECRET };
+		fetched = 0;
+		for (let i = 0; i < 5; i++) expect((await run(`${SECRET}.ics`)).status).toBe(200);
+		expect(fetched).toBe(1);
+		vi.setSystemTime(Date.now() + 61_000);
+		await run(`${SECRET}.ics`);
+		expect(fetched).toBe(2);
+	});
+
+	it('says only "try again later" when the calendar server is down, logging it once and resting before asking again', async () => {
+		feeds = { '/david/me/': SECRET };
+		const log = vi.spyOn(console, 'error').mockImplementation(() => {});
 		for (const failure of ['feeds', 'file'] as const) {
+			vi.setSystemTime(Date.now() + 120_000);
 			fails = failure;
-			const response = await run(`${SECRET}.ics`);
-			expect(response.status).toBe(503);
-			expect(await response.text()).toBe('Try again later');
+			fetched = 0;
+			for (let i = 0; i < 3; i++) {
+				const response = await run(`${SECRET}.ics`);
+				expect(response.status).toBe(503);
+				expect(await response.text()).toBe('Try again later');
+			}
+			expect(fetched).toBe(failure === 'file' ? 1 : 0);
 		}
+		expect(log).toHaveBeenCalledTimes(2);
 		fails = undefined;
-		quiet.mockRestore();
+		// Back after the rest.
+		vi.setSystemTime(Date.now() + 11_000);
+		expect((await run(`${SECRET}.ics`)).status).toBe(200);
+		log.mockRestore();
 	});
 });

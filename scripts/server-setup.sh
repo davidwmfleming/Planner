@@ -125,8 +125,16 @@ sudo tailscale serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$APP_PORT"
 say "Shared calendar links"
 # Only /feed, on its own port, is published to the internet; the planner itself stays on your tailnet only.
 # The first time, this may print a link to allow Funnel for your tailnet; open it, then run this script again.
-sudo tailscale funnel --bg --https="$FEED_PORT" --set-path=/feed "http://127.0.0.1:$APP_PORT/feed" ||
-	echo "Warning: shared calendar links aren't published yet; the message above says why. Everything else works."
+# Funnel is switched on for a whole port, so first make sure the feed port serves nothing else and the planner's
+# own port isn't public; then check again afterwards.
+if sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" before; then
+	sudo tailscale funnel --bg --https="$FEED_PORT" --set-path=/feed "http://127.0.0.1:$APP_PORT/feed" ||
+		echo "Warning: shared calendar links aren't published yet; the message above says why. Everything else works."
+	sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" after ||
+		echo "Warning: check the line above before sharing any calendar."
+else
+	echo "Warning: shared calendar links were not turned on, to keep the rest private; the line above says why."
+fi
 # Port $HTTPS_PORT should say "tailnet only"; port $FEED_PORT, "Funnel on" for /feed only.
 sudo tailscale serve status
 sudo tailscale funnel status
