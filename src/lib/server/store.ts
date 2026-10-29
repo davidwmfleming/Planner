@@ -3,6 +3,7 @@ import { env } from '$env/dynamic/private';
 import type { ItemKind } from '$lib/item';
 import { byName, calendarAtPath, type Settings } from '$lib/settings';
 import { CalendarStore, useLogKey } from './calendar-store';
+import type { Feeds } from './feeds';
 import { addDueDates, prepareStore, tasksCalendarUrl } from './startup';
 
 let store: Promise<CalendarStore> | undefined;
@@ -68,4 +69,27 @@ export function defaultCalendarUrl(store: CalendarStore, kind: ItemKind, setting
 	const url = kind === 'event' ? (calendarAtPath(events, settings.defaultEventCalendar) ?? events[0])?.url : tasksCalendarUrl(store, tasksCalendarName());
 	if (!url) throw new Error(`No calendar on the server accepts ${kind}s yet`);
 	return url;
+}
+
+/** The shared calendar links, kept on the Tasks collection next to the settings. Read at most every 30 seconds for
+ * feed requests, so guesses from the internet don't each cost the calendar server a look-up. */
+let feedsRead: { at: number; feeds: Promise<Feeds> } | undefined;
+const FEEDS_FRESH_MS = 30_000;
+
+export function getFeeds(store: CalendarStore, fresh = false): Promise<Feeds> {
+	if (fresh || !feedsRead || Date.now() - feedsRead.at > FEEDS_FRESH_MS) {
+		const read = { at: Date.now(), feeds: store.readFeeds(store.addressFor(tasksCalendarName())) };
+		// A failed read isn't kept, so the next request asks again.
+		read.feeds.catch(() => {
+			if (feedsRead === read) feedsRead = undefined;
+		});
+		feedsRead = read;
+	}
+	return feedsRead.feeds;
+}
+
+export async function saveFeeds(store: CalendarStore, feeds: Feeds): Promise<void> {
+	feedsRead = undefined;
+	await store.writeFeeds(store.addressFor(tasksCalendarName()), feeds);
+	feedsRead = undefined;
 }

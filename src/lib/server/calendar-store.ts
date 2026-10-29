@@ -3,6 +3,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { DAVClient, type DAVCalendar } from 'tsdav';
 import type { Item, ItemKind } from '$lib/item';
 import { parseSettings, type Settings, type SettingsSeed } from '$lib/settings';
+import { parseFeeds, type Feeds } from './feeds';
 import { icsToItems, itemToICS, withOccurrence, withoutOccurrence } from './ical';
 
 /** The key fingerprints in the log are made with. Each install has its own, kept on the Tasks collection beside the
@@ -274,7 +275,7 @@ export class CalendarStore {
 	}
 
 	/** One of the planner's own properties on a collection (planner-<name>). Throws if the server couldn't say. */
-	private async plannerProperty(calendarUrl: string, name: 'settings' | 'log-key'): Promise<{ found: boolean; stored: string | undefined }> {
+	private async plannerProperty(calendarUrl: string, name: 'settings' | 'log-key' | 'feeds'): Promise<{ found: boolean; stored: string | undefined }> {
 		const [response] = await this.timed(
 			this.client.propfind({
 				url: calendarUrl,
@@ -301,6 +302,17 @@ export class CalendarStore {
 		if (status >= 300) throw new Error(`The calendar server refused to keep the log key (${status})`);
 		// Another copy of the planner may have stored its own at the same moment: whichever is stored now is the one.
 		return valid((await this.plannerProperty(calendarUrl, 'log-key')).stored) ?? made;
+	}
+
+	/** The shared calendar links kept on a collection (the Tasks one): calendar path → secret. Damaged entries are
+	 * left out, so a bad value only means fewer links. Throws if the server couldn't say. */
+	async readFeeds(calendarUrl: string): Promise<Feeds> {
+		return parseFeeds((await this.plannerProperty(calendarUrl, 'feeds')).stored);
+	}
+
+	async writeFeeds(calendarUrl: string, feeds: Feeds): Promise<void> {
+		const status = await this.proppatch(calendarUrl, `<p:planner-feeds xmlns:p="${PLANNER_NS}">${escapeXml(JSON.stringify(feeds))}</p:planner-feeds>`);
+		if (status >= 300) throw new Error(`The calendar server refused to save the shared links (${status})`);
 	}
 
 	async writeSettings(calendarUrl: string, settings: Settings): Promise<void> {

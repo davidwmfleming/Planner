@@ -45,7 +45,7 @@ Timed tasks get a VALARM so phones that show tasks can alert on them.
 
 ## Access and sign-in
 
-- Everything is reached only through Tailscale; no ports open to the internet.
+- Everything is reached only through Tailscale; no ports open to the internet. The one exception, which David asked for, is the shared calendar links below: one read-only path published with Tailscale Funnel, still with no port opened on the router.
 - Planner: Tailscale Serve HTTPS address; the user is identified from Tailscale's identity headers, so there's no separate login.
 - Radicale: one username and password per person (David, his wife), stored hashed; phones add it as a CalDAV account. His wife's phone needs the Tailscale app installed to sync.
 
@@ -158,5 +158,32 @@ Each is one small PR with its own tests.
 25. **Server backup:** `scripts/backup.sh`, `/etc/default/planner-backup`, the systemd service and timer, installed by `server-setup.sh`, which also prints the timer status. Shellcheck in CI; rehearse on the VM (`systemctl start planner-backup` makes an archive, and old ones are removed).
 26. **Restore:** `scripts/restore.sh` with its safety copy, plus a README section. Rehearse on the VM: back up, delete a calendar, restore, and check it is back.
 27. **Mac pull to Proton Drive:** `scripts/mac/pull-backup.sh`, the launchd plist, the read-only rrsync key line printed by `server-setup.sh`, and the stale-copy notification. Shellcheck in CI; test by hand on the Mac (including a run after waking from sleep).
+
+## Shared calendar links (v4)
+
+David wants to subscribe to a calendar from a computer that isn't on his Tailscale (a work computer, or Google or Outlook, which fetch a subscribed calendar from their own servers).
+
+**Decision:** configure and build a small add-on. Tailscale, already on the server, can publish one path to the internet with **Funnel**, which needs no port opened on the router. Radicale already hands out a whole calendar as one .ics file. So the planner only adds a read-only address that hands out that file for a secret link, and a place on the settings page to make and cancel links.
+
+Other routes considered:
+- **Tailscale on the other computer, or sharing the server with another Tailscale account.** Nothing becomes public, so this is still the first choice where it works; the README says how. It can't work for Google, Outlook or a locked-down work computer.
+- **Making Radicale itself public, with a read-only user.** This would put the CalDAV server and its password check on the internet, and one password would cover every calendar, with no way to cancel a single link. Rejected.
+- **Copying the calendar to Google or iCloud and sharing it from there.** This puts the data in another company's service and needs a sync job. Rejected.
+
+```
+other computer ── https://<server>.ts.net:8443/feed/<secret>.ics ──► Tailscale Funnel (only /feed, only port 8443)
+                                                                        └─► planner /feed/<secret>.ics ── GET calendar ──► Radicale
+```
+
+- **Separate port.** Funnel is switched on for a whole port, so the links use port 8443, and only the `/feed` path is mapped there. The planner itself, the settings page and CalDAV stay on port 443, reachable only over Tailscale. `server-setup.sh` runs `tailscale funnel --bg --https=8443 --set-path=/feed http://127.0.0.1:<port>/feed` and writes `FEED_ORIGIN=https://<server>.ts.net:8443` to `.env`. Funnel has to be allowed for the tailnet once; if it isn't, the command prints the link to do that, and the rest of the setup carries on.
+- **Second guard in the planner.** Tailscale marks a request that came through Funnel with a `Tailscale-Funnel-Request` header. Such a request may reach only `/feed/<secret>.ics`; anything else gets a 404 before any other code runs, including the CalDAV proxy. So a mistake in the Funnel setup can't publish more than the feeds.
+- **Links.** One link per event calendar, made only when David presses **Share** on the settings page. The secret is 32 random bytes (43 characters, base64url). Links are kept as a `planner-feeds` property on the Tasks collection (JSON, calendar path → secret), next to the settings, so they are in the nightly backup and nothing is kept on the planner's own disk. **New link** replaces the secret, and **Stop sharing** removes it; either way the old link stops working at once.
+- **The feed.** `GET /feed/<secret>.ics` compares the secret with every stored one in constant time and returns the calendar exactly as Radicale hands it out (`text/calendar`, `Cache-Control: private, max-age=300`, `X-Robots-Tag: noindex`). Unknown, cancelled or badly formed links all get the same plain 404. If the calendar server doesn't answer, the answer is 503 with no details. Nothing about the request is logged except failures, and those never include the secret.
+- **What is shared.** Everything in that calendar (titles, times, places and notes), to anyone who has the link. Nobody can change anything through it. Task lists are not offered, because calendar subscriptions show only events.
+- **House rules.** This is the one address reachable from the internet, so it needs security's go like any release (rule 6). Rule 4 is met by sharing only the calendars David picks, one at a time.
+
+### Tasks (v4)
+
+28. **Shared calendar links:** the `planner-feeds` property, the `/feed` route, the Funnel guard in `hooks.server.ts`, the settings page section, `FEED_ORIGIN` in `compose.yaml`, the Funnel line in `server-setup.sh`, and a README section. Unit tests for the route and the guard; Playwright for share, copy, new link and stop sharing.
 
 **Later versions:** school-meal emails to calendar (Proton Bridge), work Outlook read-only feed, handwriting entry (configure the tablet's handwriting keyboard first).
