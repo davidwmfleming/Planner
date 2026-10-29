@@ -4,7 +4,9 @@ import { byName, calendarAtPath, checkCalendarName, checkCategoryName, MAX_CATEG
 import { deleteCategory, renameCategory, tasksWith, type Recategorised, type SettingsPlace } from '$lib/server/categories';
 import { logged, RefusedError, unanswered, type Calendar, type CalendarStore, type MoveOutcome, type StoredDocument } from '$lib/server/calendar-store';
 import { icsToItems } from '$lib/server/ical';
-import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
+import { env } from '$env/dynamic/private';
+import { feedUrl, newSecret, type Feeds } from '$lib/server/feeds';
+import { defaultCalendarUrl, getFeeds, getSettings, getStore, saveFeeds, tasksUrl, unshare } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const pathOf = (url: string) => new URL(url).pathname;
@@ -46,6 +48,13 @@ export const load: PageServerLoad = async () => {
 		}
 	};
 	const [newEvents, newTasks] = [urlFor('event'), urlFor('task')];
+	// Shared links are a side matter: if they can't be read, the rest of the page still shows, and says so.
+	let feeds: Feeds | undefined;
+	try {
+		feeds = await getFeeds(store, true);
+	} catch (e) {
+		console.error('Settings: could not read the shared links', e);
+	}
 
 	return {
 		eventCalendars: menuLabels(events.map((c) => ({ path: pathOf(c.url), name: c.name, work: c.url === work?.url, newEvents: c.url === newEvents }))),
@@ -55,7 +64,17 @@ export const load: PageServerLoad = async () => {
 		defaultEventPath: newEvents && pathOf(newEvents),
 		categories: settings.categories,
 		// A rename of a category that didn't finish: both names are on the list until it does.
-		renaming: settings.renaming
+		renaming: settings.renaming,
+		// Shared calendar links: whether the server has a public address for them, and each shared calendar's link.
+		sharing: {
+			on: !!env.FEED_ORIGIN,
+			readable: !!feeds,
+			links: Object.fromEntries(events.flatMap((c) => {
+				const secret = feeds?.[pathOf(c.url)];
+				const url = secret && feedUrl(env.FEED_ORIGIN, secret);
+				return url ? [[pathOf(c.url), url]] : [];
+			})) as Record<string, string>
+		}
 	};
 };
 
@@ -166,11 +185,18 @@ export const actions: Actions = {
 		if (!store) return fail(503, { action: 'add', name: asked, message: NOT_ANSWERING });
 		const checked = checkCalendarName(asked, store.calendars());
 		if ('error' in checked) return fail(400, { action: 'add', name: asked, message: checked.error });
+		let made;
 		try {
-			await store.ensureCalendar(checked.name, ['event']);
+			made = await store.ensureCalendar(checked.name, ['event']);
 		} catch (e) {
 			console.error('Settings: could not create a new calendar', e);
 			return fail(502, { action: 'add', name: asked, message: `The calendar server didn't make "${checked.name}". Try again in a moment.` });
+		}
+		try {
+			await unshare(store, pathOf(made.url));
+		} catch (e) {
+			console.error('Settings: could not check a new calendar has no shared link', e);
+			return fail(502, { action: 'add', name: asked, message: `Made "${checked.name}", but couldn't check it has no shared link left from an old calendar of that name; reload the page.` });
 		}
 		return { action: 'add', added: checked.name };
 	},
@@ -197,6 +223,39 @@ export const actions: Actions = {
 			return fail(502, { action: 'rename', path, name: asked, message: `The calendar server didn't rename "${calendar.name}". Try again in a moment.` });
 		}
 		return { action: 'rename', renamed: checked.name };
+	},
+
+	/** Shares an event calendar with a secret link, replaces its link (the old one stops working), or stops sharing it. */
+	share: async ({ request }) => {
+		const form = await request.formData();
+		const path = String(form.get('path') ?? '');
+		const what = String(form.get('do') ?? '');
+		const refuse = (status: number, message: string) => fail(status, { action: 'share' as const, path, message });
+		if (!['share', 'renew', 'stop'].includes(what)) return refuse(400, 'Choose Share, New link or Stop sharing');
+		if (what !== 'stop' && !env.FEED_ORIGIN) return refuse(400, 'Shared links are not turned on for this server yet; see the README');
+		const store = await connect();
+		if (!store) return refuse(503, NOT_ANSWERING);
+		let feeds;
+		try {
+			await store.refreshCalendars();
+			feeds = await getFeeds(store, true);
+		} catch (e) {
+			console.error('Settings: could not read the shared links', e);
+			return refuse(503, NOT_ANSWERING);
+		}
+		const events = store.calendars().filter((c) => c.accepts.includes('event'));
+		if (what !== 'stop' && !calendarAtPath(events, path)) return refuse(404, CALENDAR_GONE);
+		// Links of calendars deleted since are dropped as the list is saved.
+		const next: Feeds = Object.fromEntries(Object.entries(feeds).filter(([p]) => p !== path && calendarAtPath(events, p)));
+		if (what === 'share' && feeds[path]) next[path] = feeds[path];
+		else if (what !== 'stop') next[path] = newSecret();
+		try {
+			await saveFeeds(store, next);
+		} catch (e) {
+			console.error('Settings: could not save the shared links', e);
+			return refuse(502, "The calendar server didn't save that. Try again in a moment.");
+		}
+		return { action: 'share' as const, path, done: what };
 	},
 
 	/** Which calendar is shaded as work (or none), and which one new events go in. Both stored by path. */
@@ -258,6 +317,12 @@ export const actions: Actions = {
 		if (!version || version !== held.version) {
 			const what = mode === 'move' ? 'moved or deleted' : 'deleted';
 			return fail(409, { action: 'delete', path, count: held.documents.length, version: held.version, message: `${name} changed since you looked, so nothing was ${what}. It now holds ${items(held.documents.length)}.` });
+		}
+		try {
+			await unshare(store, path);
+		} catch (e) {
+			console.error('Settings: could not take the shared link away before deleting a calendar', e);
+			return refuse(502, `The calendar server didn't stop sharing ${name}, so nothing was deleted. Try again in a moment.`);
 		}
 		if (mode === 'delete') return recounted(store, calendar, await finish(store, calendar, version, { action: 'delete' as const, deleted: calendar.name, count: held.documents.length }));
 

@@ -2,11 +2,18 @@ import type { Handle, HandleServerError } from '@sveltejs/kit';
 import { building } from '$app/environment';
 import { env } from '$env/dynamic/private';
 import { isDavPath, proxyToCalendarServer } from '$lib/server/dav-proxy';
+import { fromInternet, secretIn } from '$lib/server/feeds';
 import { scheduleNightlyRollover } from '$lib/server/rollover';
 
 if (!building) scheduleNightlyRollover();
 
 export const handle: Handle = async ({ event, resolve }) => {
+	// From the internet (Tailscale Funnel), only a shared calendar link may be reached, and only to read it: never the
+	// planner's pages, its settings or the calendar server, even if Funnel were set up to publish more than /feed.
+	// (The app's own static files, such as its icons and code, are served before this runs; none holds personal data.)
+	if (fromInternet(event.request.headers) && !(['GET', 'HEAD'].includes(event.request.method) && secretIn(event.url.pathname))) {
+		return new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' } });
+	}
 	// Calendar apps syncing over CalDAV; the calendar server checks its own password.
 	if (isDavPath(event.url.pathname)) {
 		return proxyToCalendarServer(event.request, event.url, env.CALDAV_URL ?? 'http://127.0.0.1:5232/');

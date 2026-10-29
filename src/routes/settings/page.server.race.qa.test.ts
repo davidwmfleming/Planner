@@ -9,6 +9,8 @@ vi.mock('$env/dynamic/private', () => ({ env: {} }));
 const HOME = 'http://127.0.0.1:5232/david/';
 let fake: ReturnType<typeof fakeStore>;
 let connectError: Error | undefined;
+/** Shared calendar links as the pretend calendar server keeps them. */
+let feeds: Record<string, string> = {};
 vi.mock('$lib/server/store', async (original) => ({
 	...(await original<typeof import('$lib/server/store')>()),
 	getStore: async () => {
@@ -47,6 +49,10 @@ function fakeStore(calendars: Calendar[], held: Record<string, StoredDocument[]>
 		},
 		async refreshCalendars() {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
+		readFeeds: async () => feeds,
+		writeFeeds: async (_url: string, next: Record<string, string>) => {
+			feeds = next;
+		},
 		async readSettings() {
 			return this.settings;
 		},

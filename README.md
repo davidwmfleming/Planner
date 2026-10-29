@@ -128,6 +128,14 @@ The planner's calendars can be added to Apple Calendar (Mac or iPhone), or to An
 - **iPhone:** Settings → Apps → Calendar → Calendar Accounts → Add Account → Other → Add CalDAV Account. Server: the planner's address without `https://`; then the user name and the calendar password.
 - **Mac:** Calendar → Settings → Accounts → + → Other CalDAV Account. Account type: Manual; server address: `https://<planner address>/dav/`.
 
+## Shared calendar links
+
+To subscribe to a calendar from a computer that isn't on your Tailscale (a work computer, or Google Calendar or Outlook), open the settings page and press **Share** next to the calendar under **Shared links**. Copy its link and paste it into the other app's "subscribe to calendar" or "add calendar from URL". The app then checks for changes every so often (Google every few hours, others more often). Anyone who has the link can read everything in that calendar, but nobody can change anything through it. **New link** makes a fresh link and **Stop sharing** removes it; either way the old link stops working at once. Task lists can't be shared, because calendar subscriptions show only events.
+
+If the other computer can run Tailscale, that is the better route, because nothing is public: sign it in to your Tailscale account, or [share the server](https://tailscale.com/kb/1084/sharing) with the other person's Tailscale account, and add the calendar over CalDAV as above.
+
+The links are published from the internet with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), on their own port (8443, or 10000 if the planner itself uses 8443), and only the `/feed` address; the planner and CalDAV stay on your tailnet only, and no port is opened on the router. The planner also refuses anything but a shared link from a request that came through Funnel. `server-setup.sh` turns this on. The first time, it may print a link to allow Funnel for your tailnet: open it, allow Funnel, and run the script again. Until then, the settings page says shared links aren't turned on. To turn sharing off entirely, run `sudo tailscale funnel --https=8443 off` (or the port it uses) and remove the `FEED_ORIGIN=` line from `.env`, then `sudo docker compose up -d`.
+
 ## Downloading everything
 
 **Download everything (.ics)**, in the Export section of the settings page (the gear at the top of the planner), saves `planner-export-YYYY-MM-DD.zip` with one .ics file per calendar (`Me.ics`, `Family.ics`, `Tasks.ics` and so on). Unzip it and import each .ics file on its own, into the calendar it should go in: Apple Calendar and Google Calendar both take one .ics file at a time, not the zip. They ignore the tasks in `Tasks.ics`, which Thunderbird and CalDAV task apps can import. In the app installed on a phone's home screen, the zip opens the share sheet instead (Save to Files, for example). If a calendar can't be fetched, the page says which one and nothing is saved; try again in a moment.

@@ -15,6 +15,9 @@ DIR="${PLANNER_DIR:-/srv/planner}"
 REPO="${PLANNER_REPO:-https://github.com/davidwmfleming/Planner.git}"
 HTTPS_PORT="${HTTPS_PORT:-443}"  # homebase will need another port if Home Assistant takes 443
 APP_PORT=3000
+# Shared calendar links (Tailscale Funnel allows only 443, 8443 and 10000); never the planner's own port.
+FEED_PORT="${FEED_PORT:-$([ "$HTTPS_PORT" = 8443 ] && echo 10000 || echo 8443)}"
+[ "$FEED_PORT" != "$HTTPS_PORT" ] || { echo "FEED_PORT must differ from HTTPS_PORT, or the whole planner would be public."; exit 1; }
 
 say() { printf '\n== %s\n' "$1"; }
 
@@ -75,6 +78,13 @@ EOF
 else
 	sed -i "s|^ORIGIN=.*|ORIGIN=$ORIGIN|" .env
 fi
+# Shared calendar links are read from the internet at this address (Tailscale Funnel, below).
+FEED_ORIGIN="https://$NAME:$FEED_PORT"
+if grep -q '^FEED_ORIGIN=' .env; then
+	sed -i "s|^FEED_ORIGIN=.*|FEED_ORIGIN=$FEED_ORIGIN|" .env
+else
+	echo "FEED_ORIGIN=$FEED_ORIGIN" >> .env
+fi
 chmod 600 .env
 
 say "Building and starting (the first time takes a few minutes)"
@@ -111,8 +121,23 @@ MAC_BACKUP_KEY="${MAC_BACKUP_KEY:-}" bash scripts/backup-access.sh ||
 say "https address"
 # If HTTPS certificates are off for your tailnet, this prints a link to turn them on; then run the script again.
 sudo tailscale serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$APP_PORT"
-# Shows it is on your tailnet only ("Funnel off" means not on the internet).
+
+say "Shared calendar links"
+# Only /feed, on its own port, is published to the internet; the planner itself stays on your tailnet only.
+# The first time, this may print a link to allow Funnel for your tailnet; open it, then run this script again.
+# Funnel is switched on for a whole port, so first make sure the feed port serves nothing else and the planner's
+# own port isn't public; then check again afterwards.
+if sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" before; then
+	sudo tailscale funnel --bg --https="$FEED_PORT" --set-path=/feed "http://127.0.0.1:$APP_PORT/feed" ||
+		echo "Warning: shared calendar links aren't published yet; the message above says why. Everything else works."
+	sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" after ||
+		echo "Warning: check the line above before sharing any calendar."
+else
+	echo "Warning: shared calendar links were not turned on, to keep the rest private; the line above says why."
+fi
+# Port $HTTPS_PORT should say "tailnet only"; port $FEED_PORT, "Funnel on" for /feed only.
 sudo tailscale serve status
+sudo tailscale funnel status
 
 cat <<EOF
 
@@ -125,6 +150,9 @@ Calendar apps (Apple Calendar on the Mac or iPhone, DAVx5 on Android):
   Add a CalDAV account. Server: $NAME$( [ "$HTTPS_PORT" = 443 ] || echo ":$HTTPS_PORT" )
   User name: david    Password: shown by  grep CALDAV_PASSWORD $DIR/.env
   If the app asks for more, choose Advanced or Manual: path /dav/david/, port $HTTPS_PORT, SSL on.
+
+Shared calendar links: make them on the planner's Settings page (Shared links).
+  They start with $FEED_ORIGIN/feed/ and work from any computer.
 
 To update to the newest version later, run this script again.
 EOF

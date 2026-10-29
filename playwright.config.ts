@@ -2,7 +2,7 @@ import { defineConfig } from '@playwright/test';
 
 const tablet = { viewport: { width: 1000, height: 1400 }, isMobile: true, hasTouch: true };
 const phone = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-const CHANGES_EVERY_PAGE = /settings-choices\.test\.ts/;
+const CHANGES_EVERY_PAGE = /settings-(choices|sharing)\.test\.ts/;
 const CHANGES_CATEGORIES = /settings-categories\.test\.ts/;
 
 export default defineConfig({
@@ -21,7 +21,7 @@ export default defineConfig({
 			// Not NODE_ENV=production while serving (only while building), or the planner would refuse PLANNER_TEST_CLOCK.
 			command: 'npm run build && NODE_ENV=test npm run preview -- --port 4173',
 			port: 4173,
-			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev', PLANNER_TEST_CLOCK: '1' }
+			env: { CALDAV_URL: 'http://127.0.0.1:5233/', CALDAV_USER: 'david', CALDAV_PASSWORD: 'dev', PLANNER_TEST_CLOCK: '1', FEED_ORIGIN: 'http://localhost:4173' }
 		}
 	],
 	projects: [

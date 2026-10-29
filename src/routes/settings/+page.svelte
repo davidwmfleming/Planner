@@ -44,6 +44,27 @@
 		if (submitter instanceof HTMLElement && submitter.isConnected) submitter.focus();
 	};
 
+	/** Shared links: which calendar's link was just copied, and what a change did, read out by screen readers. */
+	let copied = $state<string | undefined>();
+	const shared: SubmitFunction = ({ formData }) => {
+		const label = data.eventCalendars.find((c) => c.path === formData.get('path'))?.label;
+		return async ({ result, update }) => {
+			await update({ reset: false });
+			copied = undefined;
+			const done = result.type === 'success' ? result.data?.done : undefined;
+			if (done) announcement = done === 'stop' ? `Stopped sharing ${label}` : done === 'renew' ? `New link for ${label}; the old one no longer works` : `Shared ${label}`;
+		};
+	};
+	/** Copies a link; where the clipboard isn't allowed, selects it so it can be copied by hand. */
+	async function copyLink(path: string, link: string) {
+		try {
+			await navigator.clipboard.writeText(link);
+			copied = path;
+		} catch {
+			document.querySelector<HTMLInputElement>(`input[data-link="${CSS.escape(path)}"]`)?.select();
+		}
+	}
+
 	/** After adding, the field is ready for another name (or to fix the one refused). */
 	const added: SubmitFunction = () => async ({ result, update }) => {
 		await update();
@@ -583,6 +604,41 @@
 			{#if categoryMessage}<p id="category-message" class="done" role="status" tabindex="-1">{categoryMessage}</p>{/if}
 		</section>
 
+		<section aria-labelledby="h-sharing">
+			<h2 id="h-sharing">Shared links</h2>
+			{#if !data.sharing.on}
+				<p class="hint">Shared links aren't turned on for this server, so no link works, including any made before. Running the setup script again turns them on; the README says how.</p>
+			{:else}
+				{#if !data.sharing.readable}{@render problem("The shared links couldn't be read just now; reload the page.")}{/if}
+				<ul class="lines">
+					{#each data.eventCalendars as calendar (calendar.path)}
+						{@const link = data.sharing.links[calendar.path]}
+						<li>
+							<span class="name">{calendar.label}</span>
+							<form method="POST" action="?/share" use:enhance={shared} class="inline">
+								<input type="hidden" name="path" value={calendar.path} />
+								{#if link}
+									<button class="btn small" name="do" value="renew" aria-label="New link for {calendar.label}">New link</button>
+									<button class="btn small" name="do" value="stop" aria-label="Stop sharing {calendar.label}">Stop sharing</button>
+								{:else}
+									<button class="btn small" name="do" value="share" aria-label="Share {calendar.label}">Share</button>
+								{/if}
+							</form>
+							{#if link}
+								<div class="edit shared-link">
+									<input class="text" readonly value={link} data-link={calendar.path} aria-label="Link for {calendar.label}" onfocus={(e) => e.currentTarget.select()} />
+									<button type="button" class="btn small" aria-label="Copy the link for {calendar.label}" onclick={() => copyLink(calendar.path, link)}>Copy</button>
+									<span role="status">{copied === calendar.path ? 'Copied' : ''}</span>
+								</div>
+							{/if}
+							{#if form?.action === 'share' && form.path === calendar.path && form.message}{@render problem(form.message)}{/if}
+						</li>
+					{/each}
+				</ul>
+				<p class="hint">A calendar app on any computer, even one not on Tailscale, can subscribe to a shared calendar with its link. Anyone who has the link can read everything in that calendar, but nobody can change it. New link and Stop sharing make the old link stop working at once.</p>
+			{/if}
+		</section>
+
 		<section aria-labelledby="h-export">
 			<h2 id="h-export">Export</h2>
 			<div class="edit">
@@ -687,6 +743,7 @@
 	.add label { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
 	/* The Delete button's form sits in the row like a plain button. */
 	.inline { display: contents; }
+	.shared-link { flex-basis: 100%; }
 	/* The delete confirm takes the whole width under its calendar's row. */
 	.confirm { flex-basis: 100%; min-width: 0; padding-block: 0.3rem 0.6rem; }
 	.confirm p { margin: 0.3rem 0; overflow-wrap: anywhere; }
