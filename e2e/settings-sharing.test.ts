@@ -41,3 +41,25 @@ test('a calendar can be shared with a link, given a new link, and stopped; only 
 		await deleteCalendar(request, path);
 	}
 });
+
+test("a calendar made with a deleted shared calendar's name starts unshared; the old link stays dead", async ({ page, request }, info) => {
+	const name = `Gamma ${info.project.name} ${Date.now()}`;
+	await page.goto('/settings');
+	await page.locator('#new-calendar').fill(name);
+	await page.getByRole('button', { name: 'Add calendar' }).click();
+	const sharing = page.getByRole('region', { name: 'Shared links' });
+	await sharing.getByRole('button', { name: `Share ${name}`, exact: true }).click();
+	const link = await sharing.getByRole('textbox', { name: `Link for ${name}` }).inputValue();
+	expect((await request.get(link)).status()).toBe(200);
+
+	// Deleted on a phone, then made again here with the same name, so at the same address.
+	const address = await page.locator(`button[aria-label="Rename ${name}"]`).getAttribute('data-rename');
+	await deleteCalendar(request, address!);
+	await page.reload();
+	await page.locator('#new-calendar').fill(name);
+	await page.getByRole('button', { name: 'Add calendar' }).click();
+	await expect(page.getByRole('region', { name: 'Shared links' }).getByRole('button', { name: `Share ${name}`, exact: true })).toBeVisible();
+	await expect(page.getByRole('region', { name: 'Shared links' }).getByRole('textbox', { name: `Link for ${name}` })).toHaveCount(0);
+	expect((await request.get(link)).status()).toBe(404);
+	await deleteCalendar(request, (await page.locator(`button[aria-label="Rename ${name}"]`).getAttribute('data-rename'))!);
+});

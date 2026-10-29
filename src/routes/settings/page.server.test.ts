@@ -8,6 +8,8 @@ vi.mock('$env/dynamic/private', () => ({ env: {} }));
 const HOME = 'http://127.0.0.1:5232/david/';
 let fake: ReturnType<typeof fakeStore>;
 let connectError: Error | undefined;
+/** Shared calendar links as the pretend calendar server keeps them. */
+let feeds: Record<string, string> = {};
 vi.mock('$lib/server/store', async (original) => ({
 	...(await original<typeof import('$lib/server/store')>()),
 	getStore: async () => {
@@ -46,6 +48,10 @@ function fakeStore(calendars: Calendar[], held: Record<string, StoredDocument[]>
 		},
 		async refreshCalendars() {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
+		readFeeds: async () => feeds,
+		writeFeeds: async (_url: string, next: Record<string, string>) => {
+			feeds = next;
+		},
 		async readSettings() {
 			return this.settings;
 		},
@@ -139,6 +145,14 @@ describe('deleting a calendar with its items', () => {
 		expect(await act('delete', { path: '/david/family/', mode: 'delete', version: '"v1"' })).toEqual({ action: 'delete', deleted: 'Family', count: 1 });
 		expect(fake.deleted).toEqual([family.url]);
 		expect(fake.written).toEqual([]); // neither Work nor new events pointed at it
+	});
+
+	it("takes a deleted calendar's shared link away, so a calendar made later with its name isn't public", async () => {
+		fake = fakeStore([me, family, work, tasks], {});
+		feeds = { '/david/family/': 'f'.repeat(43), '/david/me/': 'm'.repeat(43) };
+		expect(await act('delete', { path: '/david/family/', mode: 'delete', version: '"v1"' })).toMatchObject({ action: 'delete', deleted: 'Family' });
+		expect(feeds).toEqual({ '/david/me/': 'm'.repeat(43) });
+		feeds = {};
 	});
 
 	it('deletes nothing when the calendar changed since its items were counted (on a phone, say)', async () => {

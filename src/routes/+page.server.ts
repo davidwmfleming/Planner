@@ -11,7 +11,7 @@ import { env } from '$env/dynamic/private';
 import { occurrenceOn, occurrencesBetween, pageStepBudget } from '$lib/server/ical';
 import { logged, RefusedError, unanswered, type StoredItem } from '$lib/server/calendar-store';
 import { byName, calendarAtPath, calendarName, calendarTags, checkCalendarName, menuLabels } from '$lib/settings';
-import { defaultCalendarUrl, getSettings, getStore, tasksUrl } from '$lib/server/store';
+import { defaultCalendarUrl, getSettings, getStore, tasksUrl, unshare } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -262,7 +262,11 @@ export const actions: Actions = {
 		let moved;
 		const saved = await change(doing('save', item), async () => {
 			const wanted = newName
-				? await store.ensureCalendar(newName.name, ['event'])
+				? await store.ensureCalendar(newName.name, ['event']).then(async (made) => {
+						// A calendar deleted on a phone may have left a shared link at this address; a new calendar starts unshared.
+						await unshare(store, new URL(made.url).pathname);
+						return made;
+					})
 				: result.item.kind === 'event'
 					? calendarAtPath(store.calendars().filter((c) => c.accepts.includes('event')), field('calendar'))
 					: undefined;

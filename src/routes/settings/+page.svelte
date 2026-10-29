@@ -607,7 +607,7 @@
 		<section aria-labelledby="h-sharing">
 			<h2 id="h-sharing">Shared links</h2>
 			{#if !data.sharing.on}
-				<p class="hint">Shared links aren't turned on for this server yet. Running the setup script again turns them on; the README says how.</p>
+				<p class="hint">Shared links aren't turned on for this server, so no link works, including any made before. Running the setup script again turns them on; the README says how.</p>
 			{:else}
 				{#if !data.sharing.readable}{@render problem("The shared links couldn't be read just now; reload the page.")}{/if}
 				<ul class="lines">

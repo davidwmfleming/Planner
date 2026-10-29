@@ -8,6 +8,8 @@ let feeds: Record<string, string> = {};
 let file: string | undefined = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n';
 let fails: 'feeds' | 'file' | undefined;
 let fetched = 0;
+const env: Record<string, string | undefined> = { FEED_ORIGIN: 'https://homebase.example.ts.net:8443', TZ: 'America/Halifax' };
+vi.mock('$env/dynamic/private', () => ({ env }));
 
 vi.mock('$lib/server/store', () => ({
 	getStore: async () => ({
@@ -39,7 +41,15 @@ describe('GET /feed/<secret>.ics', () => {
 		expect(response.status).toBe(200);
 		expect(response.headers.get('Content-Type')).toBe('text/calendar; charset=utf-8');
 		expect(response.headers.get('X-Robots-Tag')).toBe('noindex');
-		expect(await response.text()).toContain('BEGIN:VCALENDAR');
+		expect(await response.text()).toBe('BEGIN:VCALENDAR\r\nX-WR-TIMEZONE:America/Halifax\r\nEND:VCALENDAR\r\n');
+	});
+
+	it('works only while sharing is on (the server has a public address)', async () => {
+		feeds = { '/david/me/': SECRET };
+		env.FEED_ORIGIN = undefined;
+		expect((await run(`${SECRET}.ics`)).status).toBe(404);
+		env.FEED_ORIGIN = 'https://homebase.example.ts.net:8443';
+		expect((await run(`${SECRET}.ics`)).status).toBe(200);
 	});
 
 	it('answers a wrong, cancelled or badly written link with the same plain 404', async () => {
@@ -69,7 +79,7 @@ describe('GET /feed/<secret>.ics', () => {
 		feeds = { '/david/me/': SECRET };
 		file = 'BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\nBEGIN:VTODO\r\nSUMMARY:Secret task\r\nBEGIN:VALARM\r\nEND:VALARM\r\nEND:VTODO\r\nEND:VCALENDAR\r\n';
 		const text = await (await run(`${SECRET}.ics`)).text();
-		expect(text).toBe('BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n');
+		expect(text).toBe('BEGIN:VCALENDAR\r\nX-WR-TIMEZONE:America/Halifax\r\nBEGIN:VEVENT\r\nSUMMARY:Dinner\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n');
 		file = 'BEGIN:VCALENDAR\r\nEND:VCALENDAR\r\n';
 	});
 

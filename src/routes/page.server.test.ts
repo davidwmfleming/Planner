@@ -8,6 +8,8 @@ vi.mock('$lib/server/rollover', () => ({ rollover: async () => 0 }));
 const HOME = 'http://127.0.0.1:5232/david/';
 let fake: ReturnType<typeof fakeStore>;
 let connectError: Error | undefined;
+/** Shared calendar links as the pretend calendar server keeps them. */
+let feeds: Record<string, string> = {};
 vi.mock('$lib/server/store', async (original) => ({
 	...(await original<typeof import('$lib/server/store')>()),
 	getStore: async () => {
@@ -52,6 +54,10 @@ function fakeStore(listed: Calendar[], settings = { categories: [] as string[], 
 		async remove(..._args: unknown[]) {},
 		async removeOccurrence(..._args: unknown[]) {},
 		addressFor: (name: string) => `${HOME}${name.toLowerCase()}/`,
+		readFeeds: async () => feeds,
+		writeFeeds: async (_url: string, next: Record<string, string>) => {
+			feeds = next;
+		},
 		async readSettings() {
 			return settings;
 		},

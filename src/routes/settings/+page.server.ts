@@ -6,7 +6,7 @@ import { logged, RefusedError, unanswered, type Calendar, type CalendarStore, ty
 import { icsToItems } from '$lib/server/ical';
 import { env } from '$env/dynamic/private';
 import { feedUrl, newSecret, type Feeds } from '$lib/server/feeds';
-import { defaultCalendarUrl, getFeeds, getSettings, getStore, saveFeeds, tasksUrl } from '$lib/server/store';
+import { defaultCalendarUrl, getFeeds, getSettings, getStore, saveFeeds, tasksUrl, unshare } from '$lib/server/store';
 import type { Actions, PageServerLoad } from './$types';
 
 const pathOf = (url: string) => new URL(url).pathname;
@@ -185,11 +185,18 @@ export const actions: Actions = {
 		if (!store) return fail(503, { action: 'add', name: asked, message: NOT_ANSWERING });
 		const checked = checkCalendarName(asked, store.calendars());
 		if ('error' in checked) return fail(400, { action: 'add', name: asked, message: checked.error });
+		let made;
 		try {
-			await store.ensureCalendar(checked.name, ['event']);
+			made = await store.ensureCalendar(checked.name, ['event']);
 		} catch (e) {
 			console.error('Settings: could not create a new calendar', e);
 			return fail(502, { action: 'add', name: asked, message: `The calendar server didn't make "${checked.name}". Try again in a moment.` });
+		}
+		try {
+			await unshare(store, pathOf(made.url));
+		} catch (e) {
+			console.error('Settings: could not check a new calendar has no shared link', e);
+			return fail(502, { action: 'add', name: asked, message: `Made "${checked.name}", but couldn't check it has no shared link left from an old calendar of that name; reload the page.` });
 		}
 		return { action: 'add', added: checked.name };
 	},
@@ -310,6 +317,12 @@ export const actions: Actions = {
 		if (!version || version !== held.version) {
 			const what = mode === 'move' ? 'moved or deleted' : 'deleted';
 			return fail(409, { action: 'delete', path, count: held.documents.length, version: held.version, message: `${name} changed since you looked, so nothing was ${what}. It now holds ${items(held.documents.length)}.` });
+		}
+		try {
+			await unshare(store, path);
+		} catch (e) {
+			console.error('Settings: could not take the shared link away before deleting a calendar', e);
+			return refuse(502, `The calendar server didn't stop sharing ${name}, so nothing was deleted. Try again in a moment.`);
 		}
 		if (mode === 'delete') return recounted(store, calendar, await finish(store, calendar, version, { action: 'delete' as const, deleted: calendar.name, count: held.documents.length }));
 

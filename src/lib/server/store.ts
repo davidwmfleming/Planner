@@ -93,3 +93,13 @@ export async function saveFeeds(store: CalendarStore, feeds: Feeds): Promise<voi
 	await store.writeFeeds(store.addressFor(tasksCalendarName()), feeds);
 	feedsRead = undefined;
 }
+
+/** Takes a calendar's shared link away: when it is deleted, and when a calendar is made at an address (the same name)
+ * that may have one left from a calendar deleted on a phone, so a calendar David never shared isn't public at the old
+ * link. Throws if the calendar server couldn't say or save. */
+export async function unshare(store: CalendarStore, path: string): Promise<void> {
+	const feeds = await getFeeds(store, true);
+	if (!(path in feeds)) return;
+	const rest = Object.fromEntries(Object.entries(feeds).filter(([p]) => p !== path));
+	await saveFeeds(store, rest);
+}
