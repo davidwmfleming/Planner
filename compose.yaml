@@ -22,7 +22,7 @@ services:
       CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
       ORIGIN: ${ORIGIN:?Set ORIGIN in .env to the planner's https address}
       TZ: ${TZ:-America/Halifax}
-      # The public address of shared calendar links (Tailscale Funnel); empty turns sharing off.
+      # The public address of shared calendar links (the share service below); empty turns sharing off.
       FEED_ORIGIN: ${FEED_ORIGIN:-}
       # Used once, the first time the planner starts, to fill in its settings.
       WORK_CALENDAR: ${WORK_CALENDAR:-Work}
@@ -30,6 +30,25 @@ services:
     # Only this machine can reach it; Tailscale Serve gives it the https address.
     ports:
       - 127.0.0.1:${PLANNER_PORT:-3000}:3000
+
+  # Shared calendar links: a Tailscale machine of its own (planner-share) that publishes only /feed to the internet
+  # with Funnel, so the server's own name and ports stay tailnet-only. On when .env sets COMPOSE_PROFILES=share
+  # (server-setup.sh does, once SHARE_AUTHKEY is in .env). See "Shared calendar links" in docs/design.md.
+  share:
+    image: tailscale/tailscale:v1.104.2
+    profiles: [share]
+    restart: unless-stopped
+    depends_on: [planner]
+    hostname: planner-share
+    environment:
+      TS_AUTHKEY: ${SHARE_AUTHKEY:-}
+      TS_HOSTNAME: planner-share
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_USERSPACE: "true"
+    volumes:
+      - share-state:/var/lib/tailscale
+      - ./docker/share/serve.json:/config/serve.json:ro
 
   # Sample entries for a test machine: docker compose --profile sample run --rm seed
   seed:
@@ -45,3 +64,7 @@ services:
 
 volumes:
   data:
+  # Only planner-share's Tailscale identity, no calendar data, so it is left out of the backup: if it is lost,
+  # a new auth key brings it back (remove the old planner-share machine in the Tailscale admin console first, so
+  # the name, and so the links, stay the same).
+  share-state:

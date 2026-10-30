@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# funnel-safe.py: shared links are turned on only when nothing but /feed would become public.
+# funnel-safe.py: says when anything on the server itself is public, so only planner-share ever is.
 set -uo pipefail
 CHECK="$(cd "$(dirname "$0")/.." && pwd)/funnel-safe.py"
 failed=0
-expect() { # expect <exit code> <before|after> <serve status json> <what it shows>
-	printf '%s' "$3" | python3 -I "$CHECK" 443 8443 "$2" >/dev/null
+expect() { # expect <exit code> <serve status json> <what it shows>
+	printf '%s' "$2" | python3 -I "$CHECK" >/dev/null
 	local got=$?
-	if [ "$got" = "$1" ]; then printf 'ok   %s\n' "$4"; else printf 'FAIL %s (exit %s)\n' "$4" "$got"; failed=1; fi
+	if [ "$got" = "$1" ]; then printf 'ok   %s\n' "$3"; else printf 'FAIL %s (exit %s)\n' "$3" "$got"; failed=1; fi
 }
-expect 0 before '' 'nothing served yet: fine'
-expect 0 before '{"Web":{"h.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}' 'the planner on 443, tailnet only: fine'
-expect 1 before '{"Web":{"h.ts.net:443":{"Handlers":{"/":{}}}},"AllowFunnel":{"h.ts.net:443":true}}' 'the planner already public: refused'
-expect 1 before '{"Web":{"h.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:8123"}}}}}' 'something else on the feed port: refused'
-expect 0 after '{"Web":{"h.ts.net:8443":{"Handlers":{"/feed":{}}}},"AllowFunnel":{"h.ts.net:8443":true}}' 'only /feed public: fine'
-expect 1 after '{"Web":{"h.ts.net:8443":{"Handlers":{"/feed":{}}}}}' 'Funnel not on afterwards: reported'
-expect 1 after '{"Web":{"h.ts.net:8443":{"Handlers":{"/feed":{},"/ha":{}}}},"AllowFunnel":{"h.ts.net:8443":true}}' 'more than /feed public afterwards: reported'
+expect 0 '' 'nothing served: private'
+expect 0 '{"TCP":{"8443":{"TCPForward":"127.0.0.1:8123","TerminateTLS":"h.ts.net"}},"Web":{"h.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3000"}}}}}' 'planner and Home Assistant, tailnet only: private'
+expect 1 '{"Web":{"h.ts.net:443":{"Handlers":{"/":{}}}},"AllowFunnel":{"h.ts.net:443":true}}' 'the planner public: reported'
+expect 1 '{"AllowFunnel":{"h.ts.net:8443":true}}' 'another port public: reported'
+expect 0 '{"AllowFunnel":{"h.ts.net:443":false}}' 'Funnel switched off: private'
 exit $failed

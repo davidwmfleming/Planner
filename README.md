@@ -134,7 +134,16 @@ To subscribe to a calendar from a computer that isn't on your Tailscale (a work 
 
 If the other computer can run Tailscale, that is the better route, because nothing is public: sign it in to your Tailscale account, or [share the server](https://tailscale.com/kb/1084/sharing) with the other person's Tailscale account, and add the calendar over CalDAV as above.
 
-The links are published from the internet with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), on their own port (8443, or 10000 if the planner itself uses 8443), and only the `/feed` address; the planner and CalDAV stay on your tailnet only, and no port is opened on the router. The planner also refuses anything but a shared link from a request that came through Funnel. `server-setup.sh` turns this on. The first time, it may print a link to allow Funnel for your tailnet: open it, allow Funnel, and run the script again. Until then, the settings page says shared links aren't turned on. To turn sharing off entirely, run `sudo tailscale funnel --https=8443 off` (or the port it uses) and remove the `FEED_ORIGIN=` line from `.env`, then `sudo docker compose up -d`.
+The links are published from the internet with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) by a small Tailscale machine of their own, `planner-share` (the `share` service in `compose.yaml`), so they read `https://planner-share.<your tailnet>.ts.net/feed/...`. It publishes only the `/feed` address; the planner, CalDAV and everything else on the server stay on your tailnet only, and no port is opened on the router. The planner also refuses anything but a shared link from a request that came through Funnel.
+
+To turn it on, once:
+
+1. In the Tailscale admin console, open **Settings → Keys** and **Generate auth key** (leave the options off). Copy it.
+2. On the server, run `SHARE_AUTHKEY=tskey-auth-... bash /srv/planner/scripts/server-setup.sh`. The key is kept in `.env`, so later runs don't need it.
+3. If `sudo docker compose logs share` says Funnel isn't enabled, open the link it gives, allow Funnel, and run `sudo docker compose restart share`.
+4. In the admin console under **Machines**, open `planner-share`'s menu and choose **Disable key expiry**, or the links stop working when its key expires (after about six months).
+
+Until it's on, the settings page says shared links aren't turned on. To turn sharing off entirely, remove the `SHARE_AUTHKEY=` line from `.env`, run the setup script again, then `sudo docker compose --profile share rm -sf share` and remove `planner-share` in the admin console. If the `share-state` volume is ever lost, remove the old `planner-share` machine in the admin console first and run the script with a new key, so the name (and so every link) stays the same.
 
 ## Downloading everything
 
