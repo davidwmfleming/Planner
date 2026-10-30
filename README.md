@@ -138,7 +138,7 @@ The links are published from the internet with [Tailscale Funnel](https://tailsc
 
 To turn it on, once:
 
-1. In the Tailscale admin console, open **Access controls** and add the lines below to the policy file (merge them into `tagOwners` and `nodeAttrs` if those are already there; the `funnel` line may already exist for `autogroup:member`, in which case add the tag to its `target`). Then, in the rule that lets everyone reach everything (`"src": ["*"]`), change `"*"` in `src` to `"autogroup:member"`, so planner-share, which faces the internet, can't reach your other machines. If you have other tagged machines that need to reach things, give them their own rule. Save.
+1. In the Tailscale admin console, open **Access controls** and add the lines below to the policy file (merge them into `tagOwners` and `nodeAttrs` if those are already there; the `funnel` line may already exist for `autogroup:member`, in which case add the tag to its `target`). Then, in the rule that lets everyone reach everything (`"src": ["*"]`), change `"*"` in `src` to `"autogroup:member", "autogroup:shared"` (your own devices, and anyone you've shared the server with), so planner-share, which faces the internet, can't reach your other machines. If you have other tagged machines that need to reach things, give them their own rule. Save.
    ```json
    "tagOwners": { "tag:planner-share": ["autogroup:admin"] },
    "nodeAttrs": [{ "target": ["tag:planner-share"], "attr": ["funnel"] }],
