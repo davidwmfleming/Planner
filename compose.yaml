@@ -46,6 +46,7 @@ services:
       TS_STATE_DIR: /var/lib/tailscale
       TS_SERVE_CONFIG: /config/serve.json
       TS_USERSPACE: "true"
+      TS_AUTH_ONCE: "true"  # sign in with the key only the first time; later starts use the saved identity
       # A tagged machine: no access to the rest of the tailnet (see the README) and no key expiry.
       TS_EXTRA_ARGS: --advertise-tags=tag:planner-share
     volumes:

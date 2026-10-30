@@ -143,16 +143,16 @@ To turn it on, once:
    "tagOwners": { "tag:planner-share": ["autogroup:admin"] },
    "nodeAttrs": [{ "target": ["tag:planner-share"], "attr": ["funnel"] }],
    ```
-2. Open **Settings → Keys** and **Generate auth key**: leave **Reusable** off, turn **Tags** on and pick `tag:planner-share`; a 1-day expiry is fine. Copy it.
+2. Open **Settings → Keys** and **Generate auth key**: leave **Reusable** off, turn **Tags** on and pick `tag:planner-share`, and turn **Pre-approved** on if your tailnet approves new machines; a 1-day expiry is fine. Copy it.
 3. On the server, run the line below, **starting it with a space** so the key isn't saved in your shell history. The key is kept in `.env` (readable only by you), so later runs don't need it.
    ```
     SHARE_AUTHKEY=tskey-auth-... bash /srv/planner/scripts/server-setup.sh
    ```
-4. If `sudo docker compose logs share` says Funnel isn't enabled, open the link it gives, allow Funnel, and run `sudo docker compose restart share`.
+4. If `cd /srv/planner && sudo docker compose logs share` says Funnel isn't enabled, open the link it gives, allow Funnel, and run `cd /srv/planner && sudo docker compose restart share`.
 
 A tagged machine's key never expires, so there is nothing to renew.
 
-Until it's on, the settings page says shared links aren't turned on. To turn sharing off entirely, remove the `SHARE_AUTHKEY=` line from `.env`, run the setup script again, then `sudo docker compose --profile share rm -sf share` and remove `planner-share` in the admin console. If the `share-state` volume is ever lost, remove the old `planner-share` machine in the admin console first and run the script with a new tagged key, so the name (and so every link) stays the same.
+Until it's on, the settings page says shared links aren't turned on. To turn sharing off entirely, remove the `SHARE_AUTHKEY=` line from `.env`, run the setup script again, then `cd /srv/planner && sudo docker compose --profile share rm -sf share` and remove `planner-share` in the admin console. If the `share-state` volume is ever lost, remove the old `planner-share` machine in the admin console first and run the script with a new tagged key, so the name (and so every link) stays the same.
 
 ## Downloading everything
 

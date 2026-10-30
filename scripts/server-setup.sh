@@ -79,6 +79,7 @@ else
 fi
 # Sets NAME=value in .env, replacing a line already there.
 set_env() {
+	[ -z "$(tail -c1 .env)" ] || echo >> .env  # a hand edit may have left no newline at the end
 	if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
 }
 # Shared calendar links are published by a Tailscale machine of their own (planner-share, in compose.yaml), so
@@ -145,9 +146,9 @@ if grep -q '^COMPOSE_PROFILES=share' .env; then
 	# Give planner-share a moment to sign in and turn on Funnel, then show what it publishes (only /feed).
 	sleep 10
 	sudo docker compose exec -T share tailscale funnel status ||
-		echo "Warning: planner-share isn't running yet; see  sudo docker compose logs share"
-	echo "If  sudo docker compose logs share  mentions Funnel not being enabled, open the link it gives, allow"
-	echo "Funnel, then run  sudo docker compose restart share."
+		echo "Warning: planner-share isn't running yet; see  cd $DIR && sudo docker compose logs share"
+	echo "If  cd $DIR && sudo docker compose logs share  mentions Funnel not being enabled, open the link it gives, allow"
+	echo "Funnel, then run  cd $DIR && sudo docker compose restart share."
 	SHARING="On. Make links on the planner's Settings page (Shared links); they start with https://$SHARE_NAME/feed/"
 else
 	SHARING="Off. To turn it on, see \"Shared calendar links\" in $DIR/README.md"
