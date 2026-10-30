@@ -3,7 +3,8 @@
 port Tailscale Funnel publishes. The planner, CalDAV and anything else served here (Home Assistant, say) should be
 tailnet-only; shared calendar links are published by the separate planner-share machine instead.
 
-Prints what is public, with the command that stops it, and exits 1.
+Prints what is public, with the command that stops it, and exits 1; exits 2 if the port given as the first argument
+(the planner's own) is among them.
 """
 import json
 import sys
@@ -13,15 +14,15 @@ def problems(status):
     found = []
     for host_port, on in sorted((status.get('AllowFunnel') or {}).items()):
         if on:
-            port = host_port.rsplit(':', 1)[-1]
-            found.append(f'port {port} of this machine is public on the internet (Funnel on). '
-                         f'Stop it with: sudo tailscale funnel --https={port} off')
+            found.append(host_port.rsplit(':', 1)[-1])
     return found
 
 
 if __name__ == '__main__':
     text = sys.stdin.read().strip()
     found = problems(json.loads(text) if text else {})
-    for line in found:
-        print(f'Not private: {line}')
-    sys.exit(1 if found else 0)
+    for port in found:
+        print(f'Not private: port {port} of this machine is public on the internet (Funnel on). '
+              f'Stop it with: sudo tailscale funnel --https={port} off')
+    planner_port = sys.argv[1] if len(sys.argv) > 1 else None
+    sys.exit(2 if planner_port in found else 1 if found else 0)

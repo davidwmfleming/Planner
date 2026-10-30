@@ -130,8 +130,14 @@ say "https address"
 sudo tailscale serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$APP_PORT"
 
 # Nothing on this machine should be public: shared links come from planner-share instead.
-sudo tailscale serve status --json | python3 scripts/funnel-safe.py ||
-	echo "Warning: the line above names something on this machine that anyone on the internet can reach."
+# The planner's own port being public stops the setup; anything else public (Home Assistant, say) is your call.
+safe=0
+sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" || safe=$?
+if [ "$safe" = 2 ]; then
+	echo "Stopped: the planner itself is public on the internet. Run the command above, then run this again."
+	exit 1
+fi
+[ "$safe" = 0 ] || echo "Warning: the line above names something on this machine that anyone on the internet can reach."
 sudo tailscale serve status
 
 say "Shared calendar links"
