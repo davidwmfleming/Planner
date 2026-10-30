@@ -15,9 +15,8 @@ DIR="${PLANNER_DIR:-/srv/planner}"
 REPO="${PLANNER_REPO:-https://github.com/davidwmfleming/Planner.git}"
 HTTPS_PORT="${HTTPS_PORT:-443}"  # homebase will need another port if Home Assistant takes 443
 APP_PORT=3000
-# Shared calendar links (Tailscale Funnel allows only 443, 8443 and 10000); never the planner's own port.
-FEED_PORT="${FEED_PORT:-$([ "$HTTPS_PORT" = 8443 ] && echo 10000 || echo 8443)}"
-[ "$FEED_PORT" != "$HTTPS_PORT" ] || { echo "FEED_PORT must differ from HTTPS_PORT, or the whole planner would be public."; exit 1; }
+# Shared calendar links: the Tailscale auth key for the planner-share machine, given once (it is kept in .env).
+SHARE_AUTHKEY="${SHARE_AUTHKEY:-}"
 
 say() { printf '\n== %s\n' "$1"; }
 
@@ -78,12 +77,21 @@ EOF
 else
 	sed -i "s|^ORIGIN=.*|ORIGIN=$ORIGIN|" .env
 fi
-# Shared calendar links are read from the internet at this address (Tailscale Funnel, below).
-FEED_ORIGIN="https://$NAME:$FEED_PORT"
-if grep -q '^FEED_ORIGIN=' .env; then
-	sed -i "s|^FEED_ORIGIN=.*|FEED_ORIGIN=$FEED_ORIGIN|" .env
+# Sets NAME=value in .env, replacing a line already there.
+set_env() {
+	[ -z "$(tail -c1 .env)" ] || echo >> .env  # a hand edit may have left no newline at the end
+	if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
+}
+# Shared calendar links are published by a Tailscale machine of their own (planner-share, in compose.yaml), so
+# nothing on this machine is ever public. It runs once .env has its auth key.
+SHARE_NAME="planner-share.${NAME#*.}"
+[[ "$SHARE_AUTHKEY" =~ ^[A-Za-z0-9_-]*$ ]] || { echo "SHARE_AUTHKEY doesn't look like a Tailscale auth key (tskey-auth-...)."; exit 1; }
+[ -z "$SHARE_AUTHKEY" ] || set_env SHARE_AUTHKEY "$SHARE_AUTHKEY"
+if grep -q '^SHARE_AUTHKEY=.' .env; then
+	set_env COMPOSE_PROFILES share
+	set_env FEED_ORIGIN "https://$SHARE_NAME"
 else
-	echo "FEED_ORIGIN=$FEED_ORIGIN" >> .env
+	sed -i '/^COMPOSE_PROFILES=/d; /^FEED_ORIGIN=/d' .env
 fi
 chmod 600 .env
 
@@ -122,22 +130,30 @@ say "https address"
 # If HTTPS certificates are off for your tailnet, this prints a link to turn them on; then run the script again.
 sudo tailscale serve --bg --https="$HTTPS_PORT" "http://127.0.0.1:$APP_PORT"
 
-say "Shared calendar links"
-# Only /feed, on its own port, is published to the internet; the planner itself stays on your tailnet only.
-# The first time, this may print a link to allow Funnel for your tailnet; open it, then run this script again.
-# Funnel is switched on for a whole port, so first make sure the feed port serves nothing else and the planner's
-# own port isn't public; then check again afterwards.
-if sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" before; then
-	sudo tailscale funnel --bg --https="$FEED_PORT" --set-path=/feed "http://127.0.0.1:$APP_PORT/feed" ||
-		echo "Warning: shared calendar links aren't published yet; the message above says why. Everything else works."
-	sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" "$FEED_PORT" after ||
-		echo "Warning: check the line above before sharing any calendar."
-else
-	echo "Warning: shared calendar links were not turned on, to keep the rest private; the line above says why."
+# Nothing on this machine should be public: shared links come from planner-share instead.
+# The planner's own port being public stops the setup; anything else public (Home Assistant, say) is your call.
+safe=0
+sudo tailscale serve status --json | python3 scripts/funnel-safe.py "$HTTPS_PORT" || safe=$?
+if [ "$safe" = 2 ]; then
+	echo "Stopped: the planner itself is public on the internet. Run the command above, then run this again."
+	exit 1
 fi
-# Port $HTTPS_PORT should say "tailnet only"; port $FEED_PORT, "Funnel on" for /feed only.
+[ "$safe" = 0 ] || echo "Warning: the line above names something on this machine that anyone on the internet can reach."
 sudo tailscale serve status
-sudo tailscale funnel status
+
+say "Shared calendar links"
+if grep -q '^COMPOSE_PROFILES=share' .env; then
+	# Give planner-share a moment to sign in and turn on Funnel, then show what it publishes (only /feed).
+	sleep 10
+	sudo docker compose exec -T share tailscale funnel status ||
+		echo "Warning: planner-share isn't running yet; see  cd $DIR && sudo docker compose logs share"
+	echo "If  cd $DIR && sudo docker compose logs share  mentions Funnel not being enabled, open the link it gives, allow"
+	echo "Funnel, then run  cd $DIR && sudo docker compose restart share."
+	SHARING="On. Make links on the planner's Settings page (Shared links); they start with https://$SHARE_NAME/feed/"
+else
+	SHARING="Off. To turn it on, see \"Shared calendar links\" in $DIR/README.md"
+fi
+echo "$SHARING"
 
 cat <<EOF
 
@@ -151,8 +167,7 @@ Calendar apps (Apple Calendar on the Mac or iPhone, DAVx5 on Android):
   User name: david    Password: shown by  grep CALDAV_PASSWORD $DIR/.env
   If the app asks for more, choose Advanced or Manual: path /dav/david/, port $HTTPS_PORT, SSL on.
 
-Shared calendar links: make them on the planner's Settings page (Shared links).
-  They start with $FEED_ORIGIN/feed/ and work from any computer.
+Shared calendar links: $SHARING
 
 To update to the newest version later, run this script again.
 EOF

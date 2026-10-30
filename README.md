@@ -134,7 +134,25 @@ To subscribe to a calendar from a computer that isn't on your Tailscale (a work 
 
 If the other computer can run Tailscale, that is the better route, because nothing is public: sign it in to your Tailscale account, or [share the server](https://tailscale.com/kb/1084/sharing) with the other person's Tailscale account, and add the calendar over CalDAV as above.
 
-The links are published from the internet with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel), on their own port (8443, or 10000 if the planner itself uses 8443), and only the `/feed` address; the planner and CalDAV stay on your tailnet only, and no port is opened on the router. The planner also refuses anything but a shared link from a request that came through Funnel. `server-setup.sh` turns this on. The first time, it may print a link to allow Funnel for your tailnet: open it, allow Funnel, and run the script again. Until then, the settings page says shared links aren't turned on. To turn sharing off entirely, run `sudo tailscale funnel --https=8443 off` (or the port it uses) and remove the `FEED_ORIGIN=` line from `.env`, then `sudo docker compose up -d`.
+The links are published from the internet with [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) by a small Tailscale machine of their own, `planner-share` (the `share` service in `compose.yaml`), so they read `https://planner-share.<your tailnet>.ts.net/feed/...`. It publishes only the `/feed` address; the planner, CalDAV and everything else on the server stay on your tailnet only, and no port is opened on the router. The planner also refuses anything but a shared link from a request that came through Funnel.
+
+To turn it on, once:
+
+1. In the Tailscale admin console, open **Access controls** and add the lines below to the policy file (merge them into `tagOwners` and `nodeAttrs` if those are already there; the `funnel` line may already exist for `autogroup:member`, in which case add the tag to its `target`). Then, in the rule that lets everyone reach everything (`"src": ["*"]`), change `"*"` in `src` to `"autogroup:member", "autogroup:shared"` (your own devices, and anyone you've shared the server with), so planner-share, which faces the internet, can't reach your other machines. If you have other tagged machines that need to reach things, give them their own rule. Save.
+   ```json
+   "tagOwners": { "tag:planner-share": ["autogroup:admin"] },
+   "nodeAttrs": [{ "target": ["tag:planner-share"], "attr": ["funnel"] }],
+   ```
+2. Open **Settings → Keys** and **Generate auth key**: leave **Reusable** off, turn **Tags** on and pick `tag:planner-share`, and turn **Pre-approved** on if your tailnet approves new machines; a 1-day expiry is fine. Copy it.
+3. On the server, run the line below, **starting it with a space** so the key isn't saved in your shell history. The key is kept in `.env` (readable only by you), so later runs don't need it.
+   ```
+    SHARE_AUTHKEY=tskey-auth-... bash /srv/planner/scripts/server-setup.sh
+   ```
+4. If `cd /srv/planner && sudo docker compose logs share` says Funnel isn't enabled, open the link it gives, allow Funnel, and run `cd /srv/planner && sudo docker compose restart share`.
+
+A tagged machine's key never expires, so there is nothing to renew.
+
+Until it's on, the settings page says shared links aren't turned on. To turn sharing off entirely, remove the `SHARE_AUTHKEY=` line from `.env`, run the setup script again, then `cd /srv/planner && sudo docker compose --profile share rm -sf share` and remove `planner-share` in the admin console. If the `share-state` volume is ever lost, remove the old `planner-share` machine in the admin console first and run the script with a new tagged key, so the name (and so every link) stays the same.
 
 ## Downloading everything
 
