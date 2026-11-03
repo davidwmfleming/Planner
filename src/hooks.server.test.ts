@@ -75,9 +75,10 @@ describe('who gets in over the tailnet', () => {
 			expect(await send('/settings', { login: 'David@Example.com' })).toMatchObject({ status: 200, resolved: true });
 			expect(await send('/settings', { login: 'friend@example.org' })).toMatchObject({ status: 403, resolved: false });
 			expect(await send('/settings')).toMatchObject({ status: 403, resolved: false });
-			proxied.mockClear();
-			expect(await send('/dav/david/', { method: 'PROPFIND', login: 'friend@example.org' })).toMatchObject({ status: 403 });
-			expect(proxied).not.toHaveBeenCalled();
+			const refused = await send('/', { login: 'friend@example.org' });
+			expect(refused.body).toContain('friend@example.org');
+			// CalDAV is left to the calendar server's own password, so a family member's phone keeps syncing.
+			expect(await send('/dav/david/', { method: 'PROPFIND', login: 'friend@example.org' })).toMatchObject({ body: 'calendar server' });
 			// A shared link needs no login: it comes from the internet.
 			expect(await send(LINK, { funnel: true })).toMatchObject({ status: 200 });
 		} finally {
