@@ -36,4 +36,24 @@ describe('fromShareMachine', () => {
 		});
 		expect(await fromShareMachine('172.18.0.9', find)).toBe(false);
 	});
+
+	it('answers from the last lookup while a fresh one runs, one at a time', async () => {
+		vi.useFakeTimers();
+		try {
+			let finish: (found: { address: string; family: number }[]) => void = () => {};
+			const find = vi
+				.fn()
+				.mockResolvedValueOnce([{ address: '172.18.0.9', family: 4 }])
+				.mockImplementation(() => new Promise((done) => (finish = done)));
+			expect(await fromShareMachine('172.18.0.9', find)).toBe(true);
+			vi.advanceTimersByTime(31_000);
+			expect(await fromShareMachine('172.18.0.9', find)).toBe(true);
+			expect(await fromShareMachine('172.18.0.9', find)).toBe(true);
+			expect(find).toHaveBeenCalledTimes(2);
+			finish([{ address: '172.18.0.7', family: 4 }]);
+			await vi.waitFor(async () => expect(await fromShareMachine('172.18.0.7', find)).toBe(true));
+		} finally {
+			vi.useRealTimers();
+		}
+	});
 });
