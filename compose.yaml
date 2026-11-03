@@ -6,6 +6,11 @@ services:
   radicale:
     build: docker/radicale
     restart: unless-stopped
+    # Nothing in it needs special permissions.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Reachable only by the planner (and the sample seeder), never by the share container.
+    networks: [calendar]
     environment:
       CALDAV_USER: ${CALDAV_USER:-david}
       CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
@@ -16,6 +21,10 @@ services:
     build: .
     restart: unless-stopped
     depends_on: [radicale]
+    # Nothing in it needs special permissions.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    networks: [default, calendar]
     environment:
       CALDAV_URL: http://radicale:5232/
       CALDAV_USER: ${CALDAV_USER:-david}
@@ -24,6 +33,9 @@ services:
       TZ: ${TZ:-America/Halifax}
       # The public address of shared calendar links (the share service below); empty turns sharing off.
       FEED_ORIGIN: ${FEED_ORIGIN:-}
+      # The Tailscale logins that may use the planner (comma-separated); server-setup.sh writes yours. Empty lets
+      # in anyone who can reach the server over Tailscale.
+      ALLOWED_USERS: ${ALLOWED_USERS:-}
       # Used once, the first time the planner starts, to fill in its settings.
       WORK_CALENDAR: ${WORK_CALENDAR:-Work}
       EVENTS_CALENDAR: ${EVENTS_CALENDAR:-Me}
@@ -40,6 +52,10 @@ services:
     restart: unless-stopped
     depends_on: [planner]
     hostname: planner-share
+    # Userspace mode needs no special permissions.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    # Only the planner, not the calendar server (on the default network, which also reaches the internet).
     environment:
       TS_AUTHKEY: ${SHARE_AUTHKEY:-}
       TS_HOSTNAME: planner-share
@@ -60,10 +76,16 @@ services:
       target: seed
     profiles: [sample]
     depends_on: [radicale]
+    networks: [calendar]
     environment:
       CALDAV_URL: http://radicale:5232/
       CALDAV_USER: ${CALDAV_USER:-david}
       CALDAV_PASSWORD: ${CALDAV_PASSWORD:?Set CALDAV_PASSWORD in .env}
+
+networks:
+  # The calendar server's own network: no way out to the internet, and no share container.
+  calendar:
+    internal: true
 
 volumes:
   data:

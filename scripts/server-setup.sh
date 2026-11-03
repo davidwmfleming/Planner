@@ -82,6 +82,19 @@ set_env() {
 	[ -z "$(tail -c1 .env)" ] || echo >> .env  # a hand edit may have left no newline at the end
 	if grep -q "^$1=" .env; then sed -i "s|^$1=.*|$1=$2|" .env; else echo "$1=$2" >> .env; fi
 }
+# Only your own Tailscale login may use the planner; to let someone else in, add their login to ALLOWED_USERS in .env
+# (comma-separated); an empty ALLOWED_USERS= lets in anyone on your tailnet. Not changed once the line is there.
+if ! grep -q '^ALLOWED_USERS=' .env; then
+	LOGIN=$(sudo tailscale status --json | python3 -c 'import json, sys; s = json.load(sys.stdin); print(s["User"][str(s["Self"]["UserID"])]["LoginName"])' 2>/dev/null || true)
+	if [[ "$LOGIN" =~ ^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+$ ]]; then
+		set_env ALLOWED_USERS "$LOGIN"
+		echo "Only $LOGIN can use the planner now (calendar apps still sign in with the calendar password)."
+		echo "To let someone else in, add their Tailscale login to ALLOWED_USERS in $DIR/.env, comma-separated."
+	else
+		echo "Warning: couldn't tell your Tailscale login (is this machine tagged?), so anyone who can reach it over Tailscale"
+		echo "can use the planner. Add  ALLOWED_USERS=you@example.com  to $DIR/.env and run this again."
+	fi
+fi
 # Shared calendar links are published by a Tailscale machine of their own (planner-share, in compose.yaml), so
 # nothing on this machine is ever public. It runs once .env has its auth key.
 SHARE_NAME="planner-share.${NAME#*.}"
@@ -161,6 +174,7 @@ cat <<EOF
 
 Planner:  $ORIGIN
   Open it on any device signed in to your Tailscale account.
+  Who can use it: $(grep '^ALLOWED_USERS=' .env | cut -d= -f2- | grep . || echo 'anyone on your tailnet')
 
 Calendar apps (Apple Calendar on the Mac or iPhone, DAVx5 on Android):
   Add a CalDAV account. Server: $NAME$( [ "$HTTPS_PORT" = 443 ] || echo ":$HTTPS_PORT" )

@@ -46,7 +46,7 @@ Timed tasks get a VALARM so phones that show tasks can alert on them.
 ## Access and sign-in
 
 - Everything is reached only through Tailscale; no ports open to the internet. The one exception, which David asked for, is the shared calendar links below: one read-only path published with Tailscale Funnel from a separate Tailscale machine, still with no port opened on the router.
-- Planner: Tailscale Serve HTTPS address; the user is identified from Tailscale's identity headers, so there's no separate login.
+- Planner: Tailscale Serve HTTPS address; the user is identified from Tailscale's identity headers, so there's no separate login. Only the logins in `ALLOWED_USERS` (in `.env`; `server-setup.sh` writes David's) get to the planner's pages; anyone else who can reach the server, such as someone it is shared with or a tagged machine (which has no login), gets 403 naming the login seen. CalDAV (`/dav`) is left to Radicale's own password, so a family member's phone keeps syncing. See "Who gets in" below.
 - Radicale: one username and password per person (David, his wife), stored hashed; phones add it as a CalDAV account. His wife's phone needs the Tailscale app installed to sync.
 
 ## Backup
@@ -186,8 +186,17 @@ other computer ── https://planner-share.<tailnet>.ts.net/feed/<secret>.ics �
 - **What is shared.** Everything in that calendar (titles, times, places and notes), to anyone who has the link. Nobody can change anything through it. Task lists are not offered, because calendar subscriptions show only events.
 - **House rules.** This is the one address reachable from the internet, so it needs security's go like any release (rule 6). Rule 4 is met by sharing only the calendars David picks, one at a time.
 
+### Who gets in (v4.1, after a full security review)
+
+- **Logins.** `hooks.server.ts` refuses any request for the planner's pages over the tailnet whose `Tailscale-User-Login` header isn't in `ALLOWED_USERS` (CalDAV keeps its password check instead; the refusal names the login seen and is logged once per login) (`src/lib/server/access.ts`). Tailscale Serve sets that header and drops one a client sends, so it can be trusted; a tagged machine gets none. With the list empty (a test machine) everyone is let in, so the setup script fills it in from `tailscale status`. A production server with an empty list says so once in its log. Programs on the server itself reach the planner at `127.0.0.1:3000` without going through Tailscale Serve, so they could send any login; that is accepted, since anything running on the server can read the data volume anyway.
+- **The share container.** It sits on the planner's network, so if it were ever broken into it could call the planner directly with any headers. A request whose address is the `share` container's (looked up by name, kept 30 seconds) is treated as one from the internet: a shared link and nothing else. Radicale is on an internal network of its own (`calendar`) that the share container isn't on, with no way out to the internet.
+- **Framing.** Every page carries `X-Frame-Options: DENY` and `frame-ancestors 'none'`, so another site can't show the planner inside its page and trick a tap.
+- **Containers.** Every service drops all Linux capabilities and sets `no-new-privileges`; none needs them.
+- **CI** runs with a read-only token.
+
 ### Tasks (v4)
 
 28. **Shared calendar links:** the `planner-feeds` property, the `/feed` route, the Funnel guard in `hooks.server.ts`, the settings page section, `FEED_ORIGIN` and the `share` service (with `docker/share/serve.json`) in `compose.yaml`, the share steps and Funnel check in `server-setup.sh`, and a README section. Unit tests for the route and the guard; Playwright for share, copy, new link and stop sharing.
+29. **Who gets in:** `ALLOWED_USERS` and the share-container check in `hooks.server.ts` (`access.ts`), frame headers, the `calendar` network and dropped capabilities in `compose.yaml`, read-only CI token, and the setup script writing `ALLOWED_USERS`. Unit tests for the checks.
 
 **Later versions:** school-meal emails to calendar (Proton Bridge), work Outlook read-only feed, handwriting entry (configure the tablet's handwriting keyboard first).
